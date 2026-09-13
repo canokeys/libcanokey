@@ -102,10 +102,18 @@ pub enum OperationState {
     ResultTaken,
 }
 
-/// Applet-specific conversation policy. OATH's non-ISO protocol is deliberately
-/// not approximated by an ISO GET RESPONSE loop.
+/// Applet-specific conversation policy; OATH uses its own continuation command.
 #[derive(Clone, Copy, Debug)]
 pub enum Continuation {
+    /// Follow OATH 61xx and optionally nonempty 9000 with SEND REMAINING.
+    /// Only an empty 6985 after a speculative nonempty-9000 poll means completion;
+    /// the same status after 61xx is a failure. Continuations never correct Le.
+    Oath {
+        /// 0x06 for legacy or 0xa5 for modern OATH; other values are invalid.
+        instruction: u8,
+        /// Poll after nonempty success for firmware without a final-page marker.
+        probe_after_success: bool,
+    },
     /// Follow 61xx with GET RESPONSE using the specified class byte.
     Iso7816 {
         /// Class byte for generated GET RESPONSE commands.
@@ -202,10 +210,15 @@ struct ConversationState {
     correct_le: bool,
     continuation: Continuation,
     continuing: bool,
+    oath_poll: bool,
     data: SecretBytes,
 }
 impl ConversationState {
     fn new(mut logical: LogicalCommand, options: OperationOptions) -> Result<Self, Error> {
+        if matches!(logical.continuation, Continuation::Oath { instruction, .. } if ![0x06, 0xa5].contains(&instruction))
+        {
+            return Err(Error::new(ErrorKind::InvalidArgument));
+        }
         if logical.data.len() > options.limits.max_input_bytes {
             return Err(Error::new(ErrorKind::LimitExceeded));
         }
@@ -295,6 +308,7 @@ impl ConversationState {
             correct_le: logical.correct_le,
             continuation: logical.continuation,
             continuing: false,
+            oath_poll: false,
             data: SecretBytes::default(),
         })
     }
@@ -329,6 +343,36 @@ impl ConversationState {
                 .ok_or_else(|| Error::new(ErrorKind::ProtocolViolation))?;
             self.corrected = false;
             return Ok(None);
+        }
+        if let Continuation::Oath {
+            instruction,
+            probe_after_success,
+        } = self.continuation
+        {
+            if self.oath_poll && sw == 0x6985 && response.data().is_empty() {
+                return Ok(Some(ResponseData {
+                    data: std::mem::take(&mut self.data),
+                    status: StatusWord::new(0x9000),
+                }));
+            }
+            if sw >> 8 == 0x61
+                || (probe_after_success && sw == 0x9000 && !response.data().is_empty())
+            {
+                if response.data().is_empty() {
+                    return Err(Error::new(ErrorKind::ProtocolViolation).at(Phase::Conversation));
+                }
+                self.data.extend(response.data());
+                self.oath_poll = sw == 0x9000;
+                self.current = CommandApdu::encode(
+                    ApduHeader::new(0, instruction, 0, 0),
+                    &[],
+                    ExpectedLength::Exact(255.min(options.exchange.max_response_bytes - 2) as u32),
+                    ApduEncoding::Short,
+                )?;
+                self.corrected = false;
+                self.correct_le = false;
+                return Ok(None);
+            }
         }
         self.data.extend(response.data());
         if let Continuation::Iso7816 { cla } = self.continuation {

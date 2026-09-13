@@ -18,11 +18,14 @@ malformed responses, failure/cancellation and budgets; owned typed results and s
 queries that never execute operations. Unsupported evidence must fail at construction;
 do not add factories that always return Unsupported.
 
-## Other applets
+## Remaining applets and compatibility
+
+- Admin/OATH factories currently require known 3.1.0 firmware. Expand older-version
+  layouts only with per-command evidence; legacy OATH 06 continuation is available
+  in the conversation engine, not as guessed legacy semantic factories.
 
 | Milestone | Scope and acceptance focus |
 | --- | --- |
-| OATH | Access validation, credentials and calculations with caller-supplied challenge/time/randomness; implement 06/A5 and nonempty-9000 continuation; never retry HOTP side effects |
 | OpenPGP | DOs, PW1-sign/PW1-other/PW3, KDF, keys/policies and private operations with independent firmware evidence; caller-supplied fingerprints/timestamps |
 
 FIDO/CTAP, Python bindings and consumer adoption are separate scope decisions.

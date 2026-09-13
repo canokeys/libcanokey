@@ -127,6 +127,13 @@ No firmware is linked or built as a dependency.
   Vendor NFC hooks are supplemented by Console's `admin_card.dart` command shapes.
   The older Console SM2 enable-flag format is not used for this firmware layout.
 
+- `applets/oath/oath.c` and `include/oath.h` at pinned HEAD define A1/A2/A3/A4/A5,
+  raw one-byte OATH lengths, the tag/value (not TLV) property field, SHA-1 mutual
+  access validation, full/truncated output and HOTP pre-increment behavior. LIST
+  and CalculateAll end in nonempty 9000 followed by empty 6985 on a final A5 poll.
+  Older inspected tags and Console establish 06/A5 conversation shapes; semantic
+  factories remain gated to current evidence rather than inferring old layouts.
+
 These sources establish encoding and version rules, not hardware interoperability.
 Newer, development and unrecognized versions remain Unknown for these mutations.
 

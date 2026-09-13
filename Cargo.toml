@@ -5,6 +5,7 @@ members = [
     "crates/canokey-compat",
     "crates/canokey-admin",
     "crates/canokey-piv",
+    "crates/canokey-oath",
     "crates/canokey",
     "crates/canokey-c",
 ]
@@ -23,6 +24,7 @@ thiserror = "2"
 canokey-protocol = { path = "crates/canokey-protocol" }
 canokey-compat = { path = "crates/canokey-compat" }
 canokey-admin = { path = "crates/canokey-admin" }
+canokey-oath = { path = "crates/canokey-oath" }
 canokey-piv = { path = "crates/canokey-piv" }
 canokey = { path = "crates/canokey" }
 x509-info = "0.1.0"

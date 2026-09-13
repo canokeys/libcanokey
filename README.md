@@ -15,7 +15,8 @@ FRB adapter would call the Rust facade directly.
 | `canokey-compat` | Immutable profiles, capability evidence, firmware rules and algorithm IDs | protocol |
 | `canokey-admin` | Admin reads, configuration, PIN and explicit resets | protocol, compat |
 | `canokey-piv` | PIV operations and certificate container parsing | protocol, compat |
-| `canokey` | Facade and device probing | protocol, compat, admin, piv |
+| `canokey-oath` | OATH access, credentials and full/truncated calculations | protocol, compat |
+| `canokey` | Facade and device probing | protocol, compat, admin, piv, oath |
 | `canokey-c` | Copied C descriptors and results, operation dispatch | canokey |
 
 The facade optionally re-exports the independent crates.io package
@@ -30,6 +31,8 @@ protocol state.
   explicit Supported/Unsupported/Unknown evidence and narrow legacy quirks.
 - Admin identity/storage/configuration reads, PIN, NFC/NDEF, CTAP SM2 configuration
   and explicit applet/device resets; configuration patches retain confirmed writes on failure.
+- OATH SELECT/access-code validation, PBKDF2 password derivation, credential CRUD,
+  full/truncated calculations and paged results with explicit HOTP/touch markers.
 - PIV selection, PIN status/verification/logout, PIN/PUK changes and unblock.
 - External/Mutual 3DES or AES-192 management authentication, explicit caller-supplied
   mutual challenges; authenticated object/certificate writes and management-key replacement.
@@ -61,6 +64,7 @@ challenges and certificate payloads are fixtures, not production inputs.
 
 | Example | Demonstrates |
 | --- | --- |
+| [oath](crates/canokey/examples/oath.rs) | Caller-supplied TOTP time step and owned code bytes |
 | [admin](crates/canokey/examples/admin.rs) | Explicit PIN and configuration patch under one SELECT |
 | [probe](crates/canokey/examples/probe.rs) | Caller-owned device profile |
 | [read_certificate](crates/canokey/examples/read_certificate.rs) | Operation and result lifetimes |

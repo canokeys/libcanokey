@@ -109,6 +109,8 @@ impl CapabilityStatus {
 /// Semantic feature keys used by the current compatibility model.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Capability {
+    /// OATH commands and full/truncated calculation layout in firmware 3.1.0.
+    Oath,
     /// Admin configuration layout and commands observed in firmware 3.1.0.
     Admin,
     /// Observed PIV applet availability.
@@ -426,7 +428,8 @@ impl DeviceProfile {
         match feature {
             Capability::ObjectWrites => return self.firmware_range((1, 5, 2), (3, 1, 0)),
             Capability::ObjectWriteChaining => return self.firmware_range((1, 5, 2), (3, 1, 0)),
-            Capability::Admin
+            Capability::Oath
+            | Capability::Admin
             | Capability::CertificateDeletion
             | Capability::MetadataDirectory
             | Capability::ContainerNames

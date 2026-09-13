@@ -6,6 +6,8 @@
 //! library, accessed without concurrent mutation, and freed exactly once.
 //! A non-null versioned struct must contain at least its declared supported prefix.
 #![deny(missing_docs)]
+mod oath;
+pub use oath::*;
 mod admin;
 pub use admin::*;
 mod piv_sm2;
@@ -77,6 +79,7 @@ pub struct CnkOperation {
     poisoned: bool,
 }
 enum Inner {
+    Oath(Operation<canokey::oath::Outcome>),
     Admin(Operation<canokey::admin::Outcome>),
     Sm2Agreement(Operation<piv::Sm2Agreement>),
     Directory(Operation<piv::MetadataDirectory>),
@@ -96,6 +99,7 @@ enum Inner {
 macro_rules! dispatch {
     ($value:expr, $op:ident => $body:expr) => {
         match $value {
+            Inner::Oath($op) => $body,
             Inner::Admin($op) => $body,
             Inner::Sm2Agreement($op) => $body,
             Inner::Directory($op) => $body,
@@ -835,6 +839,7 @@ pub unsafe extern "C" fn cnk_operation_result_kind(op: *const CnkOperation, out:
             return STATE;
         }
         *out = match &op.inner {
+            Inner::Oath(_) => 16,
             Inner::Admin(_) => 15,
             Inner::Probe(_) => 1,
             Inner::Unit(_) => 2,

@@ -69,6 +69,8 @@ pub enum SecretReference {
     ManagementKey,
     /// Admin applet PIN.
     AdminPin,
+    /// OATH access-code key, distinct from a PIN retry counter.
+    OathAccess,
 }
 /// Owned, cloneable protocol failure with no secret payload.
 /// Display is diagnostic English; applications own localization and transport errors.

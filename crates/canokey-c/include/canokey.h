@@ -35,7 +35,7 @@ enum { CNK_STATE_CREATED=0, CNK_STATE_AWAITING_RESPONSE=1,
 enum { CNK_PHASE_CONSTRUCTION=0, CNK_PHASE_SELECT=1, CNK_PHASE_COMMAND=2,
        CNK_PHASE_AUTHENTICATION=3, CNK_PHASE_PARSING=4, CNK_PHASE_CONVERSATION=5 };
 enum { CNK_REFERENCE_NONE=0, CNK_REFERENCE_PIN=1, CNK_REFERENCE_PUK=2,
-       CNK_REFERENCE_MANAGEMENT_KEY=3, CNK_REFERENCE_ADMIN_PIN=4 };
+       CNK_REFERENCE_MANAGEMENT_KEY=3, CNK_REFERENCE_ADMIN_PIN=4, CNK_REFERENCE_OATH_ACCESS=5 };
 enum { CNK_ERROR_HAS_SW=1, CNK_ERROR_HAS_RETRIES=2 };
 enum { CNK_RESULT_PROFILE=1, CNK_RESULT_UNIT=2, CNK_RESULT_PIN_STATUS=3,
        CNK_RESULT_OBJECT=4, CNK_RESULT_CERTIFICATE=5, CNK_RESULT_MUTATION=6,
@@ -265,6 +265,43 @@ uint32_t cnk_admin_new(const cnk_profile_t *, const cnk_admin_request_v1 *,
  * result_copy_bytes returns original identity bytes, six configuration bytes,
  * eight SM2 bytes, or 48 usage bytes (8 records: ID,flags,logical_bytes BE u32). */
 uint32_t cnk_operation_admin_outcome(const cnk_operation_t *, cnk_admin_outcome_v1 *);
+
+/* OATH descriptors use opaque names/secret byte spans. Zero unused fields.
+ * Host authentication challenges must be fresh caller-generated random bytes. */
+enum { CNK_RESULT_OATH=16, CNK_OATH_SELECT=1, CNK_OATH_VALIDATE=2,
+ CNK_OATH_LIST=3, CNK_OATH_PUT=4, CNK_OATH_DELETE=5, CNK_OATH_RENAME=6,
+ CNK_OATH_CALCULATE=7, CNK_OATH_CALCULATE_ALL=8, CNK_OATH_SET_CODE=9,
+ CNK_OATH_CLEAR_CODE=10 };
+typedef struct {
+ uint32_t struct_size, kind;
+ const uint8_t *name; size_t name_len;
+ const uint8_t *new_name; size_t new_name_len;
+ const uint8_t *secret; size_t secret_len;
+ const uint8_t *access_key; size_t access_key_len;
+ const uint8_t *host_challenge; size_t host_challenge_len;
+ const uint8_t *challenge; size_t challenge_len;
+ uint32_t credential_kind; /* 1 HOTP, 2 TOTP */
+ uint32_t algorithm; /* 1 SHA1, 2 SHA256, 3 SHA512 */
+ uint32_t digits, properties; /* PUT flags: increasing=1, touch=2 */
+ uint32_t initial_counter; /* PUT HOTP: first firmware use calculates N+1 */
+ uint32_t format; /* CALCULATE/CALCULATE_ALL: 1 truncated, 2 full */
+} cnk_oath_request_v1;
+typedef struct {
+ uint32_t struct_size, kind; /* 1 selection, 2 entries, 3 calculations, 4 unit */
+ size_t count;
+ uint32_t algorithm_type, digits;
+ uint32_t code_kind; /* 1 truncated, 2 full, 3 HOTP marker, 4 touch marker */
+ uint32_t flags; /* bit 0: SELECT challenge or calculation name present */
+ uint8_t version[3], reserved, handle[8], challenge[8];
+} cnk_oath_info_v1;
+uint32_t cnk_oath_new(const cnk_profile_t *, const cnk_oath_request_v1 *,
+ const cnk_operation_options_v1 *, cnk_operation_t **, cnk_error_v1 *);
+/* Index zero queries empty lists too (count=0); nonzero indices must exist. */
+uint32_t cnk_operation_oath_info(const cnk_operation_t *, size_t index, cnk_oath_info_v1 *);
+/* Field 1 SELECT raw, 2 name, 3 code bytes, 4 decimal. No implicit full-HMAC
+ * truncation. Query/copy contracts apply. Caller must wipe copied codes. */
+uint32_t cnk_operation_oath_copy(const cnk_operation_t *, size_t index, uint32_t field,
+ uint8_t *buffer, size_t *length);
 
 #ifdef __cplusplus
 }

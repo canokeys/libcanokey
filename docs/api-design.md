@@ -167,6 +167,29 @@ Current Admin layout is gated to pinned 3.1.0 evidence. CTAP SM2 configuration c
 two signed big-endian i32 identifiers, without an enable flag. NFC commands are vendor
 hooks; a supported firmware layout does not establish vendor hardware support.
 
+## OATH
+
+`oath::operation` selects once and performs explicit mutual HMAC-SHA1 validation
+when the caller supplies an access key and fresh eight-byte challenge. SELECT-only
+returns observations; it does not create a login handle. A protected applet without
+a supplied key fails before the target. A supplied key on an unprotected applet also
+fails instead of silently dropping validation. Password derivation is a pure PBKDF2
+helper using the SELECT handle as salt; connection and password prompts stay outside.
+
+Names are opaque 1..64 byte values. PUT owns 1..64 secret bytes, four through eight
+digits, explicit properties and initial HOTP counter. The pinned firmware increments
+HOTP before calculating (initial N produces N+1 on first use). Time steps and fresh
+randomness always come from the caller. SHA-1/256/512 calculations expose either full
+HMAC bytes or dynamic truncation; CalculateAll retains HOTP/touch markers. Optional
+decimal conversion returns secret-owned ASCII bytes without logging codes.
+
+The conversation engine supports OATH 06/A5, not ISO GET RESPONSE. After nonempty
+9000 it may send a speculative SEND REMAINING; only an empty 6985 in that context
+means completion. An error following 61xx remains an error, and empty 61xx fails for
+lack of progress. No OATH calculation, mutation or continuation retries 6C. Lost
+responses and later-page failures may leave HOTP/increasing-TOTP state changed;
+no result getter, retry, cancel or drop can recover or roll back that state.
+
 ## Batch
 
 `batch(profile, Vec<BatchRequest>, options)` executes explicit requests under one
