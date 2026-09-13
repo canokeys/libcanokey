@@ -56,7 +56,7 @@ pub use canokey_piv as piv;
 pub use canokey_protocol::{apdu, tlv};
 pub use canokey_protocol::{
     Error, ErrorKind, ExchangeOptions, Operation, OperationLimits, OperationOptions,
-    OperationState, SecretBytes, Step,
+    OperationState, Phase, SecretBytes, SecretReference, StatusWord, Step,
 };
 /// Optional, transport-free X.509 inspection (`x509` feature).
 #[cfg(feature = "x509")]

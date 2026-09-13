@@ -346,6 +346,13 @@ uint32_t cnk_openpgp_new(const cnk_profile_t *, const cnk_openpgp_request_v1 *,
  * apply; EC signatures are raw fixed-width r||s. No automatic private-op retries. */
 uint32_t cnk_operation_openpgp_kind(const cnk_operation_t *, uint32_t *);
 
+/* Explicit standalone PIV credential operations. All spans are copied, no
+ * implicit VERIFY precedes replacement, and mutations are never replayed. */
+uint32_t cnk_piv_logout_new(const cnk_profile_t *, const cnk_operation_options_v1 *, cnk_operation_t **, cnk_error_v1 *);
+uint32_t cnk_piv_change_pin_new(const cnk_profile_t *, const uint8_t *old_pin, size_t old_len, const uint8_t *new_pin, size_t new_len, const cnk_operation_options_v1 *, cnk_operation_t **, cnk_error_v1 *);
+uint32_t cnk_piv_change_puk_new(const cnk_profile_t *, const uint8_t *old_puk, size_t old_len, const uint8_t *new_puk, size_t new_len, const cnk_operation_options_v1 *, cnk_operation_t **, cnk_error_v1 *);
+uint32_t cnk_piv_unblock_pin_new(const cnk_profile_t *, const uint8_t *puk, size_t puk_len, const uint8_t *new_pin, size_t new_len, const cnk_operation_options_v1 *, cnk_operation_t **, cnk_error_v1 *);
+
 #ifdef __cplusplus
 }
 #endif

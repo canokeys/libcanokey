@@ -6,6 +6,8 @@
 //! library, accessed without concurrent mutation, and freed exactly once.
 //! A non-null versioned struct must contain at least its declared supported prefix.
 #![deny(missing_docs)]
+mod piv_credentials;
+pub use piv_credentials::*;
 mod openpgp;
 pub use openpgp::*;
 mod oath;
@@ -206,7 +208,20 @@ unsafe fn failure(error: Error, out: *mut CnkError) -> u32 {
     if !out.is_null() {
         (*out).kind = kind_code(error.kind);
         (*out).phase = error.phase as u32;
-        (*out).reference = error.reference.map_or(0, |r| r as u32 + 1);
+        (*out).reference = error.reference.map_or(0, |r| {
+            // Reference codes are independent of Rust enum order.
+            match r {
+                canokey::SecretReference::Pin => 1,
+                canokey::SecretReference::Puk => 2,
+                canokey::SecretReference::ManagementKey => 3,
+                canokey::SecretReference::AdminPin => 4,
+                canokey::SecretReference::OathAccess => 5,
+                canokey::SecretReference::Pw1Sign => 6,
+                canokey::SecretReference::Pw1Other => 7,
+                canokey::SecretReference::Pw3 => 8,
+                canokey::SecretReference::ResetCode => 9,
+            }
+        });
         if let Some(sw) = error.status_word {
             (*out).presence_flags |= 1;
             (*out).status_word = sw.raw();
