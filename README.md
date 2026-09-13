@@ -49,17 +49,19 @@ protocol state.
   P-256/P-384/P-521/secp256k1/SM2; RSA CRT and Ed25519/X25519/ML seeds are typed inputs.
 - Classic RSA/ECDSA/SM2/Ed25519 signing, original signature encoding and DER/P1363
   conversion; explicit ML-DSA (empty context), randomized Ed25519 and SM2 full-message
-  streaming signing, including empty messages; raw RSA decryption, P-256/P-384/P-521/secp256k1 ECDH, X25519 derivation
-  and ML-KEM-768 decapsulation; SM2 agreement with pre-exchanged peer keys. Hashing, padding and KDF remain caller responsibilities.
+  streaming signing, including empty messages; raw RSA decryption,
+  P-256/P-384/P-521/secp256k1 ECDH, X25519 derivation, ML-KEM-768 decapsulation
+  and SM2 agreement with pre-exchanged peer keys. Classic PIV hashing/padding and
+  postprocessing KDF remain caller responsibilities.
 - Explicit Batch requests under one SELECT, with completed results retained after
   a later failure; corresponding C factories and indexed result getters.
 
-Each operation checks its firmware/slot/algorithm evidence; an algorithm name alone
-is not a support promise. Use `sign_streaming` for ML-DSA and empty Ed25519 messages; the classic factory never changes modes implicitly.
-SM2 agreement has its own operation; initiators require PIN Never/Once and peer keys available before construction. See
-[plan](plan.md) for remaining PIV and applet work. No consumer has been integrated;
-compatibility is based on pinned source evidence and offline transcripts, without
-hardware/usbip validation.
+Admin, OATH and OpenPGP factories target known 3.1.0 firmware; PIV uses its existing
+version matrix. Every semantic factory checks required evidence. PIV `sign_streaming`
+handles ML-DSA and empty Ed25519 messages explicitly; SM2 initiators require PIN
+Never/Once and peer keys supplied at construction. See [plan](plan.md) for firmware
+limitations and compatibility work. Validation uses pinned sources and offline
+transcripts; hardware checks and consumer integration remain separate.
 
 ## Examples
 
@@ -81,10 +83,10 @@ challenges and certificate payloads are fixtures, not production inputs.
 | [C probe](crates/canokey-c/examples/probe.c) | Size queries, profile transfer and cleanup |
 
 ```sh
-cargo run -p canokey --example decapsulate --locked
-# shared secret: 32 bytes
+cargo run -p canokey --example admin --locked
+cargo run -p canokey --example oath --locked
+cargo run -p canokey --example openpgp --locked
 cargo run -p canokey --example batch --locked
-# completed: 1; failed index: Some(1); error: NotFound during Command
 bash scripts/run-c-example.sh
 ```
 

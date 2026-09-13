@@ -10,7 +10,7 @@ This is **future integration pseudocode**, not a shipped FRB binding or a modifi
 | Dart service | Connection generation, device lock/lease, async executor, profile lifetime |
 | Dart transport | One raw PCSC/USB/WebUSB/NFC exchange and transport errors |
 | Console Rust FRB wrapper | Opaque owned wrappers, concrete factories, DTO/error conversion |
-| libcanokey facade | Probe and PIV operations; protocol state, APDUs, parsing, compatibility |
+| libcanokey facade | Probe and Admin/PIV/OATH/OpenPGP operations; APDUs, parsing, compatibility |
 
 Dart retains the opaque operation across await points. Rust holds no Dart callback, connection, registry or global state. The FRB wrapper calls the Rust facade directly; C ABI is unnecessary. Console-specific hashing, CSR and certificate policy may live in Console Rust pure functions without becoming libcanokey responsibilities.
 

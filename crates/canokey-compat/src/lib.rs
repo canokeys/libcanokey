@@ -557,7 +557,7 @@ impl DeviceProfile {
         }
         Some(id)
     }
-    /// Resolve a wire identifier without authorizing key use. On 3.1 and newer,
+    /// Resolve a PIV wire identifier without authorizing key use. On 3.1 and newer,
     /// reserved AES-management/randomized-signing IDs never resolve as extensions,
     /// even if malformed configuration observations assign them. Raw bytes remain
     /// available through algorithm_config; older layouts retain their own IDs.
@@ -637,7 +637,7 @@ impl DeviceProfile {
         }
         self.firmware_range((2, 0, 0), (3, 1, 0))
     }
-    /// Whether an asymmetric algorithm is evidenced for key operations.
+    /// Whether an asymmetric algorithm is evidenced for PIV key operations.
     /// Extended algorithms require observed, enabled IDs; guessed fallback IDs
     /// never authorize a key write. RSA-1024 is not implemented by inspected firmware.
     /// Ed/X operations require the encoding fixes from 3.0.1 onward.

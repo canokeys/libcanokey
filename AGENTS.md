@@ -16,14 +16,14 @@
 - Reuse maintained dependencies for standard cryptography and key formats; do not implement cryptographic primitives or constant-time comparison locally. Add dependencies with their first concrete use, choose minimal features, and check MSRV, licenses, secret handling and native/wasm dependency closure. Randomness remains caller-supplied.
 - Certificate inspection parses fields and encodings without enforcing certificate validity, identity, trust, attestation profiles, or agreement between inner/outer signature algorithms. Preserve asserted values and original bytes; application policy remains outside parsing.
 - Public errors must retain typed categories/fields; use thiserror for implementations, leaving anyhow-style aggregation to applications. Standard certificate inspection lives in the optional external x509-info crate from crates.io; trust policy stays in callers. Test default and all-feature builds when optional APIs change.
-- Put protocol logic in its applet crate, firmware rules in compat, and probe orchestration in the facade. The internal machine interface is for composition, not transport callbacks.
+- Put protocol logic in its applet crate, firmware rules in compat, shared public-key encodings in canokey-key, and probe orchestration in the facade. Applets must not depend on each other for key formats. The internal machine interface is for composition, not transport callbacks.
 - Distinguish Unknown from Unsupported. PIV compatibility versions are not actual firmware versions. Generic YubiKey support is not CanoKey support evidence.
 
 ## Protocol and secrets
 
 - Exchange complete command APDUs and complete response data plus status words. The core owns SELECT, authentication, continuation, chaining, and parsing.
 - Bound all card-controlled parsing and allocation; malformed responses return errors, never panic. Interpret status words in command context; do not swallow failures as empty objects.
-- Never insert SELECT between authentication and its target command, try default credentials implicitly, or replay mutations automatically.
+- Never insert SELECT between authentication and its target command, try default credentials implicitly, or replay mutations automatically. OATH calculation can change HOTP/increasing-TOTP state; OpenPGP PW1-sign and PW1-other are separate modes. Do not reuse PIV private-operation formats or capability decisions for another applet.
 - Redact PINs, keys, APDUs, temporary plaintext, and sensitive results from Debug/logs. Zeroize secret buffers, including old allocations during growth.
 - The C ABI has only profile/operation opaque handles. Copy input descriptors; errors are caller-owned POD; getters use query-size/copy.
 - Document FFI pointer, aliasing, and concurrency contracts. Catch unwindable panics. Keep fixed integer mappings synchronized with the header; expose neither Rust layouts nor borrowed internal pointers.
