@@ -22,7 +22,6 @@ do not add factories that always return Unsupported.
 
 | Milestone | Scope and acceptance focus |
 | --- | --- |
-| Full Admin | Device/config/storage/chip/core-commit reads, configuration updates, PIN, NFC/NDEF, SM2 configuration and explicit applet reset; preserve unknown bits and report profile invalidation/partial writes |
 | OATH | Access validation, credentials and calculations with caller-supplied challenge/time/randomness; implement 06/A5 and nonempty-9000 continuation; never retry HOTP side effects |
 | OpenPGP | DOs, PW1-sign/PW1-other/PW3, KDF, keys/policies and private operations with independent firmware evidence; caller-supplied fingerprints/timestamps |
 

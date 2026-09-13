@@ -147,6 +147,26 @@ re-exports the external [x509-info](https://github.com/canokeys/x509-info) parse
 it uses no operation or connection. That project owns its model, CLI and schema
 documentation. FRB may map owned fields directly; JSON is not a required bridge.
 
+## Admin
+
+`admin::operation` owns a Request and optional Admin PIN (6..64 unpadded bytes).
+It selects once and authenticates explicitly before protected commands. Empty VERIFY
+returns status data; submitted-PIN failures retain AdminPin and retries. Factory reset
+rejects a supplied PIN and requires the card's existing blocked/physical-presence state.
+Applet resets use Admin authorization and destroy the named applet's data/credentials.
+
+Configuration patches read current state, preserve unspecified fields and only write
+changes. Unknown feature bits remain observable and prevent unsafe feature overwrites.
+All patch fields are checked before the first write. Writes persist separately:
+`Outcome::confirmed_writes` is available through progress even after failure, and
+`reprobe_required` is set before a profile-affecting write is exposed. An unacknowledged
+write may still have changed the device. Invalidate credential/object caches on their
+mutation attempts too. Neither progress nor completion is an automatic refresh.
+
+Current Admin layout is gated to pinned 3.1.0 evidence. CTAP SM2 configuration contains
+two signed big-endian i32 identifiers, without an enable flag. NFC commands are vendor
+hooks; a supported firmware layout does not establish vendor hardware support.
+
 ## Batch
 
 `batch(profile, Vec<BatchRequest>, options)` executes explicit requests under one
@@ -162,7 +182,7 @@ decompressed certificates. Stop at the first error without rollback or replay.
 and after completion. Request/conversation failure retains its index in BatchResults
 and the original Error in Operation. SELECT failure has no request index/progress.
 Cancelling an active operation discards progress; cancel after failure is a no-op.
-Taking the result transfers ownership. Ordinary operations expose no partial success.
+Taking the result transfers ownership. Admin also exposes confirmed-write progress; other standalone operations expose no partial success.
 Binding getters copy by index without introducing result handles.
 
 ## Errors, secrets and dependency reuse

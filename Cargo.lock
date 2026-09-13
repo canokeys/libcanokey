@@ -101,6 +101,7 @@ dependencies = [
 name = "canokey-admin"
 version = "0.1.0"
 dependencies = [
+ "canokey-compat",
  "canokey-protocol",
 ]
 

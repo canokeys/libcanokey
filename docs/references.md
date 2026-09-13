@@ -120,6 +120,13 @@ No firmware is linked or built as a dependency.
   command clears pending agreement. Host initiators therefore preflight metadata
   and permit only explicit Never/Once policies; they do not re-VERIFY mid-agreement.
 
+- `applets/admin/admin.c`, `include/admin.h` and `ctap.c` at the same pinned
+  revision define the six-byte configuration, per-field writes, eight fixed logical
+  storage records, raw Admin PIN, explicit applet/factory resets and eight-byte SM2
+  configuration. SM2 rejects curve 0/1..8/256..259 and algorithm -7/-8/-49.
+  Vendor NFC hooks are supplemented by Console's `admin_card.dart` command shapes.
+  The older Console SM2 enable-flag format is not used for this firmware layout.
+
 These sources establish encoding and version rules, not hardware interoperability.
 Newer, development and unrecognized versions remain Unknown for these mutations.
 

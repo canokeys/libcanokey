@@ -6,8 +6,9 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 homepage.workspace = true
-description = "CanoKey Admin applet bootstrap command builders"
+description = "Caller-owned CanoKey Admin applet operations"
 publish = false
 
 [dependencies]
 canokey-protocol.workspace = true
+canokey-compat.workspace = true

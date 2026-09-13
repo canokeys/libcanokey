@@ -1,9 +1,9 @@
-//! Stable, read-only CanoKey Admin bootstrap commands.
+//! Caller-owned CanoKey Admin operations and raw bootstrap builders.
 //!
-//! These builders return raw logical commands; they do not select automatically,
-//! interpret responses, or build device profiles. Applications normally use
-//! `canokey::probe_device`, which orchestrates these reads with compatibility rules.
-//! No full Admin configuration or authentication API is implemented yet.
+//! [`operation`] selects once, verifies only an explicitly supplied PIN, and
+//! executes an owned [`Request`]. Configuration patches read before writing;
+//! [`Outcome`] retains confirmed writes on failure through `Operation::progress`.
+//! No operation stores a connection or changes the caller's immutable profile.
 //!
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
@@ -43,3 +43,8 @@ pub mod command {
         read(0x32, 0)
     }
 }
+
+mod types;
+pub use types::*;
+mod execute;
+pub use execute::operation;

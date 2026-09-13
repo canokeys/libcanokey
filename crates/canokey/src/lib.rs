@@ -2,7 +2,7 @@
 //!
 //! Most applications depend on this facade. [`piv`] provides semantic PIV factories,
 //! [`compatibility`] owns firmware/capability rules, and [`apdu`]/[`tlv`] expose
-//! low-level codecs. [`admin`] currently contains bootstrap command builders only.
+//! low-level codecs. [`admin`] provides device configuration and explicit authentication/reset operations.
 //! C consumers use the separate `canokey-c` crate; a Rust/FRB wrapper uses this crate
 //! directly. No layer here owns a transport, runtime, or mutable global state.
 //! The optional `x509` feature adds owned DER/PEM certificate inspection; `serde`

@@ -230,6 +230,42 @@ cnk_status_t cnk_operation_cancel(cnk_operation_t *);
 cnk_status_t cnk_operation_state(const cnk_operation_t *,uint32_t *);
 cnk_status_t cnk_operation_error(const cnk_operation_t *,cnk_error_v1 *);
 cnk_status_t cnk_operation_result_kind(const cnk_operation_t *,uint32_t *);
+/* Admin requests (11 reserved). Inputs unused by a request must be zero/NULL. */
+enum { CNK_ADMIN_FIRMWARE=1, CNK_ADMIN_MODEL=2, CNK_ADMIN_SERIAL=3,
+  CNK_ADMIN_CHIP_ID=4, CNK_ADMIN_CORE_COMMIT=5, CNK_ADMIN_CONFIGURATION=6,
+  CNK_ADMIN_FLASH_USAGE=7, CNK_ADMIN_APPLET_USAGE=8, CNK_ADMIN_PIN_STATUS=9,
+  CNK_ADMIN_VERIFY_PIN=10, CNK_ADMIN_CHANGE_PIN=12, CNK_ADMIN_CONFIGURE=13,
+  CNK_ADMIN_NFC_STATUS=14, CNK_ADMIN_SET_NFC=15, CNK_ADMIN_SM2_CONFIGURATION=16,
+  CNK_ADMIN_CONFIGURE_SM2=17, CNK_ADMIN_RESET_APPLET=18, CNK_ADMIN_FACTORY_RESET=19,
+  CNK_RESULT_ADMIN=15 };
+typedef struct {
+  uint32_t struct_size, kind;
+  const uint8_t *pin; size_t pin_len;
+  const uint8_t *data; size_t data_len; /* CHANGE_PIN: new PIN. */
+  /* CONFIGURE: presence/value bits LED, NDEF read-only, NDEF enabled, WebUSB.
+   * CONFIGURE_SM2: presence bits curve, algorithm. SET_NFC: values=0/1.
+   * RESET_APPLET: values=1 OpenPGP, 2 PIV, 3 OATH, 4 NDEF, 5 CTAP, 6 PASS. */
+  uint32_t present, values;
+  uint8_t feature_mask, feature_values, reserved[2];
+  int32_t curve_id, algorithm_id;
+} cnk_admin_request_v1;
+typedef struct {
+  uint32_t struct_size;
+  /* 0 none, 1 bytes, 2 configuration, 3 flash, 4 usage, 5 PIN, 6 NFC, 7 SM2. */
+  uint32_t value_kind;
+  size_t confirmed_writes;
+  uint32_t reprobe_required;
+  /* PIN bits: verified, blocked, remaining present. NFC: 0/1. */
+  uint32_t flags, retries_remaining, used_kib, total_kib;
+  int32_t curve_id, algorithm_id;
+} cnk_admin_outcome_v1;
+uint32_t cnk_admin_new(const cnk_profile_t *, const cnk_admin_request_v1 *,
+  const cnk_operation_options_v1 *, cnk_operation_t **, cnk_error_v1 *);
+/* Completed result or active/failed progress. Cancel discards active progress.
+ * result_copy_bytes returns original identity bytes, six configuration bytes,
+ * eight SM2 bytes, or 48 usage bytes (8 records: ID,flags,logical_bytes BE u32). */
+uint32_t cnk_operation_admin_outcome(const cnk_operation_t *, cnk_admin_outcome_v1 *);
+
 #ifdef __cplusplus
 }
 #endif

@@ -13,7 +13,7 @@ FRB adapter would call the Rust facade directly.
 | --- | --- | --- |
 | `canokey-protocol` | APDU/TLV, owned operations, continuation/chaining, limits, errors, secret buffers | None |
 | `canokey-compat` | Immutable profiles, capability evidence, firmware rules and algorithm IDs | protocol |
-| `canokey-admin` | Read-only Admin bootstrap builders | protocol |
+| `canokey-admin` | Admin reads, configuration, PIN and explicit resets | protocol, compat |
 | `canokey-piv` | PIV operations and certificate container parsing | protocol, compat |
 | `canokey` | Facade and device probing | protocol, compat, admin, piv |
 | `canokey-c` | Copied C descriptors and results, operation dispatch | canokey |
@@ -28,6 +28,8 @@ protocol state.
 
 - Minimal/PIV probing; firmware and PIV version separation; observed algorithm IDs,
   explicit Supported/Unsupported/Unknown evidence and narrow legacy quirks.
+- Admin identity/storage/configuration reads, PIN, NFC/NDEF, CTAP SM2 configuration
+  and explicit applet/device resets; configuration patches retain confirmed writes on failure.
 - PIV selection, PIN status/verification/logout, PIN/PUK changes and unblock.
 - External/Mutual 3DES or AES-192 management authentication, explicit caller-supplied
   mutual challenges; authenticated object/certificate writes and management-key replacement.
@@ -59,6 +61,7 @@ challenges and certificate payloads are fixtures, not production inputs.
 
 | Example | Demonstrates |
 | --- | --- |
+| [admin](crates/canokey/examples/admin.rs) | Explicit PIN and configuration patch under one SELECT |
 | [probe](crates/canokey/examples/probe.rs) | Caller-owned device profile |
 | [read_certificate](crates/canokey/examples/read_certificate.rs) | Operation and result lifetimes |
 | [write_certificate](crates/canokey/examples/write_certificate.rs) | Mutual authentication followed by PUT DATA |
