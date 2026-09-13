@@ -1,0 +1,10 @@
+[package]
+name = "canokey-piv"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+canokey-protocol.workspace = true
+canokey-compat.workspace = true

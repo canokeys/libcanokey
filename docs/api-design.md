@@ -1,6 +1,6 @@
 # libcanokey 接口设计
 
-状态：设计规范，尚未实现。本文是公共接口与生命周期的唯一契约来源；代码块为声明/伪代码，不是可链接 SDK。目标与实施顺序见 [plan](../plan.md)，接入示例见 [Console](console-integration.md) / [PKCS#11](pkcs11-integration.md)，源码证据见 [references](references.md)。
+状态：最终目标设计，当前已实现基础子集，范围见 [README](../README.md)。本文统一维护接口方向与生命周期契约；代码块仍是目标声明/伪代码，实际可用 API 以 crate 源码为准。目标与实施顺序见 [plan](../plan.md)，接入示例见 [Console](console-integration.md) / [PKCS#11](pkcs11-integration.md)，源码证据见 [references](references.md)。
 
 ## 1. 对象与所有权
 

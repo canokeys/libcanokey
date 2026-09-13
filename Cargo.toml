@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/canokey-protocol",
+    "crates/canokey-compat",
+    "crates/canokey-admin",
+    "crates/canokey-piv",
+    "crates/canokey",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+
+[workspace.dependencies]
+zeroize = "1.8"
+canokey-protocol = { path = "crates/canokey-protocol" }
+canokey-compat = { path = "crates/canokey-compat" }
+canokey-admin = { path = "crates/canokey-admin" }
+canokey-piv = { path = "crates/canokey-piv" }
+canokey = { path = "crates/canokey" }
