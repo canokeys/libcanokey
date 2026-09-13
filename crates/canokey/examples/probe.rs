@@ -1,27 +1,13 @@
-//! Executable transcript example. Replace the fixture with application-owned I/O.
-use canokey::{probe_device, ProbeMode, ProbeOptions, Step};
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut op = probe_device(ProbeOptions {
-        mode: ProbeMode::Minimal,
-        ..Default::default()
-    })?;
-    let responses: &[&[u8]] = &[
-        &[0x90, 0],
-        b"3.1.0\x90\x00",
-        b"CanoKey\x90\x00",
-        &[1, 2, 3, 4, 0x90, 0],
-    ];
-    let mut responses = responses.iter();
-    let mut step = op.start()?;
-    while step == Step::Exchange {
-        // Send op.command()?.as_bytes() through your transport, retaining SW1/SW2.
-        let response = responses.next().ok_or("fixture exhausted")?;
-        step = op.advance(response)?;
-    }
-    let profile = op.take_result()?;
+//! Offline probe example; no hardware or global state.
+mod support;
+use canokey::probe_device;
+use support::{execute, AppResult, Card, PROBE};
+fn main() -> AppResult<()> {
+    let mut card = Card::new(PROBE);
+    let profile = execute(&mut card, probe_device(Default::default())?)?;
     println!(
         "firmware: {}",
         String::from_utf8_lossy(profile.info().firmware_text())
     );
-    Ok(())
+    card.finish()
 }

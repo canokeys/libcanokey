@@ -1,57 +1,40 @@
-# Console 接入示例
+# Console integration boundary
 
-本文只演示 Console 的分层和调用；公共生命周期、错误与协议契约见 [design](api-design.md)。以下均为伪代码，尚未运行 FRB codegen。
+This is **future integration pseudocode**, not a shipped FRB binding or a modification to Console. The underlying probe and certificate-read Rust APIs exist today; the runnable equivalents are linked from [README](../README.md). Common ownership and protocol rules live in [design](api-design.md).
 
-## 1. 分层与迁移点
+## Responsibilities
 
-```text
-Flutter 页面 / Controller
-    ↓ 业务参数和结果
-Dart service / executor
-    ├── FRB → Console Rust wrapper → libcanokey Operation<T>
-    └── await exchangeRaw → Dart CCID / WebUSB / NFC → CanoKey
-```
+| Layer | Owns |
+| --- | --- |
+| Flutter UI | Input, navigation, cancellation requests, localized error display |
+| Dart service | Connection generation, device lock/lease, async executor, profile lifetime |
+| Dart transport | One raw PCSC/USB/WebUSB/NFC exchange and transport errors |
+| Console Rust FRB wrapper | Opaque owned wrappers, concrete factories, DTO/error conversion |
+| libcanokey facade | Probe and PIV operations; protocol state, APDUs, parsing, compatibility |
 
-页面处理输入/提示；Dart 持有连接、profile、锁和取消状态；Console Rust wrapper 只转换类型/分派核心对象。FRB 留在 Console 仓库，直接依赖 Rust facade，不经过 C ABI。
+Dart retains the opaque operation across await points. Rust holds no Dart callback, connection, registry or global state. The FRB wrapper calls the Rust facade directly; C ABI is unnecessary. Console-specific hashing, CSR and certificate policy may live in Console Rust pure functions without becoming libcanokey responsibilities.
 
-现有实现的必要调整（源码见 [references](references.md)）：
+## Rust wrapper sketch
 
-- `SmartCard.process()` 中 Admin SELECT/读序列号改由 probe 完成，提取只管理设备会话的 `withExclusiveSession()`，取消/错误必须向上层传播。
-- `SmartCard.transceive()` 的完整 APDU 日志移除或脱敏；新增 `exchangeRaw()` 绑定本次实际连接，返回完整 R-APDU。插件仅支持 hex 时只在这里转换。
-- 新路径不用 `transceiveChained()`、`assertOK()`、`dropSW()`；旧路径、后台刷新和新路径共用设备互斥，计数器不是锁。
-- `rust/src/api/piv_crypto.rs` 保留文件解析、CSR/证书策略；私钥解析后直接构造核心 PrivateKeyMaterial，不把 IMPORT TLV 经 Dart 往返。
+The following illustrates generated-binding shapes; `dispatch_*` denotes a match over the core operations, not another state machine. An actual FRB implementation must use its supported opaque annotations and DTO types.
 
-## 2. Rust wrapper
-
-沿用当前 FRB 配置的同步短调用；只有 Dart transport 做异步 I/O。示意省略错误转换和重复 enum 分派，具体生成形式需验证 FRB 2.13 的 native/wasm 支持。
-
-```rust
-#[frb(opaque)]
-pub struct ProtocolProfile { inner: Option<DeviceProfile> }
-#[frb(opaque)]
+```rust,ignore
+pub struct ProtocolProfile { inner: Option<canokey::DeviceProfile> }
 pub struct ProtocolOp { inner: Option<AnyOperation> }
-
-enum AnyOperation { // Console 私有类型，不实现协议
-    Probe(Operation<DeviceProfile>),
-    Sign(Operation<Signature>),
+enum AnyOperation {
+    Probe(canokey::Operation<canokey::DeviceProfile>),
+    Certificate(canokey::Operation<canokey::piv::Certificate>),
 }
 pub enum BridgeStep { Exchange, Done, Failed(ProtocolErrorDto) }
-pub struct SignatureDto { pub der: Vec<u8>, pub p1363: Vec<u8> }
+pub struct CertificateDto { pub der: Vec<u8>, pub was_compressed: bool }
 
-pub fn new_p256_sign(profile: &ProtocolProfile, slot: PivSlotDto,
-                     digest: Vec<u8>, pin: Vec<u8>, options: OptionsDto)
-    -> Result<ProtocolOp, BridgeError>
-{
-    let pin = Zeroizing::new(pin);
-    validate_sha256_length(&digest)?;
-    let op = canokey::piv::sign(
+pub fn new_read_certificate(profile: &ProtocolProfile, slot: SlotDto,
+                            options: OptionsDto) -> Result<ProtocolOp, BridgeError> {
+    let op = canokey::piv::read_certificate(
         profile.require_open()?, slot.try_into()?,
-        SignInput::ecdsa_digest(Curve::P256, &digest)?,
-        Access::Pin(Pin::from_bytes(&pin)?), options.try_into()?,
-    )?;
-    Ok(ProtocolOp { inner: Some(AnyOperation::Sign(op)) })
+        canokey::piv::Access::None, options.try_into()?)?;
+    Ok(ProtocolOp { inner: Some(AnyOperation::Certificate(op)) })
 }
-
 impl ProtocolOp {
     pub fn start(&mut self) -> BridgeStep { self.dispatch_start() }
     pub fn advance(&mut self, response: Vec<u8>) -> BridgeStep {
@@ -61,10 +44,10 @@ impl ProtocolOp {
     pub fn command_bytes(&self) -> Result<Vec<u8>, BridgeError> {
         Ok(self.dispatch_command()?.as_bytes().to_vec())
     }
-    pub fn signature_result(&self) -> Result<SignatureDto, BridgeError> {
-        let signature = self.require_sign()?.result()?;
-        Ok(SignatureDto {
-            der: signature.to_der()?, p1363: signature.to_p1363()?,
+    pub fn certificate_result(&self) -> Result<CertificateDto, BridgeError> {
+        let result = self.require_certificate()?.result()?;
+        Ok(CertificateDto {
+            der: result.der().to_vec(), was_compressed: result.was_compressed(),
         })
     }
     pub fn take_profile(&mut self) -> Result<ProtocolProfile, BridgeError> {
@@ -74,13 +57,14 @@ impl ProtocolOp {
 }
 ```
 
-newProbe 包装 `probe_device()`；profile 有 info DTO getter 和 close。协议错误转换为结构化 kind/SW/retries/reference/phase，构造或 getter 错误也必须保留类型，不能仅靠异常字符串。wrapper 不重复保存 command/result/error/terminal；关闭状态仅由 Option 表达。
+`newProbe` wraps `probe_device`; profile also exposes copied info DTOs and idempotent close. Factory/getter errors preserve typed details rather than only strings. Wrappers do not cache commands, results, errors or terminal states. For PIN-protected reads, copy the bridge input into a zeroizing temporary and pass `Access::Pin(Pin::from_bytes(...))`; constructor completion releases the caller input lifetime.
 
-## 3. Dart executor
+## Dart executor and service
 
-`CardLease` 已持有本次物理连接和设备锁；`readResult` 是 Dart 本地函数，不跨 FRB。
+`CardLease` is an application object holding the lock and physical connection across the complete use case. `readResult` is a local Dart function and never crosses FRB.
 
 ```dart
+// Pseudocode: generated union names depend on the FRB adapter.
 Future<T> execute<T>(ProtocolOp op, CardLease lease, CancellationToken cancel,
                      T Function(ProtocolOp) readResult) async {
   try {
@@ -103,8 +87,9 @@ Future<T> execute<T>(ProtocolOp op, CardLease lease, CancellationToken cancel,
             wipe(command);
             wipe(response);
           }
+          break;
         case BridgeDone():
-          return readResult(op); // 取得独立值后才 close
+          return readResult(op);
         case BridgeFailed(:final error):
           throw ProtocolFailure(error);
       }
@@ -113,47 +98,27 @@ Future<T> execute<T>(ProtocolOp op, CardLease lease, CancellationToken cancel,
     op.close();
   }
 }
-```
 
-同步 FRB 调用返回后输入必须已复制/消费，wipe 才安全。取消后 lease 按 design 的在途 I/O 规则清理/隔离连接，不能只 `Future.timeout()` 后立即解锁重用。
-
-## 4. Service 与页面
-
-先用每次用例 probe 的保守版本，特别适合 NFC。稳定 USB 连接可由 DeviceContext 按 generation 缓存 profile，替换/断连时 close；序列号不能替代 generation。
-
-```dart
-Future<SignatureDto> signP256Digest(slot, digest, pin, cancel) async {
-  try { // service 取得 pin 可变副本的清理责任
-    return await sessions.withExclusiveSession((lease) async {
-      final profile = await execute(
-        newProbe(lease.options), lease, cancel, (op) => op.takeProfile());
-      try {
-        return await execute(
-          newP256Sign(profile, slot, digest, pin, lease.options),
-          lease, cancel, (op) => op.signatureResult());
-      } finally {
-        profile.close(); // 缓存版本则由 DeviceContext 释放
-      }
-    });
-  } finally {
-    wipe(pin);
-  }
-}
-
-// 页面：进入卡会话前收集输入；其余 UI 代码省略。
-try {
-  final signature = await service.signP256Digest(
-    slot, consoleCrypto.sha256(document), pinBytes, pageCancellation);
-  showSignature(signature.der);
-} on ProtocolFailure catch (e) {
-  showProtocolError(e.kind, retries: e.retriesRemaining);
-} on TransportFailure catch (e) {
-  showConnectionError(e);
+Future<CertificateDto> readCertificate(slot, cancel) {
+  return sessions.withExclusiveSession((lease) async {
+    final profile = await execute(
+      newProbe(lease.options), lease, cancel, (op) => op.takeProfile());
+    try {
+      return await execute(newReadCertificate(profile, slot, lease.options),
+          lease, cancel, (op) => op.certificateResult());
+    } finally {
+      profile.close();
+    }
+  });
 }
 ```
 
-Sign 自己完成 `SELECT -> VERIFY -> GENERAL AUTHENTICATE -> 续传`；Dart 只循环收发。63C2 已由 Rust 转成 AuthenticationFailed/retries=2，页面不认识其编码。
+Use a raw exchange that does not issue identity APDUs, log credentials, or process 61xx/6Cxx itself. Synchronous bridge methods must consume/copy their inputs before returning so Dart may wipe its copy. A transport timeout must drain/cancel or isolate old I/O before releasing the lease; simply timing out a Future and unlocking is insufficient.
 
-operation 跨多个 await 仍是一次用例的局部变量。页面关闭只请求取消，不与 executor 抢调用 close。UI String/插件 hex String 无法保证擦除，故不能宣称秘密未离开 Rust。
+Per-use-case probing is conservative and convenient for NFC. A stable USB device context may cache the profile by connection generation and close it on replacement/disconnection. The operation stays local either way. UI disposal requests cancellation; it must not race the executor to close the operation. Show protocol errors separately from transport failures. Immutable UI/plugin strings cannot be guaranteed erasable.
 
-复杂用例仍由 service 编排：已知的 `AUTH -> IMPORT -> WRITE CERT` 用 Batch；依赖上一步公钥的 CSR 流程由 Console Rust 纯函数与多次 operation 组合。管理密钥 Mutual challenge 在 Console 应用层用 CSPRNG 生成，协议密码步骤仍在库内。
+## Planned private operations
+
+When signing is implemented, add a Sign variant and `newSign` factory with the same lifecycle. It will perform SELECT, explicit VERIFY where needed, GENERAL AUTHENTICATE and continuation internally. Dart will still only exchange bytes and display typed results/errors. Management mutual-authentication challenges come from the application's CSPRNG.
+
+A planned Batch handles known AUTH/IMPORT/WRITE CERT sequences under one SELECT. Workflows depending on an intermediate public key, such as CSR construction, remain service orchestration plus application pure functions. None of this requires a long-lived Rust device or session object.

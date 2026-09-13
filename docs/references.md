@@ -1,8 +1,8 @@
-# 设计参考仓库
+# Design reference repositories
 
-克隆日期：2026-09-13。以下 SHA 固定本次接口设计依据；在线链接指向固定 commit，不随默认分支移动。三个仓库均已完整克隆（未使用 shallow clone；未拉取子模块），仅作为只读设计资料。
+Cloned on 2026-09-13. The SHAs below pin the design evidence; source links do not follow moving branches. All three clones are non-shallow, without fetched submodules, and used only as read-only reference material.
 
-| 仓库 | 本地目录 | HEAD |
+| Repository | Local directory | HEAD |
 | --- | --- | --- |
 | [canokey-console](https://github.com/canokeys/canokey-console) | `references/canokey-console` | `63863ef66ff0766754ee8f5bee28b9e977889f75` |
 | [canokey-manager](https://github.com/canokeys/canokey-manager) | `references/canokey-manager` | `89a52a7ec237b93b01f1158f6ffc3d26a57e13f9` |
@@ -10,7 +10,7 @@
 
 ## canokey-console
 
-关键实现、相关回归测试及约定：
+Relevant implementations, regression tests, and conventions:
 
 - [lib/helper/utils/piv_card.dart](https://github.com/canokeys/canokey-console/blob/63863ef66ff0766754ee8f5bee28b9e977889f75/lib/helper/utils/piv_card.dart)
 - [lib/helper/utils/piv_management_key.dart](https://github.com/canokeys/canokey-console/blob/63863ef66ff0766754ee8f5bee28b9e977889f75/lib/helper/utils/piv_management_key.dart)
@@ -29,7 +29,7 @@
 
 ## canokey-manager
 
-关键实现、相关回归测试及约定：
+Relevant implementations, regression tests, and conventions:
 
 - [yubikit/canokey.py](https://github.com/canokeys/canokey-manager/blob/89a52a7ec237b93b01f1158f6ffc3d26a57e13f9/yubikit/canokey.py)
 - [yubikit/piv.py](https://github.com/canokeys/canokey-manager/blob/89a52a7ec237b93b01f1158f6ffc3d26a57e13f9/yubikit/piv.py)
@@ -41,7 +41,7 @@
 
 ## canokey-pkcs11
 
-关键实现、相关回归测试及约定：
+Relevant implementations, regression tests, and conventions:
 
 - [src/backend/pcsc.c](https://github.com/canokeys/canokey-pkcs11/blob/086c4d135e59fc7b24c02e6efae2d3f0d982720a/src/backend/pcsc.c)
 - [include/private/backend/pcsc.h](https://github.com/canokeys/canokey-pkcs11/blob/086c4d135e59fc7b24c02e6efae2d3f0d982720a/include/private/backend/pcsc.h)
@@ -51,16 +51,17 @@
 - [include/pkcs11_canokey.h](https://github.com/canokeys/canokey-pkcs11/blob/086c4d135e59fc7b24c02e6efae2d3f0d982720a/include/pkcs11_canokey.h)
 - [AGENTS.md](https://github.com/canokeys/canokey-pkcs11/blob/086c4d135e59fc7b24c02e6efae2d3f0d982720a/AGENTS.md)
 
-## 影响设计的观测
+## Observations informing the design
 
-| 来源 | 观测 |
+| Source | Observation |
 | --- | --- |
-| manager canokey.py / piv.py | CanoKey 真实版本与 PIV 兼容版本不同；SELECT 安全状态、旧对象容器、空槽 SW 随固件变化 |
-| Console piv_management_key / manager piv.py | 现有客户端分别使用 External / Mutual 管理密钥认证；Mutual 有 host RNG 输入 |
-| Console models/piv.dart / piv_post_quantum | 历史和可配置算法 ID；ML-DSA/ML-KEM 的独立输入与结果格式 |
-| Console metadata_directory / piv_controller | 目录与单槽 metadata 分离，条目可能仅有证书 |
-| Console oath_card | OATH 使用 06/A5 续传，部分非空 9000 仍继续读取 |
-| pkcs11 pcsc.c | PCSC 与 PIV 编解码混合；RSA 使用 short command chaining；应用自己保存认证/机制状态 |
-| Console smartcard.dart / FRB 配置 | Dart 管理通路；process 内含身份 APDU，raw 路径有完整 APDU 日志；Rust bridge 默认 Dart 同步调用 |
+| manager canokey.py / piv.py | Actual CanoKey firmware differs from PIV compatibility version; SELECT security state, historical containers and empty-slot statuses vary |
+| Console piv_management_key / manager piv.py | External and Mutual management authentication appear in different clients; Mutual requires host randomness |
+| Console models/piv.dart / piv_post_quantum | Historical/configurable algorithm IDs and distinct ML-DSA/ML-KEM input/result formats |
+| Console metadata_directory / piv_controller | Directory and individual metadata are distinct; entries may contain only certificates |
+| Console piv_card / manager piv.py | Certificate payload tag 70, information tag 71 and optional empty FE; manager supports gzip decoding |
+| Console oath_card | OATH uses 06/A5 continuation and may continue on nonempty 9000 |
+| pkcs11 pcsc.c | PCSC and PIV encoding are mixed; RSA uses short command chaining; application owns authentication/mechanism state |
+| Console smartcard.dart / FRB configuration | Dart owns transport; process includes identity APDUs, raw paths log complete APDUs, bridge calls default to synchronous Dart methods |
 
-以上是 host 实现证据，不是完整固件支持保证；尤其 manager 的通用 YubiKey API 不能直接当 CanoKey 能力。当前未运行上游应用测试或连接真机。若以后复制代码，应按文件审查许可证及第三方归属。
+These are host implementation observations, not complete firmware support guarantees. Generic YubiKey APIs in manager are not proof of CanoKey support. No upstream application tests or hardware sessions were run. Any future code copying requires a per-file license and attribution review.

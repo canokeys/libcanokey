@@ -1,8 +1,8 @@
-# PKCS#11 接入示例
+# PKCS#11 integration boundary
 
-本文只演示 C 调用方的组织方式；所有权与 C ABI 以 [design](api-design.md) 为准。伪代码中的 helper 属于 canokey-pkcs11，尚未实现或通过真机验证。
+This document is **application pseudocode**, not an implemented PKCS#11 integration. The [runnable C probe](../crates/canokey-c/examples/probe.c) uses today's ABI with complete cleanup. The [header](../crates/canokey-c/include/canokey.h) is authoritative for available functions; signing and management authentication below remain planned. Shared contracts live in [design](api-design.md).
 
-## 1. C 模块保存全部应用状态
+## Caller-owned state
 
 ```c
 typedef struct {
@@ -24,29 +24,28 @@ typedef struct {
 } SessionContext;
 ```
 
-PKCS#11 的入口 session 表留在 C 模块，Rust 不镜像。现有项目把凭据放在 CNK_PKCS11_SESSION，接库不必一次重写，但普通 USER/SO 登录的同 token 多 session 语义、登出传播和锁顺序必须由 C 保证。CKU_CONTEXT_SPECIFIC 绑定当前 session 的一次操作，不能自动用长期 USER PIN 代替。
+All session tables, PKCS#11 objects, mechanism/hash state and login policies remain in C. Rust does not mirror them. Ordinary USER/SO login propagation across sessions, logout and lock ordering belong to the module; CKU_CONTEXT_SPECIFIC belongs to one session operation and must not silently use cached USER authorization.
 
-C 可显式选择缓存原始未 padding PIN，以便新 SELECT 后重新验证；擦除、认证策略和对象/机制/hash 状态均由 C 管理。profile 放 token context，operation 只放一次调用栈，结果复制后立即释放。
+If the module caches raw unpadded credentials for verification after SELECT, it owns erasure and cache policy. A profile belongs to the token context. An operation belongs to one C call and is freed after copying/taking its result. There is no Rust init/finalize or global handle registry.
 
-## 2. 共用 executor 与 probe
+## Executor and public certificate read
 
-`CardLease` 表示已持有设备锁和 PCSC transaction，覆盖整个 operation。下面 CHECK helper 的含义为“检查错误并跳 cleanup”；所有临时缓冲由 cleanup 擦除释放，不表示省略生产错误处理。
+`CardLease` denotes the device lock plus PCSC transaction across the whole operation. The checked helpers below jump to cleanup on failure. `copy_command` uses query-size/reserve/copy; `pcsc_exchange_raw` makes one SCardTransmit call, retains SW1/SW2 and performs no continuation/replay. Buffers and error mapping are application-owned.
 
 ```c
+/* Pseudocode helpers: CHECK_CNK maps protocol/binding errors by purpose;
+ * CHECK_CK preserves application CK_RV. Both jump to cleanup. */
 static CK_RV run_op(CardLease *lease, cnk_operation_t *op, ErrorPurpose purpose) {
     cnk_error_v1 error = {.struct_size = sizeof(error)};
     cnk_step_kind_t step = 0;
     ByteBuffer command = {0}, response = {0};
     CK_RV rv = CKR_OK;
-
     CHECK_CNK(cnk_operation_start(op, &step, &error), purpose);
     while (step == CNK_STEP_EXCHANGE) {
-        /* checked helper：query-size、reserve、copy；不推进 operation。 */
         CHECK_CK(copy_command(op, &command));
-        /* 只封装 SCardTransmit，保留 data || SW，不重试、不处理 continuation。 */
         CHECK_CK(pcsc_exchange_raw(lease, &command, &response));
         CHECK_CNK(cnk_operation_advance(op, response.data, response.length,
-                                        &step, &error), purpose);
+                                       &step, &error), purpose);
         buffer_wipe(&command);
         buffer_wipe(&response);
     }
@@ -54,101 +53,73 @@ static CK_RV run_op(CardLease *lease, cnk_operation_t *op, ErrorPurpose purpose)
 cleanup:
     buffer_wipe_and_free(&command);
     buffer_wipe_and_free(&response);
-    return rv; // 借用 op，不负责 free
+    return rv; /* Borrows op; the caller frees it. */
 }
 
-static CK_RV probe_token(TokenContext *token, CardLease *lease) {
+/* Uses the current public-certificate ABI; no access descriptor is required. */
+static CK_RV read_certificate(TokenContext *token, CardLease *lease,
+                              uint32_t slot, ByteBuffer *out) {
     cnk_operation_t *op = NULL;
-    cnk_profile_t *fresh = NULL;
     cnk_error_v1 error = {.struct_size = sizeof(error)};
     CK_RV rv = CKR_OK;
-    CHECK_CNK(cnk_probe_device_new(&lease->probe_options, &op, &error), PURPOSE_PROBE);
-    CHECK_CK(run_op(lease, op, PURPOSE_PROBE));
-    CHECK_STATUS(cnk_operation_take_profile(op, &fresh));
-    cnk_profile_free(token->profile);
-    token->profile = fresh;
-    fresh = NULL;
+    size_t n = 0;
+    CHECK_CNK(cnk_piv_read_certificate_new(token->profile, slot, &lease->options,
+                                          &op, &error), PURPOSE_READ_CERTIFICATE);
+    CHECK_CK(run_op(lease, op, PURPOSE_READ_CERTIFICATE));
+    CHECK_CNK(cnk_operation_result_copy_bytes(op, NULL, &n), PURPOSE_READ_CERTIFICATE);
+    CHECK_CK(buffer_reserve(out, n));
+    CHECK_CNK(cnk_operation_result_copy_bytes(op, out->data, &n), PURPOSE_READ_CERTIFICATE);
+    out->length = n;
 cleanup:
-    cnk_profile_free(fresh);
     cnk_operation_free(op);
+    if (rv != CKR_OK) buffer_wipe_and_free(out);
     return rv;
 }
 ```
 
-CHECK_CNK 使用传入的 error/purpose 映射 typed 协议错误；CHECK_STATUS 处理纯绑定错误，CHECK_CK 保留 CK_RV。用户 PIN 的 AuthenticationFailed/PinBlocked 可映射 CKR_PIN_INCORRECT/CKR_PIN_LOCKED；NotFound 根据枚举或指定对象访问分别处理。transport 错误由 PCSC helper 映射，不解析 SW。
+Getter errors are binding status codes, so CHECK_CNK must only inspect error POD when a call actually populated it. The copied certificate payload survives operation destruction; the application parses X.509 and maps CKA_VALUE. Getter size queries do not reread the card. Only exact NotFound may mean an absent enumerated object; authentication, malformed containers and unsupported formats are distinct failures.
 
-重连前先作废旧 profile，不能让新设备 probe 失败后使用旧快照。通路上限与 constructor options 保持一致，通信/接收缓冲失败不通过再次 SCardTransmit“取结果”。
+Probe uses the same executor: create `cnk_probe_device_new`, run, take_profile into the token context, free the operation. On reconnect invalidate the old profile **before** probing, so failure cannot leave a previous device's snapshot in use. Connection/frame budgets must match constructor options. I/O or allocation failures never cause a second SCardTransmit to retrieve a result.
 
-## 3. 登录与签名
+## Login and planned signing
 
-C_Login 的 USER 分支：在 C 锁内先准备受控凭据副本，再运行 verify_pin operation；成功才提交 token 登录状态，最后无论结果都释放 op。C 保留的凭据由其自身登出/断连策略清理，Rust 不保存登录对象。SO 分支使用 authenticate_management_key；Mutual challenge 由 C CSPRNG 提供。
+C_Login USER prepares a controlled PIN copy, runs the implemented verify-pin operation under the device lock, and commits token login state only on success; always free the operation. Map PIN AuthenticationFailed/PinBlocked to CKR_PIN_INCORRECT/CKR_PIN_LOCKED in this context. SO will use planned management authentication, with mutual challenge supplied by C's CSPRNG.
 
-C_SignInit 只保存 key/slot/mechanism/长度/授权要求；不创建要跨调用保存的 Rust operation。以 P-256 CKM_ECDSA 为例：
+C_SignInit only records validated key/slot/mechanism/length/authorization requirements. It does not create a Rust operation spanning PKCS#11 calls. For P-256 CKM_ECDSA, the future C_Sign path is:
 
 ```c
-/* 已通过参数、session、机制、输入和授权前置校验，并持有相应锁。 */
-static CK_RV sign_p256(SessionContext *s, CardLease *lease,
-                       const uint8_t *digest, size_t digest_len,
-                       uint8_t *out, CK_ULONG *inout_len) {
-    const CK_ULONG required = 64; // PKCS#11 r || s，来自已验证 key 元数据
-    if (out == NULL) { *inout_len = required; return CKR_OK; }
-    if (*inout_len < required) {
-        *inout_len = required;
-        return CKR_BUFFER_TOO_SMALL;
-    }
-
-    cnk_operation_t *op = NULL;
-    cnk_error_v1 error = {.struct_size = sizeof(error)};
-    cnk_sign_input_v1 input = {
-        .struct_size = sizeof(input), .kind = CNK_SIGN_ECDSA_DIGEST,
-        .algorithm = CNK_ALGORITHM_P256, .data = {digest, digest_len},
-    };
-    cnk_piv_access_v1 access = {.struct_size = sizeof(access)};
-    CK_RV rv = CKR_OK;
-    CHECK_CK(prepare_sign_access(s, &access)); // C 的普通/context-specific 凭据或 NONE
-    CHECK_CNK(cnk_piv_sign_new(s->token->profile, s->sign.piv_slot,
-        &input, &access, &lease->options, &op, &error), PURPOSE_SIGN);
-    CHECK_CK(run_op(lease, op, PURPOSE_SIGN));
-    size_t n = required;
-    CHECK_STATUS(cnk_operation_signature_copy(op, CNK_SIGNATURE_P1363, out, &n));
-    *inout_len = (CK_ULONG)n;
-cleanup:
-    cnk_operation_free(op);
-    finish_sign_attempt(s, rv);
-    return rv;
+/* Planned API pseudocode; signing functions/descriptors are not exported yet. */
+const CK_ULONG required = 64; /* P1363 r || s, from validated key metadata. */
+if (out == NULL) { *inout_len = required; return CKR_OK; }
+if (*inout_len < required) {
+    *inout_len = required;
+    return CKR_BUFFER_TOO_SMALL;
 }
-```
-
-size-only/too-small 不发 APDU、不消耗签名或 context-specific 授权，也可在获取 PCSC lease 前处理。真正执行后 getter 的异常长度不是让应用重签的 BUFFER_TOO_SMALL，应作为内部/设备错误终结。生产代码须完整遵守 PKCS#11 各错误的状态保留/终结规则。
-
-CKM_ECDSA_SHA256 在 C 先 hash；RSA PKCS1/PSS 在 C 准备 encoded block。C_SignUpdate 保存 C digest 状态，C_SignFinal 真正输出时才创建局部 Rust operation。PIV PinPolicy::Always 与对外 CKA_ALWAYS_AUTHENTICATE 的映射须一致：每次卡私钥操作需要的 VERIFY 在这笔 operation 内完成。
-
-## 4. 对象读写与清理
-
-读取证书/metadata 采用同一局部生命周期：
-
-```c
+/* Now obtain the card lease and validate USER/context-specific authorization. */
 cnk_operation_t *op = NULL;
-CHECK_CNK(cnk_piv_read_certificate_new(profile, slot, &access,
-                                      &options, &op, &error), PURPOSE_READ_CERTIFICATE);
-CHECK_CK(run_op(lease, op, PURPOSE_READ_CERTIFICATE));
-CHECK_STATUS(cnk_operation_result_copy_bytes(op, NULL, &required));
-CHECK_CK(reserve_output(&out, required));
-CHECK_STATUS(cnk_operation_result_copy_bytes(op, out.data, &required));
-/* out 是独立 DER bytes，由 C 对象层映射 CKA_VALUE。 */
+CHECK_CK(prepare_sign_access(session, &access));
+CHECK_CNK(cnk_piv_sign_new(token->profile, slot, &input, &access,
+                           &lease->options, &op, &error), PURPOSE_SIGN);
+CHECK_CK(run_op(lease, op, PURPOSE_SIGN));
+size_t n = required;
+CHECK_CNK(cnk_operation_signature_copy(op, CNK_SIGNATURE_P1363, out, &n), PURPOSE_SIGN);
+*inout_len = (CK_ULONG)n;
 cleanup:
 cnk_operation_free(op);
+finish_sign_attempt(session, rv);
 ```
 
-上例沿用前述 checked helper，并由调用方在失败时释放输出缓冲。两个 getter 不重读卡；metadata 使用 typed getter，不再解析 TLV。枚举只跳过确切 NotFound，不吞认证或格式错误。
+Size-only and too-small paths send no APDU and consume neither signature nor context-specific authorization. After real execution, an unexpected result length is an internal/device error, not a reason to sign again. Production code must obey PKCS#11 state retention/termination rules for every return path.
 
-生成密钥返回公钥，C 创建 PKCS#11 object records；导入时 CKA_PRIME_1 等填入 typed private-key descriptor，库复制后编码。需要 `AUTH -> IMPORT -> WRITE CERT` 时用单个 Batch，仍只持有一个 op，无额外 input/result handle。
+CKM_ECDSA_SHA256 hashes in C; RSA PKCS1/PSS prepares the encoded block in C. C_SignUpdate stores C digest state; C_SignFinal creates a local operation only when producing output. PIV PinPolicy::Always and CKA_ALWAYS_AUTHENTICATE must agree: required VERIFY belongs in the same operation as the private-key command.
 
-| 应用事件 | C 模块动作 |
+Planned key generation returns a public key for C object creation. Import copies typed private components before TLV encoding. A planned AUTH/IMPORT/WRITE CERT Batch still uses one operation and no additional input/result handles.
+
+## Cleanup events
+
+| Event | Application action |
 | --- | --- |
-| C_Logout | 更新同 token 相关 session、清凭据；按协议需要运行短期 Logout 或由连接层 reset/disconnect，free 本身不撤销卡上认证 |
-| 断连/重连 | 等待/隔离在途 I/O，递增 generation、清凭据和受影响 cache、释放 profile，新连接 probe |
-| C_CloseSession | 清本 session 的 hash/context auth；其他 session 使用 token 时保留 profile，最后 session 的登录语义按标准处理 |
-| token 销毁/C_Finalize | 阻止新调用并等待在途调用，释放 C 状态、profile、PCSC 资源；无 Rust finalize |
-
-参考实现与源码位置见 [references](references.md)，公共验证要求只在 [plan](../plan.md) 维护。
+| C_Logout | Propagate token login changes and clear credentials; explicitly run logout or reset/disconnect as needed. Free alone does not revoke card authentication |
+| Disconnect/reconnect | Drain or isolate in-flight I/O, advance generation, clear credentials/affected caches, release profile, probe the new connection |
+| C_CloseSession | Clear session hash/context authorization; retain shared token profile as needed and follow standard login semantics |
+| Token destruction/C_Finalize | Block new calls, wait for in-flight calls, release C state/profile/PCSC resources; no Rust finalize |
