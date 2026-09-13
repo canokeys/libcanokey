@@ -1,6 +1,6 @@
 # Console integration boundary
 
-This is **future integration pseudocode**, not a shipped FRB binding or a modification to Console. The underlying probe and certificate-read Rust APIs exist today; the runnable equivalents are linked from [README](../README.md). Common ownership and protocol rules live in [design](api-design.md).
+This is **future integration pseudocode**, not a shipped FRB binding or a modification to Console. The core factories shown here are implemented; the runnable equivalents are linked from [README](../README.md). Common ownership and protocol rules live in [design](api-design.md).
 
 ## Responsibilities
 
@@ -123,8 +123,31 @@ Console can enable `canokey`'s `x509` feature in its Rust wrapper and replace it
 
 If another caller needs JSON, enable the `serde` feature and serialize the same result in that caller. Do not require Console to encode/decode JSON merely to cross FRB. Card/PIV errors and local X.509 errors remain distinguishable in the wrapper. MacOS role policy, trust decisions, CSR construction, private-key import and QR decoding still belong to the application.
 
-## Planned private operations
+## Signing and Batch
 
-When signing is implemented, add a Sign variant and `newSign` factory with the same lifecycle. It will perform SELECT, explicit VERIFY where needed, GENERAL AUTHENTICATE and continuation internally. Dart will still only exchange bytes and display typed results/errors. Management mutual-authentication challenges come from the application's CSPRNG.
+The wrapper can add concrete Signature and Batch variants using the same lifecycle:
 
-A planned Batch handles known AUTH/IMPORT/WRITE CERT sequences under one SELECT. Workflows depending on an intermediate public key, such as CSR construction, remain service orchestration plus application pure functions. None of this requires a long-lived Rust device or session object.
+```rust,ignore
+let signing = canokey::piv::sign(
+    profile.require_open()?, slot, algorithm,
+    canokey::piv::SignInput::Digest(owned_digest),
+    canokey::piv::Access::Pin(pin), options)?;
+// Wrap signing in ProtocolOp; Dart executes it with the same executor.
+// Copy signature.algorithm(), encoding(), as_bytes(), or to_p1363() into a DTO.
+
+let importing = canokey::piv::batch(profile.require_open()?, vec![
+    canokey::piv::BatchRequest::AuthenticateManagement(explicit_auth),
+    canokey::piv::BatchRequest::ImportKey { parameters, material },
+    canokey::piv::BatchRequest::WriteCertificate { slot, der },
+], options)?;
+```
+
+`explicit_auth` owns the selected management key/mode and, for Mutual, a fresh
+application CSPRNG challenge. The core owns SELECT, authentication, segmentation
+and response decoding. Dart still only exchanges bytes and handles typed results.
+
+For Batch, copy `batch_progress(&operation)` into the failure DTO **before** the
+executor closes the wrapper: successful items and failed index survive protocol
+failure but not destruction. Do not resume or replay a failed Batch. Workflows
+requiring an intermediate public key, such as CSR construction, remain service
+orchestration with application pure functions and explicit access on each operation.

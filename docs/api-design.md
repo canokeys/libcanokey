@@ -1,207 +1,186 @@
-# API design
+# API contracts
 
-This document owns the common contracts and future API direction. [README](../README.md) is the authoritative implementation inventory; factories explicitly marked **planned** below are not callable yet. See [plan](../plan.md) for sequencing and [references](references.md) for evidence. Actual Rust signatures and the [experimental C header](../crates/canokey-c/include/canokey.h) take precedence over pseudocode.
+[README](../README.md) lists implemented features and examples;
+[plan](../plan.md) tracks remaining work. Rustdoc and the
+[experimental C header](../crates/canokey-c/include/canokey.h) define signatures.
+[References](references.md) records firmware and consumer evidence.
 
 ## Ownership and execution
 
-There are two lifecycle objects:
-
 | Object | Contents | Application owner |
 | --- | --- | --- |
-| `DeviceProfile` | Immutable protocol capability snapshot | Device/token context |
-| `Operation<T>` | Owned inputs/configuration, machine, current APDU, result/error | One local synchronous call or asynchronous use case |
+| `DeviceProfile` | Immutable capability snapshot; no connection or authentication state | Device/token context |
+| `Operation<T>` | Owned inputs, configuration, protocol machine, current APDU, result/error | One synchronous call or asynchronous use case |
 
-There are no Rust device/operation registries, global locks, credential caches, thread-local errors, or background tasks. Immutable protocol constants may be static. Profile data contains no connection, current applet, login state, or PIN. Constructors copy required configuration and own inputs; source profiles and FFI input buffers can be released immediately. Changes to a profile do not alter existing operations.
-
-```rust,ignore
-pub enum Step { Exchange, Done }
-pub enum OperationState {
-    Created, AwaitingResponse, Completed, Failed, Cancelled, ResultTaken,
-}
-impl<T> Operation<T> {
-    pub fn start(&mut self) -> Result<Step, Error>;
-    pub fn advance(&mut self, response: &[u8]) -> Result<Step, Error>;
-    pub fn command(&self) -> Result<&CommandApdu, Error>;
-    pub fn result(&self) -> Result<&T, Error>;
-    pub fn take_result(&mut self) -> Result<T, Error>;
-    pub fn error(&self) -> Option<&Error>;
-    pub fn state(&self) -> OperationState;
-    pub fn cancel(&mut self);
-}
-```
+Constructors own inputs and copy required profile data. Source profiles and FFI
+buffers may be released immediately; changing application state cannot alter an
+existing operation. The core has no transport, runtime, registry, mutable globals,
+credential cache, or background tasks. Pure codecs return values without operations.
 
 | Action | Contract |
 | --- | --- |
-| start | From Created, return Exchange/Done or protocol failure; constructors perform no I/O |
-| command | In AwaitingResponse, borrow the complete APDU; repeatable without advancing |
-| advance | Consume one complete response data + SW1/SW2 for the pending command |
-| result | In Completed, borrow the result repeatedly without device access |
-| take_result | Transfer an independent result once, entering ResultTaken |
-| error | Preserve the typed protocol error after failure |
-| cancel | Clear active working data and enter Cancelled from Created/AwaitingResponse; otherwise a no-op |
-| drop/close/free | Release memory only; no logout, disconnect, reconnect, rollback, or APDU |
+| `start` | From Created, return Exchange/Done or failure; construction performs no I/O |
+| `command` | Borrow the complete pending APDU in AwaitingResponse; repeatable |
+| `advance` | Consume one response containing data and SW1/SW2 |
+| `result` / `take_result` | Borrow a completed result repeatedly / transfer it once |
+| `error` | Preserve the original typed protocol failure |
+| `cancel` | Clear active working data from Created/AwaitingResponse; otherwise a no-op |
+| drop/free/close | Release memory; no APDU, logout, reconnect, retry, or rollback |
 
-Invalid-state calls return OperationStateError without replacing the stored protocol error. Completion/failure drops unnecessary working secrets; results survive until take/drop. Rust borrows cannot span the next mutable operation call. Bindings return copies; close is deterministic with a finalizer only as fallback. Pure codecs and conversions remain plain functions.
+Invalid-state calls do not replace the stored protocol error. Completion/failure
+releases execution secrets; owned results survive until take/drop. Rust borrows
+cannot span a mutable operation call. Bindings copy results and close deterministically.
 
-The application holds exclusive access to the physical connection for the **entire operation**. Transport errors stay application errors; close/drop the operation instead of feeding it a Timeout or replaying a command. Cancellation does not stop pending I/O. Drain/cancel the request successfully or isolate its old connection before reuse; never feed a late response to a new operation. Connection generations belong to the application, and serial numbers do not substitute for them.
+The application holds exclusive access to the connection across the **entire
+operation**. Transport failures remain application errors; drop the operation
+instead of replaying its command. Cancellation does not stop pending I/O. Drain or
+isolate old I/O before connection reuse, and never pass a late response to a new
+operation. Connection generations and locks belong to the application.
 
 ## APDU/TLV conversations
 
-`CommandApdu::encode`, `ResponseApdu::parse`, checked tags, TLV readers/writers, and applet command builders are pure computation. Current PIV command builders return `LogicalCommand`; the conversation layer performs physical encoding and segmentation. The doc-hidden machine extension point composes applet operations and never calls transport.
+- Exchange complete command/response APDUs. Disable transport continuation/retries.
+- Le distinguishes absent, short 00=256, and extended 0000=65536. Frame budgets
+  include headers/status words; extended encoding requires explicit permission.
+- ISO 61xx produces GET RESPONSE; 6100 requests up to 256 bytes, within the channel
+  limit. Only explicitly safe commands may repeat once after 6Cxx. Never accumulate
+  rejected response data or restart authentication/private operations/mutations.
+- Chaining checks intermediate acknowledgements and stops on failure. Decode TLV
+  after reassembly. The internal machine interface composes operations, not I/O.
+- Definite-length BER preserves order and duplicates. Semantic parsers check
+  required/unique fields, lengths, bounds and trailing bytes without panicking.
 
-- Expected length distinguishes absent Le, short 00=256, and extended 0000=65536; short/extended encoding is explicit.
-- Definite-length BER TLV preserves order and duplicates. Semantic parsers enforce required/unique fields, bounds, and trailing-byte rules. Malformed input must not panic.
-- ISO 61xx produces GET RESPONSE; 6100 means up to 256 bytes, bounded by the channel. Applets select CLA/continuation policy.
-- Only commands marked safe may retry one physical command after 6Cxx. Do not accumulate its rejected response data, restart authentication, or replay mutations.
-- Chaining validates intermediate acknowledgements and stops on failure. Parse TLV only after reassembly.
-- Planned OATH 06/A5 continuation and nonempty-9000 rules need an applet-specific conversation, not the ISO loop.
-
-`OperationOptions` combines per-exchange byte limits/extended encoding permission and cumulative response/exchange budgets. Frame sizes include APDU headers or status words. Default cumulative response limit is 1 MiB and exchange limit 4096; TLV default depth is 16. These are host budgets, not card capacity claims. Unsafe/unencodable known commands fail before transmission; no-progress continuation fails promptly. Applications must disable their own continuation and preserve raw status words.
+`OperationOptions` bounds each frame, input bytes, cumulative response bytes and
+exchange count. Defaults are 1 MiB cumulative response data, 4096 exchanges and TLV
+depth 16. These are host budgets, not device capacity claims. Known unencodable
+commands fail before transmission; no-progress continuation fails promptly.
 
 ## Profiles and probing
 
-`DeviceProfile::from_observations(DeviceObservations)` normalizes evidence from one device. Firmware text, optional parsed version and suffix, model, serial bytes, and PIV application version remain distinct. The current profile exposes info, capability, warning and algorithm-ID accessors; a richer per-applet profile is planned.
+Actual firmware text/version, model, serial bytes and PIV application version are
+separate observations. PIV compatibility version never substitutes for firmware.
+`probe_device` reads Admin firmware/model/serial; default PIV mode then selects PIV,
+reads its version and reads algorithm configuration only where probing is known safe.
+Minimal mode stops after Admin. Probe performs no credential attempts or writes.
 
-Capabilities distinguish Supported, Unsupported and Unknown; evidence distinguishes Observed, FirmwareMatrix and LatestKnownFallback. Capability (availability), variant (encoding), and quirk (historical behavior) are separate concepts. Firmware comparisons live only in compat. Observed IDs override matrix defaults; missing fields do not imply support. Unknown newer firmware gets conservative stable behavior, not wholesale rejection or speculative writes. PIV compatibility version never replaces real firmware.
+Capabilities distinguish Supported, Unsupported and Unknown; evidence distinguishes
+Observed, FirmwareMatrix and LatestKnownFallback. Firmware rules live in compat.
+Observed IDs override fallback names; guessed IDs never authorize extended private
+operations or writes. Required failures and malformed responses propagate. Only
+recognized optional unsupported statuses downgrade; authentication-required discovery
+remains unknown with a warning. Unknown firmware text stays observable.
 
-`probe_device(ProbeOptions)` defaults to PIV mode. Minimal mode stops after Admin reads:
+Probe changes applets and must not interrupt authentication. Reconnect requires a
+new profile. Configuration changes or uncertain writes invalidate relevant profile
+observations; ordinary key/certificate changes invalidate application caches.
+`MutationResult::profile_effect` does not refresh either cache automatically.
 
-```text
-00 A4 04 00 05 F0 00 00 00 00   SELECT Admin
-00 31 00 00 00                  Required firmware text
-00 31 01 00 00                  Optional model
-00 32 00 00 00                  Optional serial
-00 A4 04 00 05 A0 00 00 03 08   SELECT PIV
-00 FD 00 00 00                  PIV application version
-00 EE 01 00 00                  Algorithm config, only when known safe to probe
-```
+## Authentication and PIV values
 
-No default PIN attempts or write-based discovery. Probe changes applets and must not interrupt authentication. Required failures and malformed responses propagate. Only recognized optional unsupported statuses downgrade; authentication-required discovery remains Unknown with a warning. Unrecognized firmware text is retained. New/replaced connections require fresh probing. A future configuration mutation returning `ProfileEffect::ReprobeRequired`, or an uncertain configuration write, invalidates the snapshot; ordinary key changes invalidate relevant application object/metadata caches.
+Standalone operations select once, then apply `Access::None`, `Pin`, `Management`
+or `PinAndManagement` before their target. None does not assert an authenticated
+session. Management precedes PIN so VERIFY stays next to PIN-always operations.
+Verify success is not an authorization object surviving SELECT or reconnect.
 
-## PIV factories and values
+Management authentication explicitly chooses External or Mutual. Mutual takes a
+fresh caller-supplied CSPRNG challenge (3DES eight bytes, AES sixteen). The library
+owns block cryptography and constant-time verification. It never tries default
+credentials or silently downgrades algorithms/modes. Version evidence is in compat
+and [references](references.md#canokey-core-firmware).
 
-Factories take `&DeviceProfile`, owned semantic inputs and `OperationOptions`, returning `Result<Operation<T>, Error>`. There is no persistent protocol session, public Sign class, or operation-specific handle.
-
-| Factory | Result | Status |
-| --- | --- | --- |
-| select | SelectionInfo | Implemented |
-| verify_pin / get_pin_status / logout | () / PinStatus / () | Implemented |
-| change_pin / change_puk / unblock_pin | MutationResult | Implemented |
-| read_object | ObjectData | Implemented; optional PIN |
-| read_certificate | Certificate | Implemented; optional PIN |
-| authenticate_management_key / set_management_key | () / MutationResult | Implemented |
-| get_metadata / read_algorithm_config | Metadata / AlgorithmConfig | Implemented |
-| generate_key / import_key | PublicKey / MutationResult | Implemented with evidenced algorithms |
-| sign / decrypt / derive / decapsulate | Signature / SecretBytes | Classic signing, RSA decryption, ECDH/X25519 agreement and ML-KEM-768 decapsulation |
-| write_object / write_certificate / delete_certificate | MutationResult | Implemented |
-
-Slot references cover authentication 9A, signature 9C, key management 9D, card authentication 9E, and checked retired indices 1..20 (wire 82..95). Management reference 9B is not a signing slot. `ObjectId` accepts a complete checked BER tag; certificate mapping is library-owned.
-
-`Pin/Puk::from_bytes` currently accepts 6..8 bytes excluding FF and pads to eight bytes on wire. Other applets use distinct secret types. Access is None, Pin, Management or PinAndManagement. None makes no promise of existing authentication. Standalone operations select once, then authenticate immediately before their target. Verify success is not an authorization token surviving later SELECT or reconnect.
-
-Management authentication explicitly selects External or Mutual; no silent downgrade. The application supplies a fresh CSPRNG challenge (3DES eight bytes, AES sixteen); the library owns witness/challenge cryptography and constant-time verification. CanoKey firmware 1.5.2..=3.0.3 supports 3DES and 3.1.0 supports AES-192; other versions remain Unknown. Both modes are evidenced in firmware sources. Dual authentication runs management before PIN so VERIFY stays next to the private operation. No implicit default credentials.
-
-| Value | Contract |
+| Value | Boundary |
 | --- | --- |
-| PinStatus | verified/remaining/total may be unknown; query 63Cx is data, submitted-PIN 63Cx is authentication failure; 9000 does not invent retry counts |
-| ObjectData | Normalized container value, with discovery 7E and narrow proven legacy CCC/CHUID exceptions; secret-buffer handling |
-| Certificate | Unwrapped payload and original compression flag; bounded gzip decoding; no X.509 syntax/trust validation |
-| MutationResult | Unchanged or ReprobeRequired profile effect; no claim that application caches were refreshed |
-| Metadata | Key/PIN/PUK/management variants, optional public key and policy, Known/Unknown(raw) fields; unknown values cannot construct commands |
-| PublicKey | Unsigned big-endian RSA n/e, uncompressed SEC1 EC points, raw Ed/X/ML bytes; pure SPKI conversion |
-| PrivateKeyMaterial | Typed, checked secret RSA CRT components, P-256/P-384/P-521/secp256k1/SM2 scalar, Ed25519 seed, X25519 key, ML-DSA 32-byte / ML-KEM 64-byte seed |
-| Signature | Algorithm-tagged result; RSA/Ed raw bytes, ECDSA/SM2 DER or fixed-width P1363 conversion |
+| `Slot` | Primary 9A/9C/9D/9E or checked retired index 1..20 (82..95); management 9B is not an asymmetric slot |
+| `Pin` / `Puk` | Own 6..8 bytes excluding FF; pad to eight bytes on wire |
+| `PinStatus` | Verification/retry fields may be unknown; query 63Cx is data, submitted-PIN 63Cx is failure |
+| `ObjectData` | Normalized container value; proven legacy exceptions remain narrow |
+| `Certificate` | Unwrapped payload and original compression flag; no X.509 syntax/trust validation |
+| `Metadata` | Key/PIN/PUK/management observations; optional fields and Known/Unknown(raw) enums; unknown values cannot build commands |
+| `PublicKey` | RSA unsigned big-endian n/e, uncompressed SEC1 points, raw Ed/X/ML bytes; pure SPKI conversion without mathematical key validation |
+| `PrivateKeyMaterial` | Checked fixed-width scalars or typed seeds/CRT components; RSA consistency and implicit exponent 65537 remain caller responsibilities |
+| `Signature` | Algorithm and explicit encoding; original card bytes, with pure EC DER/P1363 conversions |
 
-Certificate parsing requires exactly one nonempty 70 field, accepts absent 71 as uncompressed, accepts 71=00/01 only, and permits an optional empty FE. Duplicate, unknown, malformed fields and trailing gzip members/data fail. Input and decoded payload are independently bounded by max_total_response_bytes; gzip CRC and size must validate. Empty/malformed containers are not silently treated as empty slots. Object NotFound remains a status-derived error. Certificate deletion uses the empty 53 container on 3.1.0 without deleting a private key; older versions cannot claim deletion and are rejected. Chained writes use common APDU reassembly on 1.5.2 and applet streaming from 1.6.0; partial writes are never rolled back or replayed.
+Certificate containers require exactly one nonempty 70 field, optional 71=00/01
+(absent means uncompressed), and optional empty FE. Duplicate/unknown/malformed
+fields and trailing gzip members/data fail. Input and decompressed output are
+bounded; gzip CRC/size must match. An empty/malformed container is not an empty slot.
+Certificate deletion does not delete a key. Writes are not rolled back on failure.
 
-SignInput distinguishes RSA encoded block (host owns hash/PKCS1/PSS), ECDSA digest (order-bit truncation and short-value padding), nonempty Ed25519 messages and SM2 digests (host computes SM3(ZA||M)). ML-DSA message/context and empty-message streaming require separate factories. Unverified contexts are rejected before sending. RSA decrypt returns the modulus-sized raw block; unpadding stays in the application. ECDH/X25519 derive validates peer encoding and returns raw shared secret; no KDF. ML-KEM-768 decapsulation owns exactly 1088 ciphertext bytes and returns a 32-byte secret; implicit rejection is not sender authentication. Algorithm names are semantic identifiers, not reconfigurable wire IDs or support promises.
+Signing inputs distinguish RSA encoded blocks (caller hashing/padding), ECDSA
+digests (order-bit truncation and short-value padding), nonempty Ed25519 messages,
+and SM2 digests (caller computes SM3(ZA||M)). SM2 returns DER on legacy supported
+firmware and P1363 on 3.1.0; `Signature::encoding()` reports this without guessing
+from bytes. Conversion checks representation, not signature validity.
 
-File I/O, private-key PEM/PKCS#8 import, CSR/X.509 policy, PKCS#11 padding/KDF and object records stay outside the library. Generic certificate DER/PEM inspection is an optional pure module, described below. Enable directories, retry configuration, move/delete key, algorithm writes and new algorithms individually by evidence.
+RSA decrypt returns a raw modulus-sized block without unpadding. ECDH checks
+uncompressed peer points using RustCrypto; X25519 requires 32 RFC 7748 bytes and
+rejects an all-zero result. ML-KEM-768 decapsulation requires 1088 ciphertext bytes
+and returns 32 secret bytes; implicit rejection does not authenticate the sender.
+No KDF is applied. SM2 agreement is a separate protocol, not generic ECDH.
 
-## Generic certificate inspection
-
-`x509-info` is independent of applets and optionally re-exported as `canokey::x509`.
-PIV unwraps the certificate container; inspection is a separate pure function with
-no operation handle, transport, clock, or application state.
-
-- DER/PEM parsers borrow input only during the call and return owned results/errors.
-  They accept exactly one bounded certificate and reject trailing data. Inner/outer
-  signature identifiers are independent fields; no agreement policy is enforced.
-- The full result retains original encodings. The independent summary omits large
-  certificate/key/signature/extension copies while retaining opaque name and policy
-  values. See the [package contract](https://docs.rs/x509-info/latest/x509_info/struct.CertificateSummary.html)
-  for fields, byte/time encodings, Serde tags, and expansion rules.
-- Unhandled extensions and failed supported decoding remain distinct. Every duplicate
-  extension occurrence is flagged; no occurrence silently wins. Names preserve
-  decoded values or opaque content through dedicated variants. Inspection findings
-  do not establish trust, identity, signature validity, or mathematical key validity.
-- Caller-owned OID overrides affect presentation only. Clones share an immutable
-  upstream base and retain independent overrides. Results copy labels; DN display
-  uses the backend's immutable default table independently of caller overrides.
-- Backend GeneralName decoding feeds one owned projection. RustCrypto strict
-  AKI/AIA/SIA checks and CRL/policy decoding retain their regression-tested behavior.
-  OID-specific opaque values are not automatically interpreted or validated.
-- Serde is optional; serializers and DTO layouts belong to callers. FRB maps owned
-  fields directly without a JSON round trip. No result Deserialize contract exists.
-- The external x509-info package has an optional `cli` binary: `lib/` owns parsing and models;
-  `bin/` owns clap arguments, I/O, report adaptation and format serializers.
-  Enabling `serde` alone does not enable CLI dependencies.
+File I/O, private-key PEM/PKCS#8 decoding, CSR policy, PKCS#11 hashing/padding/KDF,
+object records and user prompts belong to applications. Optional `canokey::x509`
+re-exports the external [x509-info](https://github.com/canokeys/x509-info) parser;
+it uses no operation or connection. That project owns its model, CLI and schema
+documentation. FRB may map owned fields directly; JSON is not a required bridge.
 
 ## Batch
 
-`batch(profile, Vec<BatchRequest>, options)` creates one `Operation<BatchResults>` for explicit semantic requests under a single SELECT. Requests omit Access and exclude SELECT, probe and nested Batch; authentication is an explicit request. A batch accepts 1..=128 requests and bounds aggregate semantic input by max_input_bytes; cumulative response and retained result payloads use max_total_response_bytes. Do not insert extra SELECT or Admin switches. PIN-always requires explicit VERIFY before each private operation.
+`batch(profile, Vec<BatchRequest>, options)` executes explicit requests under one
+SELECT. Requests omit Access and exclude SELECT, probe and nested Batch.
+Authentication is an explicit request; mutations require preceding management
+authentication. PIN-always requires a VERIFY before each private operation.
 
-Stop at the first error with failed index/completed count, without rollback or automatic continuation. `batch_progress(&operation)` exposes successful preceding items during execution/failure/completion, but not after take/cancel. SELECT failure has no request index or progress; a request/conversation failure retains its index in BatchResults and the original Error in Operation. Ordinary operations do not expose partial success. Binding getters copy by index without introducing result handles.
+A batch accepts 1..=128 requests. Aggregate semantic input uses max_input_bytes;
+cumulative responses and retained payloads use max_total_response_bytes, including
+decompressed certificates. Stop at the first error without rollback or replay.
 
-## Errors and secrets
+`batch_progress(&operation)` exposes successful items while running, after failure,
+and after completion. Request/conversation failure retains its index in BatchResults
+and the original Error in Operation. SELECT failure has no request index/progress.
+Cancelling an active operation discards progress; cancel after failure is a no-op.
+Taking the result transfers ownership. Ordinary operations expose no partial success.
+Binding getters copy by index without introducing result handles.
 
-Error contains kind, phase, optional raw status, secret reference and retries; Mutual cryptogram mismatch returns DeviceAuthenticationFailed without a fabricated status word. Management failures never report PIN retry counts. Batch progress is stored in BatchResults separately from the original protocol error. Interpret statuses in command context: 6A82 on SELECT is different from GET DATA; a historical empty-slot 6700 requires a proven narrow quirk. Preserve unknown status values, and never invent user-PIN retries for management authentication.
+## Errors, secrets and dependency reuse
 
-Keep protocol, binding and transport failures separate. Redact PINs, keys, APDUs, temporary plaintext and sensitive results from Debug/error/log output. Zeroize working buffers, including allocations replaced during growth. Applications own transport/FFI copies; immutable Dart/Python strings cannot promise erasure. Success/failure releases execution secrets while results remain available until take/drop.
+Errors retain kind, phase, raw status when present, credential reference and reported
+retries. Interpret status in command context: SELECT NotFound differs from a missing
+object. Management failures never invent PIN retries. Mutual cryptogram mismatch
+returns DeviceAuthenticationFailed without a fabricated status word. Keep protocol,
+binding and transport failures distinct; localization belongs to applications.
 
-## C ABI
+Redact secrets/APDUs from Debug and logs. `SecretBytes` zeroizes working storage,
+including old allocations replaced during growth. Applications own transport/FFI
+copies; immutable UI strings cannot promise erasure. Secret results remain owned
+until take/drop and must not be logged.
 
-Only `cnk_profile_t` and `cnk_operation_t` are opaque. Other inputs are copied descriptors, errors are caller-owned pointer-free POD, results are getters on the operation. No init/finalize, result/error/key/access handles, borrowed internal pointers or global last_error. The experimental header lists implemented factories; the eventual design maps each Rust factory to a `_new` and adds typed metadata/public-key/mutation/Batch getters.
+Reuse `thiserror`, `zeroize`, RustCrypto block/curve/DER/SPKI libraries and bounded
+`flate2` decompression. Add dependencies with their first concrete use, minimal
+features, compatible MSRV/licenses and checked advisories. No OS RNG or transport
+features in core; randomness is caller-supplied. Native/wasm dependency checks enforce
+these boundaries. Package reuse does not establish device support.
 
-- Semantic enums/flags use fixed uint32_t mappings, distinct from wire algorithm IDs. Status codes: OK=0, INVALID_ARGUMENT=1, INVALID_STATE=2, BUFFER_TOO_SMALL=3, RESULT_TYPE_MISMATCH=4, PROTOCOL_ERROR=5, PANIC=6. Steps: EXCHANGE=1, DONE=2.
-- Versioned POD begins with struct_size. Reject unknown input enums/flags. NULL options means defaults; explicit zero budgets are invalid. Final major-version trailing-field compatibility is not frozen yet.
-- Constructors copy every input, initialize output handles to NULL, and leave no partial object on failure. Error POD can be NULL; otherwise initialize struct_size. Presence flags distinguish absent SW/retry data.
-- NULL copy buffer queries required length; a short buffer updates length without partial copying; success reports actual length. Text has no appended NUL. Getters never advance or resend. Byte getters for certificates return the unwrapped payload.
-- take_profile succeeds once on completed probe. The transferred profile survives free(op). Other results are copied before freeing op. free(NULL) is safe; non-NULL handles must be freed exactly once with the matching Rust allocator entry point.
-- Callers guarantee aligned, live pointers, non-overlapping input/output/handle ranges, and no concurrent mutation or free. The ABI cannot detect dangling pointers. Catch unwindable panics; a poisoned operation cannot resume but can be freed. Allocator/process aborts are not recoverable errors.
+## Bindings
 
-## Dart and Python boundaries
+The C ABI has only `cnk_profile_t` and `cnk_operation_t` opaque handles. Inputs are
+copied versioned descriptors; errors are caller-owned POD; results use query-size/copy.
+There is no init/finalize, result/error/key handle, borrowed internal pointer or
+thread-local last_error. Semantic integer enums are distinct from wire IDs.
 
-The future Console FRB wrapper lives in Console and depends on the Rust facade, not C ABI. PyO3 belongs in a future canokey-python crate. Wrappers may dispatch private enums of `Operation<T>` and hold Option for idempotent close, but never duplicate command/result/error/protocol state. Expose concrete factories, start/advance, command copies, typed result DTOs, profile transfer, and close.
+- POD begins with struct_size; reject unknown input enums/flags. NULL options means
+  defaults; explicit zero budgets are invalid. ABI stability is not frozen yet.
+- Constructors initialize output handles to NULL and leave no partial handle on failure.
+- NULL copy buffers query size. Short buffers update length without partial copying.
+  Text has no NUL terminator. Getters never execute the operation.
+- Probe profile transfer succeeds once and survives free(op). Other results are copied.
+  free(NULL) is safe; non-NULL handles must be freed once with the matching function.
+- Callers guarantee aligned live pointers, non-overlapping ranges, and no concurrent
+  mutation/free. Catch unwindable panics; poisoned operations can only be freed.
+  Dangling pointers and allocator/process aborts cannot be made recoverable.
 
-Dart owns async transport and execution; Python callers own their synchronous loop. Close in finally/context-manager after copying/taking results; finalizers are fallback only. Structured exceptions/DTOs preserve error kind, SW, reference, retries and Batch progress. Localization and CLI formatting stay in applications. See [Console](console-integration.md) and [PKCS#11](pkcs11-integration.md) for examples.
-
-## Dependency reuse
-
-Use established libraries for standard cryptography and standard key formats. The core should implement CanoKey protocol orchestration and compatibility, not AES/DES rounds, curve arithmetic, constant-time equality, gzip, or general ASN.1 encoding. Keep protocol-facing public types owned and independent of dependency-specific layouts.
-
-| Need | Dependency direction | Boundary and status |
-| --- | --- | --- |
-| Typed errors | `thiserror` | Used for protocol and X.509 errors; preserves public kinds/fields and redacted Display. `anyhow` may aggregate application errors but is not a public core error type |
-| Certificate inspection | `x509-parser`, `x509-cert`, `oid-registry`, `pem-rfc7468`, `pkcs1`, `sha2`, and `hex` | Used by optional x509-info, following Console; no signature-verification backend, transport, or OS RNG |
-| Result serialization | Optional `serde` | Owned certificate structs derive Serialize; JSON library choice stays in the application |
-| Secret erasure | `zeroize` / `Zeroizing` | Already used by protocol. `SecretBytes` adds redacted Debug and wipes old allocations during growth; replacing that behavior requires equivalent guarantees |
-| Certificate gzip | `flate2` with `rust_backend` and default features disabled | Already used by PIV. The applet layer still enforces input/output bounds, container rules, and trailing-data rejection |
-| Management-key block cryptography | RustCrypto [`aes`](https://docs.rs/aes), [`des`](https://docs.rs/des), and their matching [`cipher`](https://docs.rs/cipher) traits | Used for external/mutual authentication. Use exact single-block operations without padding. 3DES is for legacy protocol interoperability; do not implement primitives locally |
-| Authentication response comparison | [`subtle`](https://docs.rs/subtle) | Used for constant-time comparison of fixed-size authentication values; reject incorrect public lengths first. Do not compare secrets with ordinary slice equality |
-| Signature/public-key encoding | RustCrypto [`der`](https://docs.rs/der), [`spki`](https://docs.rs/spki), and curve-specific signature types where appropriate | Used for DER/P1363 and SPKI conversion. Reuse canonical integer/length handling; no handwritten generic ASN.1 codec |
-| EC point validation | RustCrypto [`p256`](https://docs.rs/p256) and the matching curve crates | Used for scalar validation on P-256/P-384/P-521/secp256k1/SM2 and peer validation on all except SM2. Use checked point decoding, not just SEC1 prefix/length checks; private signing/key agreement still occurs on the card |
-
-Random bytes remain explicit caller inputs. Do not enable a dependency's OS RNG, runtime, or transport features in the core. Host hashing/padding/KDF that belongs to PKCS#11 or application policy stays in that application; introduce hash/MAC/KDF dependencies only when an implemented protocol requires them.
-
-Registry review on 2026-09-13 found concrete version/feature constraints: current `aes` 0.9.3 declares Rust 1.89, beyond this workspace's 1.85 MSRV. Current `p256` 0.14.0 enables `getrandom` through its `std` feature. Thus "latest" and default features are not automatically suitable. Select a compatible, maintained release and matching trait family, or explicitly revise the MSRV as part of implementation. Use minimal features, enable key-schedule zeroization where offered, and verify the complete resolved dependency closure on native and wasm. Registry metadata is a selection aid, not a completed integration test or an audit claim.
-
-The Cargo resolver uses MSRV-compatible fallback, and Cargo.lock pins tested versions (including a Rust-1.85-compatible `time` for X.509 parsing). Add further dependencies together with their first real use, rather than populating Cargo.toml with unused future crates. Check license, MSRV, maintenance/security advisories, secret handling and transitive features; track the resulting Cargo.lock. Validate library composition with known-answer vectors and protocol transcripts, including malformed inputs and authentication failure. Package reuse does not establish CanoKey firmware support.
-
-The existing BER TLV reader is a small applet framing codec with explicit bounds and duplicate preservation, distinct from X.509/DER schema handling. Reuse a BER dependency if it satisfies these semantics without losing evidence or adding platform I/O; do not replace it blindly with a DER-only parser. Certificate trust and X.509 policy remain outside the core.
-
-## Later protocols and evidence gaps
-
-Admin will add device/config/storage/chip/core-commit reads, updates, PIN, NFC/NDEF, SM2 configuration and explicit applet reset. Patches preserve unknown bits; multi-APDU writes are not atomic. OATH needs access validation, credentials and calculations with explicit challenge/time/randomness; never automatically retry HOTP increments. OpenPGP needs independent DO, PW1-sign/PW1-other/PW3, KDF, key/policy/operation semantics and caller-supplied fingerprints/timestamps. Keep FIDO's existing CTAP/HID/WebAuthn backends pending separate evaluation.
-
-Before enablement, verify bootstrap firmware coverage, algorithm purpose/slot rules, ML signing modes, and directory/move/delete semantics using firmware sources or controlled transcripts. Generic YubiKey host APIs alone are insufficient evidence. User prompts, intentional PIN exhaustion, and certificate policy are never implicit library actions.
+A Console FRB adapter belongs in Console and calls the Rust facade directly. It may
+hold a private enum of concrete Operation types and Option for idempotent close,
+but must not duplicate protocol state. Dart owns async execution; Python bindings
+would follow the same model with a caller-owned synchronous loop. Binding examples:
+[Console](console-integration.md), [PKCS#11](pkcs11-integration.md).

@@ -1,149 +1,125 @@
 # libcanokey
 
-A Rust host protocol library for CanoKey. It produces APDUs and consumes complete responses; the caller owns connections, transport, scheduling, and application state. Unpublished 0.1 development workspace; the C ABI is experimental.
+A Rust host protocol library for CanoKey. It produces APDUs and consumes complete
+responses; callers own transport, connections and application state. The C ABI is
+experimental. There is no runtime, credential cache or mutable global state.
 
-## Crates and dependencies
+## Crates
 
-Most Rust applications should depend on **`canokey`**. C applications link **`canokey-c`**. A future Console FRB wrapper should depend directly on `canokey`, without going through C.
+Rust applications use **`canokey`**; C applications link **`canokey-c`**. A Console
+FRB adapter would call the Rust facade directly.
 
-| Crate | Responsibility | Direct workspace dependencies |
+| Crate | Responsibility | Workspace dependencies |
 | --- | --- | --- |
-| `canokey-protocol` | APDU/TLV codecs, owned `Operation<T>`, ISO continuation/chaining, limits, errors, zeroized buffers | None |
-| `canokey-compat` | Immutable device profiles, capability evidence, firmware rules and algorithm IDs | protocol |
-| `canokey-admin` | Minimal read-only Admin bootstrap command builders | protocol |
+| `canokey-protocol` | APDU/TLV, owned operations, continuation/chaining, limits, errors, secret buffers | None |
+| `canokey-compat` | Immutable profiles, capability evidence, firmware rules and algorithm IDs | protocol |
+| `canokey-admin` | Read-only Admin bootstrap builders | protocol |
 | `canokey-piv` | PIV operations and certificate container parsing | protocol, compat |
-| `canokey` | Application-facing facade: re-exports lower layers and orchestrates device probing | protocol, compat, admin, piv; optional x509 |
-| `x509-info` (external) | Owned certificate details, decoded common extensions, algorithm information and optional summary serialization | None |
-| `canokey-c` | C ABI: converts descriptors, dispatches operations, copies results | canokey |
+| `canokey` | Facade and device probing | protocol, compat, admin, piv |
+| `canokey-c` | Copied C descriptors and results, operation dispatch | canokey |
 
-Dependency arrows point from consumer to dependency:
+The facade optionally re-exports the independent crates.io package
+[`x509-info`](https://github.com/canokeys/x509-info) 0.1.0. PIV unwraps a certificate
+container; X.509 inspection is a separate pure call. Probe orchestration belongs in
+the facade so compat never depends on applet crates. Bindings do not duplicate
+protocol state.
 
-```mermaid
-graph TD
-    C[canokey-c] --> F[canokey]
-    F --> A[canokey-admin]
-    F --> P[canokey-piv]
-    F --> K[canokey-compat]
-    F --> R[canokey-protocol]
-    F -. optional x509 feature .-> X[x509-info]
-    P --> K
-    P --> R
-    K --> R
-    A --> R
-```
+## Available features
 
-`protocol` knows nothing about firmware or applets. `compat` never calls an applet; putting probe orchestration in the facade avoids a dependency cycle. `admin` currently contains only bootstrap builders, so it does not yet need compat. Bindings adapt ownership and types without duplicating protocol state. There is no transport crate or mutable global state. `x509-info` is independent of applets: PIV removes its certificate container, then an application can inspect the DER through this optional crate. Default facade/C builds do not include X.509 parsing.
+- Minimal/PIV probing; firmware and PIV version separation; observed algorithm IDs,
+  explicit Supported/Unsupported/Unknown evidence and narrow legacy quirks.
+- PIV selection, PIN status/verification/logout, PIN/PUK changes and unblock.
+- External/Mutual 3DES or AES-192 management authentication, explicit caller-supplied
+  mutual challenges; authenticated object/certificate writes and management-key replacement.
+- Object/certificate reads, bounded gzip decoding, certificate deletion, metadata
+  and algorithm-configuration reads.
+- Key generation/import and public-key SPKI export. Scalar import supports
+  P-256/P-384/P-521/secp256k1/SM2; RSA CRT and Ed25519/X25519/ML seeds are typed inputs.
+- Classic RSA/ECDSA/SM2/Ed25519 signing, original signature encoding and DER/P1363
+  conversion; raw RSA decryption, P-256/P-384/P-521/secp256k1 ECDH, X25519 derivation
+  and ML-KEM-768 decapsulation. Hashing, padding and KDF remain caller responsibilities.
+- Explicit Batch requests under one SELECT, with completed results retained after
+  a later failure; corresponding C factories and indexed result getters.
 
-## Implemented scope
+Each operation checks its firmware/slot/algorithm evidence; an algorithm name alone
+is not a support promise. Classic signing excludes ML-DSA and empty Ed25519 messages.
+SM2 agreement uses a separate protocol and is not exposed as ECDH. See
+[plan](plan.md) for remaining PIV and applet work. No consumer has been integrated;
+compatibility is based on pinned source evidence and offline transcripts, without
+hardware/usbip validation.
 
-- Owned operation state machine, bounded ISO GET RESPONSE, safe one-time Le correction, short command chaining, BER TLV, and secret buffers.
-- Firmware/PIV version separation, capability evidence, conservative unknown-version handling, observed algorithm IDs, and narrow legacy object quirks.
-- Minimal/PIV read-only probe; PIV SELECT, PIN status/verify/logout, PIN/PUK changes, PIN unblock, object reads with optional PIN, and certificate reads.
-- Explicit External/Mutual management authentication using RustCrypto 3DES/AES-192, with caller-supplied mutual challenges. Authenticated object/certificate writes, certificate deletion on evidenced firmware, and management-key replacement.
-- PIV metadata/configuration reads, owned public keys with SPKI export, key generation/import, classic signing with DER/P1363 conversion, raw RSA decryption, and P-256/P-384/X25519 derivation. Extended key operations require observed enabled algorithm IDs.
-- Certificate container parsing and bounded gzip decompression. `Certificate::der()` returns the payload; X.509 syntax, signatures, and trust validation remain application responsibilities.
-- Explicit PIV Batch under one SELECT, with caller-owned indexed results and completed-item/failure progress. Failed or cancelled batches never roll back or replay.
-- Optional generic X.509 DER/PEM inspection into owned fields, with timestamp values, raw encodings, and optional Serde serialization. Adapted from Console Rust without its FRB/UI dependencies; no trust verification.
-- Experimental C ABI 0.1: probe, PIN verification/status, public object/certificate reads, management authentication, writes, metadata and key operations, typed results/errors, and copy getters. Only profile/operation handles; see [header](crates/canokey-c/include/canokey.h).
+## Examples
 
-Full Admin, OATH, OpenPGP, and Python/FRB bindings remain planned. Classic signing excludes ML-DSA and empty Ed25519 messages. Scalar import covers P-256/P-384/P-521/secp256k1/SM2; ECDH covers the same curves except SM2, and X25519 derivation is supported. ML-KEM-768 decapsulation returns a raw shared secret without a KDF. No consumer repository has been integrated. Compatibility is based on host sources and offline transcripts, not hardware/usbip validation.
+Install rustup; the repository selects Rust 1.85.1 (MSRV 1.85). All examples use
+synthetic offline transcripts and check emitted commands. Test credentials,
+challenges and certificate payloads are fixtures, not production inputs.
 
-## Runnable examples
-
-Install rustup; the repository selects Rust 1.85.1 (MSRV 1.85). From the repository root:
+| Example | Demonstrates |
+| --- | --- |
+| [probe](crates/canokey/examples/probe.rs) | Caller-owned device profile |
+| [read_certificate](crates/canokey/examples/read_certificate.rs) | Operation and result lifetimes |
+| [write_certificate](crates/canokey/examples/write_certificate.rs) | Mutual authentication followed by PUT DATA |
+| [decapsulate](crates/canokey/examples/decapsulate.rs) | Algorithm discovery, PIN, chained ML-KEM ciphertext and owned secret |
+| [batch](crates/canokey/examples/batch.rs) | Successful preceding results after a later failure |
+| [C probe](crates/canokey-c/examples/probe.c) | Size queries, profile transfer and cleanup |
 
 ```sh
-cargo run -p canokey --example probe --locked
-# firmware: 9.0.0
-cargo run -p canokey --example read_certificate --locked
-# certificate payload: 2 bytes; compressed: false
-cargo run -p canokey --example write_certificate --locked
-# certificate written; profile effect: Unchanged
 cargo run -p canokey --example decapsulate --locked
 # shared secret: 32 bytes
 cargo run -p canokey --example batch --locked
 # completed: 1; failed index: Some(1); error: NotFound during Command
 bash scripts/run-c-example.sh
-# firmware: 3.1.0
 ```
 
-These examples run **offline** and compare every emitted command against a deterministic transcript. The synthetic 9.0.0 firmware demonstrates conservative fallback, not verified firmware support. The two-byte certificate payload demonstrates framing and is not a valid X.509 certificate. The C script requires a Unix shell, Python 3, and a C compiler; it compiles and links the actual library.
+Replace the [example executor's](crates/canokey/examples/support/mod.rs) fixture
+exchange with raw application I/O. Hold one connection lease across the operation;
+supply complete responses including SW1/SW2 and disable transport retries/continuation.
+Getters never send APDUs. On I/O failure, drop the operation and drain or isolate
+pending I/O before connection reuse. Cancel/drop never roll back device effects.
+Boundary sketches: [Console/Dart](docs/console-integration.md),
+[PKCS#11/C](docs/pkcs11-integration.md).
 
-- [Rust probe](crates/canokey/examples/probe.rs): obtain a caller-owned profile.
-- [Rust certificate read](crates/canokey/examples/read_certificate.rs): construct an operation, release its source profile, drive it, and retain the result.
-- [Rust certificate write](crates/canokey/examples/write_certificate.rs): probe, mutual authentication and PUT DATA under one SELECT; fixed test credentials/challenges are never production inputs.
-- [Rust ML-KEM decapsulation](crates/canokey/examples/decapsulate.rs): observed algorithm IDs, PIN verification, chained ciphertext and owned shared secret.
-- [Rust Batch](crates/canokey/examples/batch.rs): inspect successful preceding results after a later failure, with a single operation.
-- [Rust application executor](crates/canokey/examples/support/mod.rs): replace the fixture exchange with application-owned raw I/O.
-- [C probe](crates/canokey-c/examples/probe.c): size queries, handle transfer, command validation, and cleanup on failure.
+## Certificate inspection
 
-For real hardware, hold one exclusive connection lease across the entire operation. Send `command()` bytes and supply response data **including SW1/SW2** to `advance()`. Disable transport continuation/retries. Getters never send APDUs. An application I/O error drops/closes the operation; drain or isolate outstanding I/O before reusing the connection. See the [Console](docs/console-integration.md) and [PKCS#11](docs/pkcs11-integration.md) boundary examples.
-
-## Certificate structures and JSON
-
-The optional parser is usable directly as `x509-info`, or through the facade:
-
-```toml
-[dependencies]
-canokey = { path = "path/to/libcanokey/crates/canokey", features = ["x509"] }
-# Choose features = ["serde"] instead when the application needs serialization.
-```
+Enable `canokey/x509` for parsing, or `canokey/serde` for optional serialization.
+Default builds omit the parser; applications choose their own serializers or FRB DTOs.
 
 ```rust,ignore
-let certificate = execute(card, canokey::piv::read_certificate(
-    &profile, slot, canokey::piv::Access::None, options)?)?;
 let info = canokey::x509::parse_der(certificate.der(), Default::default())?;
-// info owns subject/issuer, validity, serial, signature, SPKI and extension data.
-// With the serde feature and an application dependency on serde_json:
+// With canokey/serde and the application's serde_json dependency:
 let json = serde_json::to_string(&info.summary())?;
 ```
 
-Certificate inspection is maintained in the independent
-[x509-info repository](https://github.com/canokeys/x509-info). Its README owns
-library, CLI and schema documentation. This workspace uses `x509-info = "0.1.0"`
-from crates.io. Default builds omit certificate inspection; `canokey/serde` enables
-serialization through the same re-export and owned result API.
+The [x509-info documentation](https://github.com/canokeys/x509-info) owns certificate
+models, CLI formats and schema. Parsing does not verify certificate trust or validity.
 
-## Rust API documentation
-
-All library crates document public types, fields, methods and factories in rustdoc, including ownership, byte formats, lifecycle errors, and FFI safety. Start with the facade's quick start, then follow its `piv` and `compatibility` re-exports. The low-level operation documentation includes a complete caller-driven exchange example.
-
-```sh
-cargo doc --workspace --no-deps --locked --open
-# Or open target/doc/canokey/index.html after building without --open.
-cargo test --workspace --doc --locked
-```
-
-Each crate denies missing public documentation. CI builds rustdoc with warnings treated as errors, and the workspace test command executes the documentation examples. Dependency choices for future cryptography and key formats are recorded in [API design](docs/api-design.md#dependency-reuse); use established primitives with minimal features and caller-supplied randomness.
-
-## Validation
+## Build and validation
 
 ```sh
 cargo fmt --all --check
-RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps --locked
 cargo test --workspace --locked
 cargo test --workspace --all-features --locked
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps --locked
 cargo build --workspace --locked
 cargo build -p canokey --all-features --target wasm32-unknown-unknown --locked
 python3 scripts/check-dependencies.py
+python3 scripts/check-licenses.py
 bash scripts/test-c-abi.sh
 ```
 
-CI covers native tests, examples, rustdoc, C/C++ linking, wasm, and dependency
-boundaries. Offline fixtures do not establish hardware compatibility. Cargo.lock
-is tracked; reference clones, build outputs, and caches are ignored.
+CI checks native/wasm builds, examples, doctests, strict rustdoc/clippy, dependency
+boundaries, licenses and C/C++ linking. Open `target/doc/canokey/index.html` for
+public API documentation. Cargo.lock is tracked; reference clones and build outputs
+are ignored.
 
-## Documentation
+## Documentation and license
 
-- [Plan](plan.md): milestones, remaining scope, acceptance.
-- [API design](docs/api-design.md): ownership and protocol contracts, including explicitly marked future APIs.
-- [Reference sources](docs/references.md): pinned upstream evidence.
-- [X.509 ecosystem research](https://github.com/canokeys/x509-info/blob/main/docs/x509-ecosystem.md): alternatives and dependency reuse decisions.
-- [Contributor instructions](AGENTS.md): English repository language, architecture, checks, and commits.
+- [API contracts](docs/api-design.md): ownership, execution and binding rules.
+- [Plan](plan.md): remaining work and acceptance criteria.
+- [Reference evidence](docs/references.md): pinned firmware and consumer sources.
+- [Contributor instructions](AGENTS.md): language, architecture, checks and commits.
 
-## License
-
-Copyright 2026 canokeys.org.
-
-Licensed under the [Apache License, Version 2.0](LICENSE). The root license applies to all original workspace crates, examples, and documentation. Each crate inherits the SPDX identifier, authors, and homepage from workspace metadata. Every crate contains a regular-file copy of the canonical root LICENSE so Cargo packages include the license on all platforms; CI checks that the copies stay identical. Third-party dependencies and read-only reference repositories retain their own licenses. The independent x509-info package is also licensed under Apache-2.0.
+Copyright 2026 canokeys.org. Licensed under [Apache-2.0](LICENSE). Each workspace
+crate inherits the metadata and includes a copy of the root license for packaging.
+Third-party dependencies and reference repositories retain their own licenses.

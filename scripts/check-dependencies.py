@@ -23,8 +23,8 @@ for root in roots:
         pending.extend(nodes[pid]["dependencies"])
 print(f"dependency boundaries verified for {len(roots)} core crates")
 
-# The optional CLI owns I/O and format dependencies. Check the library closure
-# with only the facade's Serde feature, excluding development-only edges.
+# The external x509-info CLI owns I/O and format dependencies. Check its library
+# closure through the facade's Serde feature, excluding development-only edges.
 metadata = json.loads(subprocess.check_output([
     "cargo", "metadata", "--no-default-features", "--features", "canokey/serde",
     "--locked", "--format-version", "1"]))

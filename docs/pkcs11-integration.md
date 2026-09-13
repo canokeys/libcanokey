@@ -1,6 +1,6 @@
 # PKCS#11 integration boundary
 
-This document is **application pseudocode**, not an implemented PKCS#11 integration. The [runnable C probe](../crates/canokey-c/examples/probe.c) uses today's ABI with complete cleanup. The [header](../crates/canokey-c/include/canokey.h) is authoritative for available functions; signing and management authentication below remain planned. Shared contracts live in [design](api-design.md).
+This document is **application pseudocode**, not an implemented PKCS#11 integration. The [runnable C probe](../crates/canokey-c/examples/probe.c) uses today's ABI with complete cleanup. The [header](../crates/canokey-c/include/canokey.h) is authoritative for available functions. Shared contracts live in [design](api-design.md).
 
 ## Caller-owned state
 
@@ -81,14 +81,14 @@ Getter errors are binding status codes, so CHECK_CNK must only inspect error POD
 
 Probe uses the same executor: create `cnk_probe_device_new`, run, take_profile into the token context, free the operation. On reconnect invalidate the old profile **before** probing, so failure cannot leave a previous device's snapshot in use. Connection/frame budgets must match constructor options. I/O or allocation failures never cause a second SCardTransmit to retrieve a result.
 
-## Login and planned signing
+## Login and signing
 
-C_Login USER prepares a controlled PIN copy, runs the implemented verify-pin operation under the device lock, and commits token login state only on success; always free the operation. Map PIN AuthenticationFailed/PinBlocked to CKR_PIN_INCORRECT/CKR_PIN_LOCKED in this context. SO will use planned management authentication, with mutual challenge supplied by C's CSPRNG.
+C_Login USER prepares a controlled PIN copy, runs the implemented verify-pin operation under the device lock, and commits token login state only on success; always free the operation. Map PIN AuthenticationFailed/PinBlocked to CKR_PIN_INCORRECT/CKR_PIN_LOCKED in this context. SO can run cnk_piv_authenticate_management_key_new with an explicit mode/key and a fresh C-supplied mutual challenge.
 
-C_SignInit only records validated key/slot/mechanism/length/authorization requirements. It does not create a Rust operation spanning PKCS#11 calls. For P-256 CKM_ECDSA, the future C_Sign path is:
+C_SignInit only records validated key/slot/mechanism/length/authorization requirements. It does not create a Rust operation spanning PKCS#11 calls. For P-256 CKM_ECDSA, a C_Sign adapter can use:
 
 ```c
-/* Planned API pseudocode; signing functions/descriptors are not exported yet. */
+/* Application pseudocode using the current C factory and result getter. */
 const CK_ULONG required = 64; /* P1363 r || s, from validated key metadata. */
 if (out == NULL) { *inout_len = required; return CKR_OK; }
 if (*inout_len < required) {
@@ -97,12 +97,14 @@ if (*inout_len < required) {
 }
 /* Now obtain the card lease and validate USER/context-specific authorization. */
 cnk_operation_t *op = NULL;
+cnk_piv_access_v1 access = {.struct_size = sizeof(access)};
 CHECK_CK(prepare_sign_access(session, &access));
-CHECK_CNK(cnk_piv_sign_new(token->profile, slot, &input, &access,
+CHECK_CNK(cnk_piv_sign_new(token->profile, slot, CNK_ALGORITHM_P256,
+                           CNK_SIGN_DIGEST, digest.data, digest.length, &access,
                            &lease->options, &op, &error), PURPOSE_SIGN);
 CHECK_CK(run_op(lease, op, PURPOSE_SIGN));
 size_t n = required;
-CHECK_CNK(cnk_operation_signature_copy(op, CNK_SIGNATURE_P1363, out, &n), PURPOSE_SIGN);
+CHECK_CNK(cnk_operation_signature_p1363(op, out, &n), PURPOSE_SIGN);
 *inout_len = (CK_ULONG)n;
 cleanup:
 cnk_operation_free(op);
@@ -113,7 +115,18 @@ Size-only and too-small paths send no APDU and consume neither signature nor con
 
 CKM_ECDSA_SHA256 hashes in C; RSA PKCS1/PSS prepares the encoded block in C. C_SignUpdate stores C digest state; C_SignFinal creates a local operation only when producing output. PIV PinPolicy::Always and CKA_ALWAYS_AUTHENTICATE must agree: required VERIFY belongs in the same operation as the private-key command.
 
-Planned key generation returns a public key for C object creation. Import copies typed private components before TLV encoding. A planned AUTH/IMPORT/WRITE CERT Batch still uses one operation and no additional input/result handles.
+`cnk_piv_generate_key_new` returns public-key fields/SPKI for C object creation;
+`cnk_piv_import_key_new` copies typed components before encoding. An explicit
+AUTH/IMPORT/WRITE CERT sequence uses `cnk_piv_batch_new` with copied request
+descriptors. On failure, inspect `cnk_operation_batch_progress` and indexed getters
+before freeing the operation; update caches for successful preceding mutations.
+No additional input/result handles or Rust session state are needed.
+
+Raw RSA decryption, ECDH/X25519 derivation and ML-KEM decapsulation also return
+owned bytes through the normal copy getter. The C module retains responsibility
+for mechanism parameters, unpadding/KDF, secret erasure and supported-mechanism
+advertising; the existence of a core factory alone does not implement a PKCS#11
+mechanism.
 
 ## Cleanup events
 
