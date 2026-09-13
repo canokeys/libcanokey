@@ -6,10 +6,12 @@
 //! library, accessed without concurrent mutation, and freed exactly once.
 //! A non-null versioned struct must contain at least its declared supported prefix.
 #![deny(missing_docs)]
+mod piv_mutation;
 use canokey::{
     compatibility::{Capability, DeviceProfile, Support},
     piv, Error, ErrorKind, Operation, OperationOptions, ProbeMode, ProbeOptions, SecretBytes, Step,
 };
+pub use piv_mutation::*;
 use std::{
     panic::{catch_unwind, AssertUnwindSafe},
     ptr, slice,
@@ -70,6 +72,7 @@ enum Inner {
     PinStatus(Operation<piv::PinStatus>),
     Object(Operation<SecretBytes>),
     Certificate(Operation<piv::Certificate>),
+    Mutation(Operation<piv::MutationResult>),
 }
 macro_rules! dispatch {
     ($value:expr, $op:ident => $body:expr) => {
@@ -79,6 +82,7 @@ macro_rules! dispatch {
             Inner::PinStatus($op) => $body,
             Inner::Object($op) => $body,
             Inner::Certificate($op) => $body,
+            Inner::Mutation($op) => $body,
         }
     };
 }
@@ -158,6 +162,7 @@ fn kind_code(kind: ErrorKind) -> u32 {
         ErrorKind::UnsupportedProtocolVersion => 15,
         ErrorKind::UnexpectedStatusWord => 16,
         ErrorKind::OperationStateError => 17,
+        ErrorKind::DeviceAuthenticationFailed => 18,
         _ => 255,
     }
 }
@@ -775,6 +780,7 @@ pub unsafe extern "C" fn cnk_operation_result_kind(op: *const CnkOperation, out:
             Inner::PinStatus(_) => 3,
             Inner::Object(_) => 4,
             Inner::Certificate(_) => 5,
+            Inner::Mutation(_) => 6,
         };
         OK
     })

@@ -36,5 +36,6 @@ jobs:
         run: bash scripts/test-c-abi.sh
       - run: cargo run -p canokey --example probe --locked
       - run: cargo run -p canokey --example read_certificate --locked
+      - run: cargo run -p canokey --example write_certificate --locked
       - if: runner.os != 'Windows'
         run: bash scripts/run-c-example.sh

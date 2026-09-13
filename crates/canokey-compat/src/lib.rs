@@ -121,6 +121,36 @@ pub enum Capability {
     AlgorithmExtensions,
     /// Retired key-management slot range.
     RetiredSlots,
+    /// Object PUT DATA, including certificate containers.
+    ObjectWrites,
+    /// Short command chaining for PUT DATA.
+    ObjectWriteChaining,
+    /// Certificate removal using an empty 53 container.
+    CertificateDeletion,
+}
+/// Management-key block algorithm, separate from asymmetric key algorithms.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ManagementKeyAlgorithm {
+    /// Three-key triple DES, 24-byte key and eight-byte authentication block.
+    Tdes,
+    /// AES-192, 24-byte key and sixteen-byte authentication block.
+    Aes192,
+}
+impl ManagementKeyAlgorithm {
+    /// PIV GENERAL AUTHENTICATE / SET MANAGEMENT KEY algorithm identifier.
+    pub fn wire_id(self) -> u8 {
+        match self {
+            Self::Tdes => 0x03,
+            Self::Aes192 => 0x0a,
+        }
+    }
+    /// Required witness and challenge length in bytes.
+    pub fn block_len(self) -> usize {
+        match self {
+            Self::Tdes => 8,
+            Self::Aes192 => 16,
+        }
+    }
 }
 /// Semantic algorithm names, independent of configurable wire identifiers.
 /// An enum variant does not promise a factory implementation or firmware support.
@@ -375,6 +405,12 @@ impl DeviceProfile {
     /// Never probes the card or changes this snapshot.
     pub fn capability(&self, feature: Capability) -> CapabilityStatus {
         use {Evidence::*, Support::*};
+        match feature {
+            Capability::ObjectWrites => return self.firmware_range((1, 5, 2), (3, 1, 0)),
+            Capability::ObjectWriteChaining => return self.firmware_range((1, 6, 0), (3, 1, 0)),
+            Capability::CertificateDeletion => return self.firmware_range((3, 1, 0), (3, 1, 0)),
+            _ => {}
+        }
         if feature == Capability::Piv {
             return CapabilityStatus {
                 support: if self.info.piv_version.is_some() {
@@ -442,6 +478,35 @@ impl DeviceProfile {
                 Unknown
             },
             evidence: LatestKnownFallback,
+        }
+    }
+    /// Resolve management-key algorithm support for both External and Mutual modes.
+    /// Firmware 1.5.2..=3.0.3 uses 3DES; 3.1.0 uses AES-192. Unrecognized,
+    /// development and newer firmware remain Unknown; no algorithm is tried implicitly.
+    pub fn management_key_support(&self, algorithm: ManagementKeyAlgorithm) -> CapabilityStatus {
+        match algorithm {
+            ManagementKeyAlgorithm::Tdes => self.firmware_range((1, 5, 2), (3, 0, 3)),
+            ManagementKeyAlgorithm::Aes192 => self.firmware_range((3, 1, 0), (3, 1, 0)),
+        }
+    }
+    fn firmware_range(&self, first: (u16, u16, u16), last: (u16, u16, u16)) -> CapabilityStatus {
+        if let Some(version) = &self.info.firmware {
+            let v = version.tuple();
+            if version.suffix.is_none() && (((1, 5, 2)..=(3, 0, 3)).contains(&v) || v == (3, 1, 0))
+            {
+                return CapabilityStatus {
+                    support: if (first..=last).contains(&v) {
+                        Support::Supported
+                    } else {
+                        Support::Unsupported
+                    },
+                    evidence: Evidence::FirmwareMatrix,
+                };
+            }
+        }
+        CapabilityStatus {
+            support: Support::Unknown,
+            evidence: Evidence::LatestKnownFallback,
         }
     }
     /// A wire identifier alone is not evidence that a key operation is supported.

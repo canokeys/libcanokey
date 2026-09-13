@@ -13,3 +13,7 @@ publish = false
 canokey-protocol.workspace = true
 canokey-compat.workspace = true
 flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
+aes = { version = "0.8", features = ["zeroize"] }
+des = { version = "0.8", features = ["zeroize"] }
+subtle = { version = "2.6", default-features = false }
+zeroize.workspace = true

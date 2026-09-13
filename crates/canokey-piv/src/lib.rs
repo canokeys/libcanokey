@@ -1,4 +1,4 @@
-//! PIV selection, PIN/PUK, object and certificate reads.
+//! PIV selection, PIN/PUK, management authentication, and object/certificate I/O.
 //! # High-level operations
 //!
 //! Factories such as [`verify_pin`], [`read_object`] and [`read_certificate`] return
@@ -42,11 +42,23 @@
 //! ```
 //!
 //! The [`command`] module is lower-level: its builders do not SELECT or authenticate
-//! on behalf of the caller. Management authentication, writes, metadata, keys,
-//! private operations and Batch are not yet implemented.
+//! on behalf of the caller. Metadata, keys, private operations and Batch remain
+//! planned. Use [`Access::Management`] or [`Access::PinAndManagement`] to keep
+//! authentication and a dependent operation under one SELECT.
 //!
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
+mod access;
+/// Authenticated object/certificate writes and management-key replacement.
+pub mod write;
+pub use write::{
+    delete_certificate, set_management_key, write_certificate, write_object, ManagementTouchPolicy,
+};
+/// Management-key types and explicit External/Mutual authentication.
+pub mod management;
+pub use management::{
+    authenticate_management_key, ManagementAuthentication, ManagementKey, ManagementKeyAlgorithm,
+};
 /// Certificate container parsing and bounded gzip decoding.
 pub mod certificate;
 pub use canokey_compat::Algorithm;
@@ -103,6 +115,15 @@ pub enum Access {
     None,
     /// Verify the supplied PIN immediately before the target command.
     Pin(Pin),
+    /// Authenticate with an explicitly selected management-key mode.
+    Management(ManagementAuthentication),
+    /// Authenticate management first, then verify PIN immediately before the target.
+    PinAndManagement {
+        /// Owned user PIN.
+        pin: Pin,
+        /// Owned key and mode, with caller-provided randomness for Mutual.
+        management: ManagementAuthentication,
+    },
 }
 /// PIV key slot, excluding the 9B management-key reference.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -607,17 +628,8 @@ fn read_object_with<T: 'static>(
 ) -> Result<Operation<T>, Error> {
     require(profile)?;
     let legacy = profile.legacy_unwrapped_objects();
-    let mut commands = vec![request(command::select(), Phase::Select, None)];
-    if let Access::Pin(pin) = access {
-        commands.push(request(
-            command::verify_pin(&pin),
-            Phase::Authentication,
-            Some(SecretReference::Pin),
-        ));
-    }
-    commands.push(request(command::get_data(id), Phase::Command, None));
     let limit = options.limits.max_total_response_bytes;
-    make(commands, options, move |r| {
+    access::command_with_access(profile, access, command::get_data(id), options, move |r| {
         r.ensure_success(Phase::Command)?;
         let data = r.data.as_bytes();
         if legacy

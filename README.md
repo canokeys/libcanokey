@@ -39,11 +39,12 @@ graph TD
 - Owned operation state machine, bounded ISO GET RESPONSE, safe one-time Le correction, short command chaining, BER TLV, and secret buffers.
 - Firmware/PIV version separation, capability evidence, conservative unknown-version handling, observed algorithm IDs, and narrow legacy object quirks.
 - Minimal/PIV read-only probe; PIV SELECT, PIN status/verify/logout, PIN/PUK changes, PIN unblock, object reads with optional PIN, and certificate reads.
+- Explicit External/Mutual management authentication using RustCrypto 3DES/AES-192, with caller-supplied mutual challenges. Authenticated object/certificate writes, certificate deletion on evidenced firmware, and management-key replacement.
 - Certificate container parsing and bounded gzip decompression. `Certificate::der()` returns the payload; X.509 syntax, signatures, and trust validation remain application responsibilities.
 - Optional generic X.509 DER/PEM inspection into owned fields, with timestamp values, raw encodings, and optional Serde serialization. Adapted from Console Rust without its FRB/UI dependencies; no trust verification.
-- Experimental C ABI 0.1: probe, PIN verification/status, public object/certificate reads, typed errors, and copy getters. Only profile/operation handles; see [header](crates/canokey-c/include/canokey.h).
+- Experimental C ABI 0.1: probe, PIN verification/status, public object/certificate reads, management authentication and writes, typed mutation results/errors, and copy getters. Only profile/operation handles; see [header](crates/canokey-c/include/canokey.h).
 
-Management-key authentication, writes, metadata, key generation/import/sign/decrypt/derive, Batch, full Admin, OATH, OpenPGP, and Python/FRB bindings are **not implemented**. No consumer repository has been integrated. Compatibility is based on host sources and offline transcripts, not hardware/usbip validation.
+Metadata, key generation/import/sign/decrypt/derive, Batch, full Admin, OATH, OpenPGP, and Python/FRB bindings are **not implemented**. No consumer repository has been integrated. Compatibility is based on host sources and offline transcripts, not hardware/usbip validation.
 
 ## Runnable examples
 
@@ -54,6 +55,8 @@ cargo run -p canokey --example probe --locked
 # firmware: 9.0.0
 cargo run -p canokey --example read_certificate --locked
 # certificate payload: 2 bytes; compressed: false
+cargo run -p canokey --example write_certificate --locked
+# certificate written; profile effect: Unchanged
 bash scripts/run-c-example.sh
 # firmware: 3.1.0
 ```
@@ -62,6 +65,7 @@ These examples run **offline** and compare every emitted command against a deter
 
 - [Rust probe](crates/canokey/examples/probe.rs): obtain a caller-owned profile.
 - [Rust certificate read](crates/canokey/examples/read_certificate.rs): construct an operation, release its source profile, drive it, and retain the result.
+- [Rust certificate write](crates/canokey/examples/write_certificate.rs): probe, mutual authentication and PUT DATA under one SELECT; fixed test credentials/challenges are never production inputs.
 - [Rust application executor](crates/canokey/examples/support/mod.rs): replace the fixture exchange with application-owned raw I/O.
 - [C probe](crates/canokey-c/examples/probe.c): size queries, handle transfer, command validation, and cleanup on failure.
 

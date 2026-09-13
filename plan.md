@@ -6,12 +6,8 @@ integration and upstream changes require a separate task.
 
 ## Next: complete PIV
 
-1. Verify management-key modes and firmware coverage against CanoKey evidence.
-   Implement explicit external/mutual authentication with maintained block-cipher
-   and constant-time comparison dependencies; randomness remains caller-supplied.
-2. Add authenticated object/certificate writes and management-key updates.
-3. Add metadata, key generation/import, signing, decryption, and derivation.
-4. Implement Batch for explicit authentication and dependent operations under one
+1. Add metadata, key generation/import, signing, decryption, and derivation.
+2. Implement Batch for explicit authentication and dependent operations under one
    SELECT. Preserve completed-item counts on failure without rollback or replay.
 
 Extend the experimental C ABI alongside useful core operations. Before enabling

@@ -1,6 +1,6 @@
 # Design reference repositories
 
-Cloned on 2026-09-13. The SHAs below pin the design evidence; source links do not follow moving branches. All three clones are non-shallow, without fetched submodules, and used only as read-only reference material.
+Cloned on 2026-09-13. The SHAs below pin the design evidence; source links do not follow moving branches. The three original clones are non-shallow, without fetched submodules, and used only as read-only reference material.
 
 | Repository | Local directory | HEAD |
 | --- | --- | --- |
@@ -52,6 +52,28 @@ Relevant implementations, regression tests, and conventions:
 - [src/internal/rsa.c](https://github.com/canokeys/canokey-pkcs11/blob/086c4d135e59fc7b24c02e6efae2d3f0d982720a/src/internal/rsa.c)
 - [include/pkcs11_canokey.h](https://github.com/canokeys/canokey-pkcs11/blob/086c4d135e59fc7b24c02e6efae2d3f0d982720a/include/pkcs11_canokey.h)
 - [AGENTS.md](https://github.com/canokeys/canokey-pkcs11/blob/086c4d135e59fc7b24c02e6efae2d3f0d982720a/AGENTS.md)
+
+## canokey-core firmware
+
+Read-only protocol evidence at `references/canokey-core`, HEAD
+[`9e77287b2a272f6123d516790af93933dec72b78`](https://github.com/canokeys/canokey-core/tree/9e77287b2a272f6123d516790af93933dec72b78).
+No firmware is linked or built as a dependency.
+
+- [`piv.c` at 1.5.2](https://github.com/canokeys/canokey-core/blob/b16e8c517ed72fe26e5101b450a99df2b3526aa1/applets/piv/piv.c),
+  1.6.0, 1.6.2, 2.0.0, 2.0.1, 3.0.0, 3.0.2 and
+  [`3.0.3`](https://github.com/canokeys/canokey-core/blob/7644370f0c16d5b5e0d2f503e6c47bd39aaa0e2f/applets/piv/piv.c)
+  implement 3DES External and Mutual authentication (GENERAL AUTHENTICATE cases 2–5).
+- [AES-192 transition](https://github.com/canokeys/canokey-core/commit/5e0b978)
+  and the pinned HEAD implement AES-192 in both modes; manager's firmware matrix
+  places this transition at 3.1.0. The host never tries both algorithms automatically.
+- PUT DATA stores 5C's following container verbatim. 1.5.2 has no short write
+  chaining; inspected releases from 1.6.0 do. The pinned HEAD explicitly removes
+  a certificate file for `53 00`; legacy releases merely store that container.
+- SET MANAGEMENT KEY accepts exactly 24 bytes: old releases require 03/9B/18
+  and P2=FF; AES-192 uses 0A/9B/18 and permits P2=FE for touch Always.
+
+These sources establish encoding and version rules, not hardware interoperability.
+Newer, development and unrecognized versions remain Unknown for these mutations.
 
 ## Observations informing the design
 

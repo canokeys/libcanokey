@@ -89,17 +89,17 @@ Factories take `&DeviceProfile`, owned semantic inputs and `OperationOptions`, r
 | change_pin / change_puk / unblock_pin | MutationResult | Implemented |
 | read_object | ObjectData | Implemented; optional PIN |
 | read_certificate | Certificate | Implemented; optional PIN |
-| authenticate_management_key / set_management_key | () / MutationResult | Planned |
+| authenticate_management_key / set_management_key | () / MutationResult | Implemented |
 | get_metadata / read_algorithm_config | Metadata / AlgorithmConfig | Planned standalone factories |
 | generate_key / import_key | PublicKey / MutationResult | Planned |
 | sign / decrypt / derive | Signature / SecretBytes / SecretBytes | Planned |
-| write_object / write_certificate / delete_certificate | MutationResult | Planned |
+| write_object / write_certificate / delete_certificate | MutationResult | Implemented |
 
 Slot references cover authentication 9A, signature 9C, key management 9D, card authentication 9E, and checked retired indices 1..20 (wire 82..95). Management reference 9B is not a signing slot. `ObjectId` accepts a complete checked BER tag; certificate mapping is library-owned.
 
-`Pin/Puk::from_bytes` currently accepts 6..8 bytes excluding FF and pads to eight bytes on wire. Other applets use distinct secret types. Current Access is None or Pin. None makes no promise of existing authentication. Standalone operations select once, then authenticate immediately before their target. Verify success is not an authorization token surviving later SELECT or reconnect.
+`Pin/Puk::from_bytes` currently accepts 6..8 bytes excluding FF and pads to eight bytes on wire. Other applets use distinct secret types. Access is None, Pin, Management or PinAndManagement. None makes no promise of existing authentication. Standalone operations select once, then authenticate immediately before their target. Verify success is not an authorization token surviving later SELECT or reconnect.
 
-Planned Access adds Management and PinAndManagement. Management authentication explicitly selects External or Mutual; no silent downgrade. The application supplies a fresh CSPRNG challenge (3DES eight bytes, AES sixteen); the library owns witness/challenge cryptography and constant-time verification. Algorithm support must be proven for CanoKey. Dual authentication runs management before PIN so VERIFY stays next to the private operation. No implicit default credentials.
+Management authentication explicitly selects External or Mutual; no silent downgrade. The application supplies a fresh CSPRNG challenge (3DES eight bytes, AES sixteen); the library owns witness/challenge cryptography and constant-time verification. CanoKey firmware 1.5.2..=3.0.3 supports 3DES and 3.1.0 supports AES-192; other versions remain Unknown. Both modes are evidenced in firmware sources. Dual authentication runs management before PIN so VERIFY stays next to the private operation. No implicit default credentials.
 
 | Value | Contract |
 | --- | --- |
@@ -112,7 +112,7 @@ Planned Access adds Management and PinAndManagement. Management authentication e
 | PrivateKeyMaterial (planned) | Typed, checked secret RSA CRT components, fixed EC scalar, Ed25519 seed, X25519 key, ML-DSA 32-byte / ML-KEM 64-byte seed |
 | Signature (planned) | Algorithm-tagged result; RSA/Ed/ML raw bytes, ECDSA/SM2 DER or fixed-width P1363 conversion |
 
-Certificate parsing requires exactly one nonempty 70 field, accepts absent 71 as uncompressed, accepts 71=00/01 only, and permits an optional empty FE. Duplicate, unknown, malformed fields and trailing gzip members/data fail. Input and decoded payload are independently bounded by max_total_response_bytes; gzip CRC and size must validate. Empty/malformed containers are not silently treated as empty slots. Object NotFound remains a status-derived error. Future certificate deletion must use the evidenced empty-container encoding without deleting a private key.
+Certificate parsing requires exactly one nonempty 70 field, accepts absent 71 as uncompressed, accepts 71=00/01 only, and permits an optional empty FE. Duplicate, unknown, malformed fields and trailing gzip members/data fail. Input and decoded payload are independently bounded by max_total_response_bytes; gzip CRC and size must validate. Empty/malformed containers are not silently treated as empty slots. Object NotFound remains a status-derived error. Certificate deletion uses the empty 53 container on 3.1.0 without deleting a private key; older versions cannot claim deletion and are rejected. Chained writes are enabled from 1.6.0; partial writes are never rolled back or replayed.
 
 Planned SignInput distinguishes RSA encoded block (host owns hash/PKCS1/PSS), ECDSA digest (order-bit truncation and short-value padding), Ed25519 message, SM2 digest (host computes SM3(ZA||M)), and ML-DSA message/context. Unverified contexts are rejected before sending. RSA decrypt returns the modulus-sized raw block; unpadding stays in the application. ECDH/X25519 derive validates peer encoding and returns raw shared secret; no KDF. ML-KEM decapsulation is separate with checked ciphertext/secret lengths. Algorithm names are semantic identifiers, not reconfigurable wire IDs or support promises.
 
@@ -155,7 +155,7 @@ Stop at the first error with failed index/completed count, without rollback or a
 
 ## Errors and secrets
 
-Error contains kind, phase, optional raw status, secret reference and retries; Batch progress and device-authentication failures are planned extensions. Interpret statuses in command context: 6A82 on SELECT is different from GET DATA; a historical empty-slot 6700 requires a proven narrow quirk. Preserve unknown status values, and never invent user-PIN retries for management authentication.
+Error contains kind, phase, optional raw status, secret reference and retries; Mutual cryptogram mismatch returns DeviceAuthenticationFailed without a fabricated status word. Management failures never report PIN retry counts. Batch progress remains planned. Interpret statuses in command context: 6A82 on SELECT is different from GET DATA; a historical empty-slot 6700 requires a proven narrow quirk. Preserve unknown status values, and never invent user-PIN retries for management authentication.
 
 Keep protocol, binding and transport failures separate. Redact PINs, keys, APDUs, temporary plaintext and sensitive results from Debug/error/log output. Zeroize working buffers, including allocations replaced during growth. Applications own transport/FFI copies; immutable Dart/Python strings cannot promise erasure. Success/failure releases execution secrets while results remain available until take/drop.
 
@@ -187,8 +187,8 @@ Use established libraries for standard cryptography and standard key formats. Th
 | Result serialization | Optional `serde` | Owned certificate structs derive Serialize; JSON library choice stays in the application |
 | Secret erasure | `zeroize` / `Zeroizing` | Already used by protocol. `SecretBytes` adds redacted Debug and wipes old allocations during growth; replacing that behavior requires equivalent guarantees |
 | Certificate gzip | `flate2` with `rust_backend` and default features disabled | Already used by PIV. The applet layer still enforces input/output bounds, container rules, and trailing-data rejection |
-| Management-key block cryptography | RustCrypto [`aes`](https://docs.rs/aes), [`des`](https://docs.rs/des), and their matching [`cipher`](https://docs.rs/cipher) traits | Planned for external/mutual authentication. Use exact single-block operations without padding. 3DES is for legacy protocol interoperability; do not implement primitives locally |
-| Authentication response comparison | [`subtle`](https://docs.rs/subtle) | Planned constant-time comparison of fixed-size authentication values; reject incorrect public lengths first. Do not compare secrets with ordinary slice equality |
+| Management-key block cryptography | RustCrypto [`aes`](https://docs.rs/aes), [`des`](https://docs.rs/des), and their matching [`cipher`](https://docs.rs/cipher) traits | Used for external/mutual authentication. Use exact single-block operations without padding. 3DES is for legacy protocol interoperability; do not implement primitives locally |
+| Authentication response comparison | [`subtle`](https://docs.rs/subtle) | Used for constant-time comparison of fixed-size authentication values; reject incorrect public lengths first. Do not compare secrets with ordinary slice equality |
 | Signature/public-key encoding | RustCrypto [`der`](https://docs.rs/der), [`spki`](https://docs.rs/spki), and curve-specific signature types where appropriate | Planned DER/P1363 and SPKI conversion. Reuse canonical integer/length handling; no handwritten generic ASN.1 codec |
 | EC point validation | RustCrypto [`p256`](https://docs.rs/p256) and the matching curve crates | Planned only when key/peer validation requires it. Use checked point decoding, not just SEC1 prefix/length checks; private signing/key agreement still occurs on the card |
 
@@ -204,4 +204,4 @@ The existing BER TLV reader is a small applet framing codec with explicit bounds
 
 Admin will add device/config/storage/chip/core-commit reads, updates, PIN, NFC/NDEF, SM2 configuration and explicit applet reset. Patches preserve unknown bits; multi-APDU writes are not atomic. OATH needs access validation, credentials and calculations with explicit challenge/time/randomness; never automatically retry HOTP increments. OpenPGP needs independent DO, PW1-sign/PW1-other/PW3, KDF, key/policy/operation semantics and caller-supplied fingerprints/timestamps. Keep FIDO's existing CTAP/HID/WebAuthn backends pending separate evaluation.
 
-Before enablement, verify bootstrap firmware coverage, algorithm purpose/slot rules, management mutual authentication by firmware, ML signing modes, and directory/move/delete semantics using firmware sources or controlled transcripts. Generic YubiKey host APIs alone are insufficient evidence. User prompts, intentional PIN exhaustion, and certificate policy are never implicit library actions.
+Before enablement, verify bootstrap firmware coverage, algorithm purpose/slot rules, ML signing modes, and directory/move/delete semantics using firmware sources or controlled transcripts. Generic YubiKey host APIs alone are insufficient evidence. User prompts, intentional PIN exhaustion, and certificate policy are never implicit library actions.

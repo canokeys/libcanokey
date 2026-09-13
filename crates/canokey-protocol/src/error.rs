@@ -17,6 +17,8 @@ pub enum ErrorKind {
     LimitExceeded,
     /// Explicit credential verification failed; retry information may be present.
     AuthenticationFailed,
+    /// The card's mutual-authentication cryptogram did not match the host challenge.
+    DeviceAuthenticationFailed,
     /// A credential reference is blocked.
     PinBlocked,
     /// Required authentication/security state is absent.
@@ -107,8 +109,12 @@ impl Error {
     /// statuses remain UnexpectedStatusWord with their raw value. This function
     /// is for failure paths: even 9000 maps to UnexpectedStatusWord here.
     pub fn status(sw: StatusWord, phase: Phase, reference: Option<SecretReference>) -> Self {
+        let pin_reference = matches!(
+            reference,
+            Some(SecretReference::Pin | SecretReference::Puk | SecretReference::AdminPin)
+        );
         let kind = match sw.raw() {
-            0x6983 if reference.is_some() => ErrorKind::PinBlocked,
+            0x6983 if pin_reference => ErrorKind::PinBlocked,
             0x6982 => ErrorKind::SecurityStatusNotSatisfied,
             0x6985 => ErrorKind::ConditionsNotSatisfied,
             0x6a82 | 0x6a88 if phase == Phase::Select => ErrorKind::UnsupportedDevice,
@@ -122,7 +128,7 @@ impl Error {
             phase,
             status_word: Some(sw),
             reference,
-            retries_remaining: if reference.is_some() && sw.raw() & 0xfff0 == 0x63c0 {
+            retries_remaining: if pin_reference && sw.raw() & 0xfff0 == 0x63c0 {
                 Some((sw.raw() & 15) as u8)
             } else {
                 None
