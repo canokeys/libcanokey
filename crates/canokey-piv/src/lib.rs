@@ -48,6 +48,9 @@
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 mod access;
+/// SM2 agreement with explicitly pre-exchanged peer keys.
+pub mod sm2_agreement;
+pub use sm2_agreement::{agree_sm2, Sm2Agreement, Sm2AgreementInput, Sm2Role};
 /// Compact directory observations and per-entry diagnostics.
 pub mod directory;
 pub use directory::{read_metadata_directory, DirectoryEntry, DirectoryIssue, MetadataDirectory};

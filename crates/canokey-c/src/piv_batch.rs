@@ -37,6 +37,8 @@ pub struct CnkBatchRequest {
     pub user_id: *const u8,
     /// Identity byte length, otherwise zero.
     pub user_id_len: usize,
+    /// SM2 agreement descriptor for CNK_BATCH_AGREE_SM2; otherwise NULL.
+    pub sm2: *const CnkSm2Input,
 }
 /// Construct a Batch by copying all requests and nested inputs before returning.
 /// Management authentication must be an earlier explicit request for mutations.
@@ -151,6 +153,10 @@ pub unsafe extern "C" fn cnk_piv_batch_new(
                     slot: slot(r.reference)?,
                     ciphertext: data()?,
                 },
+                27 => piv::BatchRequest::AgreeSm2 {
+                    slot: slot(r.reference)?,
+                    input: piv_sm2::input(r.sm2)?,
+                },
                 19 => piv::BatchRequest::ReadMetadataDirectory,
                 20 => piv::BatchRequest::ReadContainerName(slot(r.reference)?),
                 21 => piv::BatchRequest::SetContainerName {
@@ -263,6 +269,7 @@ pub unsafe extern "C" fn cnk_operation_batch_item_kind(
             return ARG;
         };
         *out = match item {
+            piv::BatchItem::Sm2Agreement(_) => 14,
             piv::BatchItem::Directory(_) => 12,
             piv::BatchItem::ContainerName(_) => 13,
             piv::BatchItem::Unit => 2,
@@ -300,6 +307,7 @@ pub unsafe extern "C" fn cnk_operation_batch_item_copy_bytes(
             return ARG;
         };
         match item {
+            piv::BatchItem::Sm2Agreement(a) => copy(a.key.as_bytes(), buffer, len),
             piv::BatchItem::Directory(d) => copy(d.raw(), buffer, len),
             piv::BatchItem::ContainerName(n) => copy(n.as_utf16le(), buffer, len),
             piv::BatchItem::Bytes(b) => copy(b.as_bytes(), buffer, len),

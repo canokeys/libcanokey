@@ -135,6 +135,8 @@ pub enum Capability {
     RetryReset,
     /// Replacement of the complete algorithm configuration.
     AlgorithmConfigWrite,
+    /// SM2 key agreement with separate peer static and ephemeral points.
+    Sm2Agreement,
     /// On-device PIV attestation certificate generation.
     Attestation,
     /// Explicit reset after both PIN and PUK are blocked.
@@ -428,6 +430,7 @@ impl DeviceProfile {
             | Capability::KeyMoveDelete
             | Capability::RetryReset
             | Capability::AlgorithmConfigWrite
+            | Capability::Sm2Agreement
             | Capability::Attestation
             | Capability::PivReset => return self.firmware_range((3, 1, 0), (3, 1, 0)),
             _ => {}

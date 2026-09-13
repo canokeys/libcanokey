@@ -121,7 +121,11 @@ RSA decrypt returns a raw modulus-sized block without unpadding. ECDH checks
 uncompressed peer points using RustCrypto; X25519 requires 32 RFC 7748 bytes and
 rejects an all-zero result. ML-KEM-768 decapsulation requires 1088 ciphertext bytes
 and returns 32 secret bytes; implicit rejection does not authenticate the sender.
-No KDF is applied. SM2 agreement is a separate protocol, not generic ECDH.
+No KDF is applied. SM2 agreement is a separate protocol, not generic ECDH. `agree_sm2` takes role,
+peer static/ephemeral points, identities and key length up front; it returns an own
+public ephemeral point and a key derived by the firmware's SM2 KDF. The initiator
+reads policy first and rejects PIN-always because the two GA steps cannot preserve
+that authorization. Peer networking and key confirmation remain caller-owned.
 
 The compact directory uses a fixed five-byte header with a single-byte payload
 length, including values above 127 (not BER long-form). Version 1 has at most 24

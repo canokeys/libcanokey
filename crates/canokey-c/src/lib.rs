@@ -6,6 +6,8 @@
 //! library, accessed without concurrent mutation, and freed exactly once.
 //! A non-null versioned struct must contain at least its declared supported prefix.
 #![deny(missing_docs)]
+mod piv_sm2;
+pub use piv_sm2::*;
 mod piv_configuration;
 pub use piv_configuration::*;
 mod piv_batch;
@@ -73,6 +75,7 @@ pub struct CnkOperation {
     poisoned: bool,
 }
 enum Inner {
+    Sm2Agreement(Operation<piv::Sm2Agreement>),
     Directory(Operation<piv::MetadataDirectory>),
     ContainerName(Operation<piv::ContainerName>),
     Probe(Operation<DeviceProfile>),
@@ -90,6 +93,7 @@ enum Inner {
 macro_rules! dispatch {
     ($value:expr, $op:ident => $body:expr) => {
         match $value {
+            Inner::Sm2Agreement($op) => $body,
             Inner::Directory($op) => $body,
             Inner::ContainerName($op) => $body,
             Inner::Probe($op) => $body,
@@ -594,6 +598,10 @@ pub unsafe extern "C" fn cnk_operation_result_copy_bytes(
                 Ok(v) => copy(v.as_bytes(), buffer, len),
                 Err(_) => STATE,
             },
+            Inner::Sm2Agreement(p) => match p.result() {
+                Ok(a) => copy(a.key.as_bytes(), buffer, len),
+                Err(_) => STATE,
+            },
             Inner::Directory(p) => match p.result() {
                 Ok(d) => copy(d.raw(), buffer, len),
                 Err(_) => STATE,
@@ -827,6 +835,7 @@ pub unsafe extern "C" fn cnk_operation_result_kind(op: *const CnkOperation, out:
             Inner::Signature(_) => 9,
             Inner::AlgorithmConfig(_) => 10,
             Inner::Batch(_) => 11,
+            Inner::Sm2Agreement(_) => 14,
             Inner::Directory(_) => 12,
             Inner::ContainerName(_) => 13,
         };

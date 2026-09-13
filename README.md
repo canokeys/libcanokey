@@ -40,13 +40,13 @@ protocol state.
 - Classic RSA/ECDSA/SM2/Ed25519 signing, original signature encoding and DER/P1363
   conversion; explicit ML-DSA (empty context), randomized Ed25519 and SM2 full-message
   streaming signing, including empty messages; raw RSA decryption, P-256/P-384/P-521/secp256k1 ECDH, X25519 derivation
-  and ML-KEM-768 decapsulation. Hashing, padding and KDF remain caller responsibilities.
+  and ML-KEM-768 decapsulation; SM2 agreement with pre-exchanged peer keys. Hashing, padding and KDF remain caller responsibilities.
 - Explicit Batch requests under one SELECT, with completed results retained after
   a later failure; corresponding C factories and indexed result getters.
 
 Each operation checks its firmware/slot/algorithm evidence; an algorithm name alone
 is not a support promise. Use `sign_streaming` for ML-DSA and empty Ed25519 messages; the classic factory never changes modes implicitly.
-SM2 agreement uses a separate protocol and is not exposed as ECDH. See
+SM2 agreement has its own operation; initiators require PIN Never/Once and peer keys available before construction. See
 [plan](plan.md) for remaining PIV and applet work. No consumer has been integrated;
 compatibility is based on pinned source evidence and offline transcripts, without
 hardware/usbip validation.

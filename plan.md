@@ -8,8 +8,9 @@ repository. Consumer integration and upstream changes require a separate task.
 
 1. ML-DSA nonempty-context and prehash signing: pinned firmware hardcodes empty
    context and exposes no such modes. Requires new firmware evidence before enablement.
-2. SM2 key agreement: specify peer exchange, ephemeral state, cancellation and
-   application key confirmation within the caller-owned operation model.
+2. Interactive peer exchange between SM2 initiator steps and PIN-always initiators
+   need further protocol/API evidence. Current operations require peer keys upfront;
+   pinned firmware clears agreement state on VERIFY and consumes PIN-always at step 1.
 
 Extend Batch and the experimental C ABI alongside core operations. Acceptance:
 transcripts for SELECT/authentication/target ordering, chaining/continuation,

@@ -40,7 +40,7 @@ enum { CNK_ERROR_HAS_SW=1, CNK_ERROR_HAS_RETRIES=2 };
 enum { CNK_RESULT_PROFILE=1, CNK_RESULT_UNIT=2, CNK_RESULT_PIN_STATUS=3,
        CNK_RESULT_OBJECT=4, CNK_RESULT_CERTIFICATE=5, CNK_RESULT_MUTATION=6,
        CNK_RESULT_METADATA=7, CNK_RESULT_PUBLIC_KEY=8, CNK_RESULT_SIGNATURE=9,
-       CNK_RESULT_ALGORITHM_CONFIG=10, CNK_RESULT_BATCH=11, CNK_RESULT_DIRECTORY=12, CNK_RESULT_CONTAINER_NAME=13 };
+       CNK_RESULT_ALGORITHM_CONFIG=10, CNK_RESULT_BATCH=11, CNK_RESULT_DIRECTORY=12, CNK_RESULT_CONTAINER_NAME=13, CNK_RESULT_SM2_AGREEMENT=14 };
 enum { CNK_MANAGEMENT_TDES=1, CNK_MANAGEMENT_AES192=2 };
 enum { CNK_AUTH_EXTERNAL=1, CNK_AUTH_MUTUAL=2 };
 enum { CNK_MANAGEMENT_TOUCH_NEVER=0, CNK_MANAGEMENT_TOUCH_ALWAYS=1 };
@@ -103,6 +103,14 @@ typedef struct {
     uint32_t struct_size,presence_flags;
     uint8_t algorithm_id,pin_policy,touch_policy,origin,is_default,retries_total,retries_remaining,reserved;
 } cnk_metadata_v1;
+enum { CNK_SM2_INITIATOR=1, CNK_SM2_RESPONDER=2 };
+typedef struct {
+    uint32_t struct_size,role,key_len;
+    cnk_bytes_t peer_static,peer_ephemeral,user_id,peer_id;
+} cnk_sm2_input_v1;
+cnk_status_t cnk_piv_agree_sm2_new(const cnk_profile_t *,uint32_t,const cnk_sm2_input_v1 *,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_operation_sm2_ephemeral_copy(const cnk_operation_t *,uint8_t *,size_t *);
+cnk_status_t cnk_operation_batch_item_sm2_ephemeral_copy(const cnk_operation_t *,size_t,uint8_t *,size_t *);
 cnk_status_t cnk_piv_generate_key_new(const cnk_profile_t *,const cnk_piv_key_parameters_v1 *,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 /* RSA: five components p/q/dP/dQ/qInv, implicit e=65537. Others: one scalar/seed. */
 cnk_status_t cnk_piv_import_key_new(const cnk_profile_t *,const cnk_piv_key_parameters_v1 *,const cnk_bytes_t *,size_t count,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
@@ -159,7 +167,7 @@ enum { CNK_BATCH_VERIFY_PIN=1, CNK_BATCH_AUTHENTICATE_MANAGEMENT=2, CNK_BATCH_LO
        CNK_BATCH_DECAPSULATE=17, CNK_BATCH_SIGN_STREAMING=18, CNK_BATCH_READ_DIRECTORY=19,
        CNK_BATCH_READ_CONTAINER_NAME=20, CNK_BATCH_SET_CONTAINER_NAME=21,
        CNK_BATCH_MOVE_KEY=22, CNK_BATCH_DELETE_KEY=23, CNK_BATCH_RESET_PIN_PUK_RETRIES=24,
-       CNK_BATCH_SET_ALGORITHM_CONFIG=25, CNK_BATCH_ATTEST=26 };
+       CNK_BATCH_SET_ALGORITHM_CONFIG=25, CNK_BATCH_ATTEST=26, CNK_BATCH_AGREE_SM2=27 };
 /* Only fields relevant to kind are read. Unused pointers/lengths should be NULL/0.
  * All nested ranges are copied. No SELECT/probe/nested Batch requests exist. */
 typedef struct {
@@ -174,6 +182,7 @@ typedef struct {
     size_t component_count;
     const uint8_t *user_id;
     size_t user_id_len;
+    const cnk_sm2_input_v1 *sm2;
 } cnk_piv_batch_request_v1;
 typedef struct {
     uint32_t struct_size,completed_count,has_failed_index,failed_index;

@@ -112,6 +112,14 @@ No firmware is linked or built as a dependency.
   rewrites default credentials. F6 moves names with keys but leaves certificates.
   These factories are enabled for the pinned 3.1.0 evidence only.
 
+- `piv_general_authenticate_sm2_dispatch` uses an empty response request and
+  85 containing peer static 86 / ephemeral 87, optional identity 88, and key-length
+  89. Initiator starts with 82 plus optional own-ID 80, then completes without 80;
+  responder returns both ephemeral 82 and derived key 85. Frames must not chain.
+  `piv_security_status_check` consumes PIN-always at each GA, while any non-GA
+  command clears pending agreement. Host initiators therefore preflight metadata
+  and permit only explicit Never/Once policies; they do not re-VERIFY mid-agreement.
+
 These sources establish encoding and version rules, not hardware interoperability.
 Newer, development and unrecognized versions remain Unknown for these mutations.
 

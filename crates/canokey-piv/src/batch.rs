@@ -8,6 +8,13 @@ pub const MAX_BATCH_REQUESTS: usize = 128;
 /// Authenticate explicitly before mutations; repeat VERIFY before PIN-always uses.
 #[derive(Debug)]
 pub enum BatchRequest {
+    /// SM2 agreement with pre-exchanged peer inputs.
+    AgreeSm2 {
+        /// Key-management/retired slot.
+        slot: Slot,
+        /// Owned peer keys, role and identities.
+        input: Sm2AgreementInput,
+    },
     /// Read the compact key/certificate directory.
     ReadMetadataDirectory,
     /// Read a slot's UTF-16 container name.
@@ -131,6 +138,7 @@ pub enum BatchRequest {
 impl BatchRequest {
     fn input_len(&self) -> usize {
         match self {
+            Self::AgreeSm2 { input, .. } => input.input_len(),
             Self::SetContainerName { name, .. } => name.as_utf16le().len(),
             Self::SetAlgorithmConfig(config) => config.raw().len(),
             Self::VerifyPin(pin) => pin.0.len(),
@@ -156,6 +164,8 @@ impl BatchRequest {
 /// One completed request's owned result; order matches the request list.
 #[derive(Debug)]
 pub enum BatchItem {
+    /// SM2 derived key and own public ephemeral point.
+    Sm2Agreement(Sm2Agreement),
     /// Compact directory observation, including entry diagnostics.
     Directory(MetadataDirectory),
     /// Validated per-slot container name.
@@ -180,6 +190,7 @@ pub enum BatchItem {
 impl BatchItem {
     fn byte_len(&self) -> usize {
         match self {
+            Self::Sm2Agreement(a) => a.key.len() + a.ephemeral_public.len(),
             Self::Directory(d) => d.raw().len(),
             Self::ContainerName(n) => n.as_utf16le().len(),
             Self::Unit | Self::Mutation(_) => 0,
@@ -346,6 +357,10 @@ pub fn batch(
             return Err(Error::new(ErrorKind::InvalidArgument));
         }
         let machine = match request {
+            BatchRequest::AgreeSm2 { slot, input } => mapped(
+                sm2_agreement::prepare_agreement(profile, slot, input, options)?,
+                BatchItem::Sm2Agreement,
+            ),
             BatchRequest::ReadMetadataDirectory => mapped(
                 directory::prepare_directory(profile, options)?,
                 BatchItem::Directory,
