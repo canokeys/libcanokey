@@ -10,15 +10,22 @@ use compatibility::{
     AlgorithmConfig, Capability, CompatibilityWarning, DeviceObservations, PivApplicationVersion,
     Support,
 };
+/// Read-only discovery scope. Both modes select Admin and change applet state.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ProbeMode {
+    /// Read actual firmware, optional model and serial only; PIV remains unobserved.
     Minimal,
+    /// Also select PIV, read its version and probe algorithm configuration when known safe.
+    /// This is the default for constructing subsequent PIV operations.
     #[default]
     Piv,
 }
+/// Owned probe scope and channel/resource limits.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ProbeOptions {
+    /// Applet discovery scope; defaults to Piv.
     pub mode: ProbeMode,
+    /// Limits copied into the constructed operation.
     pub operation: OperationOptions,
 }
 struct Probe {
@@ -26,6 +33,20 @@ struct Probe {
     mode: ProbeMode,
     observations: DeviceObservations,
 }
+/// Construct a read-only probe yielding an immutable [`DeviceProfile`].
+///
+/// No connection or input reference is retained. The caller drives all APDUs
+/// using [`Operation::start`] and [`Operation::advance`]. Probe changes applets,
+/// so never insert it between another operation's authentication and target command.
+/// It does not try credentials, write configuration, or establish a login.
+///
+/// # Errors
+/// Construction rejects invalid operation options. During execution, required
+/// command failures and malformed responses are errors. Recognized optional
+/// unsupported/authentication-required statuses become profile warnings; other
+/// failures propagate. Unknown firmware text is preserved rather than rejected.
+///
+/// See the [crate example](crate) for a complete offline drive loop.
 pub fn probe_device(options: ProbeOptions) -> Result<Operation<DeviceProfile>, Error> {
     Operation::from_machine(
         Probe {

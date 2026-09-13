@@ -1,5 +1,53 @@
 //! PIV selection, PIN/PUK, object and certificate reads.
+//! # High-level operations
+//!
+//! Factories such as [`verify_pin`], [`read_object`] and [`read_certificate`] return
+//! owned [`Operation`] values. Each selects PIV and performs explicit authentication
+//! before its target command; the caller must hold the connection exclusively until
+//! completion/failure. Constructors copy required profile configuration and own
+//! inputs, so the source profile may be dropped immediately. No transport, login
+//! cache, or global device state is retained.
+//!
+//! # Errors
+//!
+//! All high-level factories require an observed PIV capability: Unsupported and
+//! Unknown produce distinct errors. Invalid budgets or unencodable known commands
+//! fail at construction. Card status, response parsing and exhausted conversation
+//! budgets fail during start/advance and are retained in the operation. Authentication
+//! failures retain credential reference and any reported retries. Never automatically
+//! retry a credential submission or mutation.
+//!
+//! # Example: explicit PIN verification
+//!
+//! ```
+//! use canokey_compat::{DeviceObservations, DeviceProfile, PivApplicationVersion};
+//! use canokey_piv::{verify_pin, Pin};
+//! use canokey_protocol::{ErrorKind, Step};
+//! // Synthetic observations for an offline transcript, not a hardware attestation.
+//! let mut observed = DeviceObservations::new(b"3.1.0".to_vec());
+//! observed.piv_version = Some(PivApplicationVersion([5, 7, 0]));
+//! let profile = DeviceProfile::from_observations(observed)?;
+//! let mut op = verify_pin(&profile, Pin::from_bytes(b"123456")?, Default::default())?;
+//! drop(profile);
+//! assert_eq!(op.start()?, Step::Exchange);
+//! assert_eq!(op.command()?.as_bytes(), &[0, 0xa4, 4, 0, 5, 0xa0, 0, 0, 3, 8]);
+//! op.advance(&[0x90, 0])?;
+//! assert_eq!(op.command()?.as_bytes(),
+//!     &[0, 0x20, 0, 0x80, 8, b'1', b'2', b'3', b'4', b'5', b'6', 0xff, 0xff]);
+//! let error = op.advance(&[0x63, 0xc2]).unwrap_err();
+//! assert_eq!(error.kind, ErrorKind::AuthenticationFailed);
+//! assert_eq!(error.retries_remaining, Some(2));
+//! // Report the failure; do not retry or try a default PIN.
+//! # Ok::<(), canokey_protocol::Error>(())
+//! ```
+//!
+//! The [`command`] module is lower-level: its builders do not SELECT or authenticate
+//! on behalf of the caller. Management authentication, writes, metadata, keys,
+//! private operations and Batch are not yet implemented.
+//!
+#![deny(missing_docs)]
 #![forbid(unsafe_code)]
+/// Certificate container parsing and bounded gzip decoding.
 pub mod certificate;
 pub use canokey_compat::Algorithm;
 use canokey_compat::{Capability, DeviceProfile};
@@ -14,8 +62,11 @@ use canokey_protocol::{
 pub use certificate::Certificate;
 use std::collections::VecDeque;
 
+/// Owned PIV user PIN, redacted in Debug and zeroized on drop.
+/// Cloning creates another protected copy with its own lifetime.
 #[derive(Clone, Debug)]
 pub struct Pin(SecretBytes);
+/// Owned PIV unblocking key, redacted in Debug and zeroized on drop.
 #[derive(Clone, Debug)]
 pub struct Puk(SecretBytes);
 fn secret(bytes: &[u8]) -> Result<SecretBytes, Error> {
@@ -25,31 +76,56 @@ fn secret(bytes: &[u8]) -> Result<SecretBytes, Error> {
     Ok(SecretBytes::new(bytes.to_vec()))
 }
 impl Pin {
+    /// Validate and copy raw credential bytes without string conversion.
+    ///
+    /// # Errors
+    /// Credential constructors return [`ErrorKind::InvalidPin`] unless length is
+    /// 6..=8 bytes and no byte is FF. Padding is applied only when encoding a command.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
         Ok(Self(secret(bytes)?))
     }
 }
 impl Puk {
+    /// Validate and copy raw credential bytes without string conversion.
+    ///
+    /// # Errors
+    /// Credential constructors return [`ErrorKind::InvalidPin`] unless length is
+    /// 6..=8 bytes and no byte is FF. Padding is applied only when encoding a command.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
         Ok(Self(secret(bytes)?))
     }
 }
+/// Authentication to perform after SELECT within one high-level operation.
+/// This is an owned input, not a persistent authorization token.
 #[derive(Clone, Debug)]
 pub enum Access {
+    /// Perform no explicit authentication; the card may still reject access.
     None,
+    /// Verify the supplied PIN immediately before the target command.
     Pin(Pin),
 }
+/// PIV key slot, excluding the 9B management-key reference.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Slot {
+    /// Authentication key, reference 9A.
     Authentication,
+    /// Digital-signature key, reference 9C.
     Signature,
+    /// Key-management key, reference 9D.
     KeyManagement,
+    /// Card-authentication key, reference 9E.
     CardAuthentication,
+    /// Retired key-management slot, reference 82..95.
     Retired(RetiredSlot),
 }
+/// Checked retired-slot index 1..=20. Valid syntax does not prove card support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RetiredSlot(u8);
 impl RetiredSlot {
+    /// Construct a retired slot from its one-based index, not its wire reference.
+    ///
+    /// # Errors
+    /// Returns [`ErrorKind::InvalidArgument`] outside 1..=20.
     pub fn new(index: u8) -> Result<Self, Error> {
         if (1..=20).contains(&index) {
             Ok(Self(index))
@@ -59,6 +135,7 @@ impl RetiredSlot {
     }
 }
 impl Slot {
+    /// Return the PIV key reference byte; it is not an object identifier.
     pub fn reference(self) -> u8 {
         match self {
             Self::Authentication => 0x9a,
@@ -69,12 +146,20 @@ impl Slot {
         }
     }
 }
+/// Checked complete BER object tag (for example, 5F C1 05 or 7E).
+/// Use [`Self::certificate`] for library-owned slot-to-certificate mapping.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ObjectId(Tag);
 impl ObjectId {
+    /// Parse and copy exactly one complete BER tag, with no length/value bytes.
+    ///
+    /// # Errors
+    /// Returns InvalidResponse for malformed, truncated, oversized or trailing
+    /// tag bytes. Syntactically valid IDs are not guaranteed to exist on the card.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
         Ok(Self(Tag::from_bytes(bytes)?))
     }
+    /// Map a key slot to its certificate object ID, without probing availability.
     pub fn certificate(slot: Slot) -> Self {
         let last = match slot {
             Slot::Authentication => 5,
@@ -86,30 +171,44 @@ impl ObjectId {
         // All constructed tags are valid BER tags.
         Self(Tag::from_bytes(&[0x5f, 0xc1, last]).expect("fixed PIV tag"))
     }
+    /// Copy the complete BER tag encoding, with no length or value bytes.
     pub fn as_bytes(self) -> Vec<u8> {
         self.0.to_bytes()
     }
 }
+/// Owned raw successful SELECT response data; no login guarantee.
 #[derive(Debug)]
 pub struct SelectionInfo {
+    /// SELECT response bytes excluding status words, retained in a protected buffer.
     pub data: SecretBytes,
 }
+/// Observation from empty VERIFY. Unknown fields are never synthesized.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PinStatus {
+    /// Some(true) for 9000, Some(false) for retry/blocked statuses.
     pub verified: Option<bool>,
+    /// Remaining attempts from 63Cx or zero for blocked; unknown after 9000.
     pub retries_remaining: Option<u8>,
+    /// Total configured attempts; currently not reported by this query.
     pub retries_total: Option<u8>,
+    /// Whether the card returned the blocked status 6983.
     pub blocked: bool,
 }
+/// Whether a successful mutation invalidates the capability snapshot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProfileEffect {
+    /// Existing profile remains applicable; application object caches may still change.
     Unchanged,
+    /// Caller must discard and rebuild its profile before subsequent operations.
     ReprobeRequired,
 }
+/// Successful mutation outcome, without claiming application caches were refreshed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MutationResult {
+    /// Profile invalidation decision; PIN/PUK changes currently return Unchanged.
     pub profile_effect: ProfileEffect,
 }
+/// Owned normalized object value with zeroization; excludes the outer container.
 pub type ObjectData = SecretBytes;
 fn unchanged() -> MutationResult {
     MutationResult {
@@ -130,12 +229,23 @@ fn require_auth(response: &ResponseData, reference: SecretReference) -> Result<(
     }
 }
 
+/// Raw PIV logical-command builders.
+///
+/// Except for `select`, these require PIV to be selected already. They do not
+/// perform authentication, status mapping, or capability checks. Prefer the
+/// crate-level factories for complete standalone operations.
 pub mod command {
     use super::*;
     use canokey_protocol::{ApduHeader, ExpectedLength};
     fn cmd(ins: u8, p1: u8, p2: u8, data: Vec<u8>, le: ExpectedLength) -> LogicalCommand {
         LogicalCommand::new(ApduHeader::new(0, ins, p1, p2), data, le)
     }
+    /// Build SELECT PIV. This can invalidate card authentication state.
+    /// Construct a standalone SELECT PIV operation returning raw selection data.
+    ///
+    /// # Errors
+    /// See the [crate-level errors](crate#errors). A missing applet fails during
+    /// execution; successful selection is not proof of retained authentication.
     pub fn select() -> LogicalCommand {
         cmd(0xa4, 4, 0, vec![0xa0, 0, 0, 3, 8], ExpectedLength::Absent)
     }
@@ -144,12 +254,15 @@ pub mod command {
         c.correct_le = true;
         c
     }
+    /// Build GET VERSION for the PIV application, not actual CanoKey firmware.
     pub fn version() -> LogicalCommand {
         read(0xfd, 0, 0, vec![])
     }
+    /// Build algorithm-configuration discovery; the caller must establish probe safety.
     pub fn algorithm_config() -> LogicalCommand {
         read(0xee, 1, 0, vec![])
     }
+    /// Build empty VERIFY. Interpret 63Cx as status data, not a submitted-PIN failure.
     pub fn pin_status() -> LogicalCommand {
         read(0x20, 0, 0x80, vec![])
     }
@@ -159,9 +272,19 @@ pub mod command {
         data.resize(8, 0xff);
         data
     }
+    /// Copy and FF-pad a PIN to eight bytes for VERIFY reference 80.
+    /// Construct SELECT followed by explicit PIN verification.
+    ///
+    /// Success returns `()` but creates no authorization token for later SELECTs.
+    /// The operation owns the PIN; it is never retried after credential failure.
+    ///
+    /// # Errors
+    /// See the [crate-level errors](crate#errors). During execution, 63Cx becomes
+    /// AuthenticationFailed with retries and PIN reference; 6983 becomes PinBlocked.
     pub fn verify_pin(pin: &Pin) -> LogicalCommand {
         cmd(0x20, 0, 0x80, padded(&pin.0), ExpectedLength::Absent)
     }
+    /// Build VERIFY with P1 FF to clear PIV PIN verification state.
     pub fn logout() -> LogicalCommand {
         cmd(0x20, 0xff, 0x80, vec![], ExpectedLength::Exact(256))
     }
@@ -178,6 +301,7 @@ pub mod command {
         data.resize(16, 0xff);
         cmd(ins, 0, reference, data, ExpectedLength::Absent)
     }
+    /// Build GET DATA with a complete 5C object identifier field.
     pub fn get_data(id: ObjectId) -> LogicalCommand {
         let tag = id.as_bytes();
         let mut data = vec![0x5c, tag.len() as u8];
@@ -253,6 +377,11 @@ fn selected(command: LogicalCommand) -> Vec<Request> {
         request(command, Phase::Command, None),
     ]
 }
+/// Construct a standalone SELECT PIV operation returning raw selection data.
+///
+/// # Errors
+/// See the [crate-level errors](crate#errors). A missing applet fails during
+/// execution; successful selection is not proof of retained authentication.
 pub fn select(
     profile: &DeviceProfile,
     options: OperationOptions,
@@ -267,6 +396,14 @@ pub fn select(
         },
     )
 }
+/// Construct SELECT followed by explicit PIN verification.
+///
+/// Success returns `()` but creates no authorization token for later SELECTs.
+/// The operation owns the PIN; it is never retried after credential failure.
+///
+/// # Errors
+/// See the [crate-level errors](crate#errors). During execution, 63Cx becomes
+/// AuthenticationFailed with retries and PIN reference; 6983 becomes PinBlocked.
 pub fn verify_pin(
     profile: &DeviceProfile,
     pin: Pin,
@@ -277,6 +414,14 @@ pub fn verify_pin(
         require_auth(&r, SecretReference::Pin)
     })
 }
+/// Construct SELECT followed by an empty VERIFY status query.
+///
+/// This performs no credential submission and does not discover total attempts.
+/// The initial SELECT may clear prior PIN verification.
+///
+/// # Errors
+/// See the [crate-level errors](crate#errors). Nonempty response data is invalid;
+/// 9000, 63Cx and 6983 are typed status results, while other statuses are errors.
 pub fn get_pin_status(
     profile: &DeviceProfile,
     options: OperationOptions,
@@ -309,12 +454,26 @@ pub fn get_pin_status(
         }
     })
 }
+/// Construct SELECT followed by explicit PIV PIN logout.
+///
+/// This does not close the application connection. Dropping an operation alone
+/// does not run this command.
+///
+/// # Errors
+/// See the [crate-level errors](crate#errors); card failures propagate.
 pub fn logout(profile: &DeviceProfile, options: OperationOptions) -> Result<Operation<()>, Error> {
     require(profile)?;
     make(selected(command::logout()), options, |r| {
         r.ensure_success(Phase::Authentication)
     })
 }
+/// Construct SELECT followed by CHANGE REFERENCE DATA for the user PIN.
+///
+/// Owns both PINs. A successful result has Unchanged profile effect. This mutates
+/// card state; an I/O failure may leave the outcome uncertain and must not replay.
+///
+/// # Errors
+/// See the [crate-level errors](crate#errors). Credential failures identify Pin.
 pub fn change_pin(
     profile: &DeviceProfile,
     old: Pin,
@@ -331,6 +490,12 @@ pub fn change_pin(
         options,
     )
 }
+/// Construct SELECT followed by CHANGE REFERENCE DATA for the PUK.
+///
+/// Owns both PUKs. This mutates card state; do not retry after uncertain I/O.
+///
+/// # Errors
+/// See the [crate-level errors](crate#errors). Credential failures identify Puk.
 pub fn change_puk(
     profile: &DeviceProfile,
     old: Puk,
@@ -347,6 +512,12 @@ pub fn change_puk(
         options,
     )
 }
+/// Construct SELECT followed by RESET RETRY COUNTER with PUK and replacement PIN.
+///
+/// Owns both credentials. This mutates card state; do not retry after uncertain I/O.
+///
+/// # Errors
+/// See the [crate-level errors](crate#errors). Credential failures identify Puk.
 pub fn unblock_pin(
     profile: &DeviceProfile,
     puk: Puk,
@@ -382,6 +553,15 @@ fn change_secret(
         },
     )
 }
+/// Construct SELECT, optional PIN verification, and GET DATA.
+///
+/// Return the outer 53 value (7E for discovery), with narrow legacy CCC/CHUID
+/// normalization from the profile. No extra SELECT occurs after authentication.
+/// The result remains protected by [`SecretBytes`].
+///
+/// # Errors
+/// See the [crate-level errors](crate#errors). Missing objects return NotFound;
+/// malformed containers or extra fields do not become empty successful reads.
 pub fn read_object(
     profile: &DeviceProfile,
     id: ObjectId,
@@ -393,6 +573,15 @@ pub fn read_object(
 
 /// Read and unwrap a certificate, with bounded gzip decompression.
 /// This does not validate X.509 syntax, signatures, or trust.
+/// The operation selects PIV, optionally verifies PIN, then reads the mapped
+/// certificate object. Both container and decoded output use the cumulative
+/// response-byte budget. The result owns its bytes independently of the operation.
+///
+/// # Errors
+/// See the [crate-level errors](crate#errors). NotFound remains a card-status
+/// error. Malformed containers/gzip fail; unsupported information flags return
+/// UnsupportedProtocolVersion; oversized decoded payloads return LimitExceeded.
+/// See [`Certificate::from_object`] for the accepted container format.
 pub fn read_certificate(
     profile: &DeviceProfile,
     slot: Slot,

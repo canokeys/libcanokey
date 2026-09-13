@@ -12,15 +12,38 @@ pub struct Certificate {
     compressed: bool,
 }
 impl Certificate {
+    /// Borrow the unwrapped/decompressed certificate payload.
+    /// The accessor name describes its expected format; no X.509 validation occurred.
     pub fn der(&self) -> &[u8] {
         self.der.as_bytes()
     }
+    /// Whether the original information field selected gzip compression.
     pub fn was_compressed(&self) -> bool {
         self.compressed
     }
     /// Parse the value of a PIV certificate object (without its outer 53 tag).
     /// Both encoded input and decompressed output are limited to `max_bytes`.
     /// Missing information means uncompressed; unknown information is rejected.
+    /// Exactly one nonempty 70 field is required. A single one-byte 71 (00/01)
+    /// and one empty FE field are optional. Other fields and duplicates fail.
+    /// The returned value owns a copy; no input borrow is retained.
+    ///
+    /// # Errors
+    /// Returns InvalidResponse for malformed containers, invalid/truncated gzip,
+    /// failed CRC/size validation, empty output or trailing gzip members/data.
+    /// Unsupported information bytes return UnsupportedProtocolVersion.
+    /// Encoded input or decoded output exceeding `max_bytes` returns LimitExceeded.
+    ///
+    /// # Examples
+    /// ```
+    /// use canokey_piv::Certificate;
+    /// // A framing fixture, not a valid X.509 certificate.
+    /// let certificate = Certificate::from_object(
+    ///     &[0x70, 2, 0x30, 0, 0x71, 1, 0, 0xfe, 0], 1024)?;
+    /// assert_eq!(certificate.der(), &[0x30, 0]);
+    /// assert!(!certificate.was_compressed());
+    /// # Ok::<(), canokey_protocol::Error>(())
+    /// ```
     pub fn from_object(data: &[u8], max_bytes: usize) -> Result<Self, Error> {
         let invalid = || Error::new(ErrorKind::InvalidResponse).at(Phase::Parsing);
         let limit = || Error::new(ErrorKind::LimitExceeded).at(Phase::Parsing);

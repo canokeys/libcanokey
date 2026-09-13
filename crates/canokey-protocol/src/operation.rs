@@ -1,13 +1,23 @@
+//! Owned operations and bounded logical-command conversations.
+//!
+//! Applications normally construct operations through applet factories. Use
+//! [`conversation`](crate::operation::conversation) only when deliberately working at the raw command/status layer.
 use crate::{
     ApduEncoding, ApduHeader, CommandApdu, Error, ErrorKind, ExpectedLength, Phase, ResponseApdu,
     SecretBytes, StatusWord,
 };
 use std::collections::VecDeque;
 
+/// Caller-reported limits for a raw transport exchange.
+/// Defaults to short APDUs: 261 command bytes and 258 response bytes.
 #[derive(Clone, Copy, Debug)]
 pub struct ExchangeOptions {
+    /// Maximum complete command size, including header and Lc/Le.
     pub max_command_bytes: usize,
+    /// Maximum complete response size, including SW1/SW2.
     pub max_response_bytes: usize,
+    /// Permit extended encoding when the logical command also permits it.
+    /// This does not discover or guarantee card support.
     pub allow_extended: bool,
 }
 impl Default for ExchangeOptions {
@@ -19,10 +29,17 @@ impl Default for ExchangeOptions {
         }
     }
 }
+/// Budgets applied by the operation; not claims about card storage capacity.
 #[derive(Clone, Copy, Debug)]
 pub struct OperationLimits {
+    /// Sum of response-data bytes across all exchanges, excluding SW (default 1 MiB).
+    /// Applet parsers may reuse this as their decoded-output limit.
     pub max_total_response_bytes: usize,
+    /// Maximum number of physical commands exposed, including retries/continuations
+    /// (default 4096). Reading the same command again does not consume a count.
     pub max_exchanges: usize,
+    /// Maximum data length of each logical command before segmentation
+    /// (default 1 MiB); not an aggregate across a multi-command operation.
     pub max_input_bytes: usize,
 }
 impl Default for OperationLimits {
@@ -34,12 +51,20 @@ impl Default for OperationLimits {
         }
     }
 }
+/// Owned channel constraints and resource budgets; default values are bounded.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct OperationOptions {
+    /// Limits for complete physical APDUs.
     pub exchange: ExchangeOptions,
+    /// Logical-command input, cumulative response, and exchange budgets.
     pub limits: OperationLimits,
 }
 impl OperationOptions {
+    /// Validate budgets and return the unchanged options.
+    ///
+    /// # Errors
+    /// Returns [`ErrorKind::InvalidArgument`] for command limits below five bytes,
+    /// response limits below three bytes, or any zero operation budget.
     pub fn validate(self) -> Result<Self, Error> {
         if self.exchange.max_command_bytes < 5
             || self.exchange.max_response_bytes < 3
@@ -52,18 +77,28 @@ impl OperationOptions {
         Ok(self)
     }
 }
+/// The caller's next action after a successful start or advance.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Step {
+    /// Read `command()`, exchange it once, then call `advance()` with data plus SW.
     Exchange,
+    /// Read or take the completed typed result; no command remains pending.
     Done,
 }
+/// Local lifecycle state, independent of card login or connection state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OperationState {
+    /// Constructed but not started.
     Created,
+    /// One physical command is available and awaits a complete response.
     AwaitingResponse,
+    /// A typed result is available; working protocol state has been released.
     Completed,
+    /// Protocol execution failed; the stored error is available.
     Failed,
+    /// Active working state was discarded locally without performing I/O.
     Cancelled,
+    /// The result has been moved out and cannot be read or taken again.
     ResultTaken,
 }
 
@@ -71,20 +106,38 @@ pub enum OperationState {
 /// not approximated by an ISO GET RESPONSE loop.
 #[derive(Clone, Copy, Debug)]
 pub enum Continuation {
-    Iso7816 { cla: u8 },
+    /// Follow 61xx with GET RESPONSE using the specified class byte.
+    Iso7816 {
+        /// Class byte for generated GET RESPONSE commands.
+        cla: u8,
+    },
+    /// Return the final raw status without performing continuation.
     None,
 }
+/// Owned semantic command before physical encoding, splitting, or continuation.
+/// Use applet builders when available so authentication and policy remain correct.
 #[derive(Clone, Debug)]
 pub struct LogicalCommand {
+    /// Header used for the initial command and its chained fragments.
     pub header: ApduHeader,
+    /// Owned command data, wiped when no longer needed.
     pub data: SecretBytes,
+    /// Requested final response-data length.
     pub le: ExpectedLength,
+    /// Permit short command chaining when one physical command is insufficient.
     pub allow_chaining: bool,
+    /// Permit extended encoding when the exchange options also permit it.
+    /// This does not discover or guarantee card support.
     pub allow_extended: bool,
+    /// Allow one 6Cxx Le correction per physical command. Enable only when safe.
     pub correct_le: bool,
+    /// Continuation policy; ISO GET RESPONSE with CLA 0 by default.
     pub continuation: Continuation,
 }
 impl LogicalCommand {
+    /// Take ownership of command data with conservative encoding/retry defaults.
+    /// Chaining, extended encoding and Le correction start disabled; ISO continuation
+    /// uses CLA 0. Validation occurs when constructing a conversation.
     pub fn new(header: ApduHeader, data: Vec<u8>, le: ExpectedLength) -> Self {
         Self {
             header,
@@ -97,12 +150,21 @@ impl LogicalCommand {
         }
     }
 }
+/// Owned reassembled response with its final raw status.
+/// A successful low-level conversation can still contain a non-9000 status.
 #[derive(Debug)]
 pub struct ResponseData {
+    /// Reassembled response data without status words, wiped on drop.
     pub data: SecretBytes,
+    /// Final status after any permitted continuation.
     pub status: StatusWord,
 }
 impl ResponseData {
+    /// Require 9000, mapping any other status with the supplied phase and no
+    /// secret reference. Authentication callers should use credential-aware mapping.
+    ///
+    /// # Errors
+    /// Returns a status-derived [`Error`] retaining the raw status.
     pub fn ensure_success(&self, phase: Phase) -> Result<(), Error> {
         if self.status.is_success() {
             Ok(())
@@ -294,6 +356,29 @@ impl ConversationState {
 }
 
 /// An owned protocol operation. All getters are local and never send commands.
+///
+/// Applet factories copy required profile configuration and own their inputs;
+/// there is no caller lifetime, connection handle, or mutable global registry.
+/// Hold one exclusive application connection lease across start and every advance.
+/// Drop releases memory only, including on application transport failure.
+///
+/// # Examples
+/// ```
+/// use canokey_protocol::{ApduHeader, ExpectedLength, OperationState, Step};
+/// use canokey_protocol::operation::{conversation, LogicalCommand};
+/// let command = LogicalCommand::new(ApduHeader::new(0, 0xca, 0, 0),
+///     vec![], ExpectedLength::Exact(256));
+/// let mut op = conversation(command, Default::default())?;
+/// assert_eq!(op.start()?, Step::Exchange);
+/// assert_eq!(op.command()?.as_bytes(), &[0, 0xca, 0, 0, 0]);
+/// // Offline response fixture; real applications supply their raw I/O result.
+/// assert_eq!(op.advance(&[0x42, 0x90, 0])?, Step::Done);
+/// let response = op.take_result()?;
+/// assert_eq!(op.state(), OperationState::ResultTaken);
+/// drop(op);
+/// assert_eq!(response.data.as_bytes(), &[0x42]);
+/// # Ok::<(), canokey_protocol::Error>(())
+/// ```
 pub struct Operation<T> {
     machine: Option<Box<dyn Machine<T>>>,
     conversation: Option<ConversationState>,
@@ -328,12 +413,20 @@ impl<T> Operation<T> {
             response_bytes: 0,
         })
     }
+    /// Inspect the local lifecycle without advancing execution.
     pub fn state(&self) -> OperationState {
         self.state
     }
+    /// Borrow the stored protocol failure, or `None` before any failure.
+    /// Invalid-state getter/drive calls do not overwrite this error.
     pub fn error(&self) -> Option<&Error> {
         self.error.as_ref()
     }
+    /// Borrow the pending complete physical APDU. Repeated reads never resend it.
+    ///
+    /// # Errors
+    /// Returns [`ErrorKind::OperationStateError`] outside AwaitingResponse.
+    /// The borrow cannot outlive the next mutable call to this operation.
     pub fn command(&self) -> Result<&CommandApdu, Error> {
         if self.state != OperationState::AwaitingResponse {
             return Err(state_error());
@@ -343,12 +436,22 @@ impl<T> Operation<T> {
             .map(|c| &c.current)
             .ok_or_else(state_error)
     }
+    /// Borrow the completed typed result without card access.
+    ///
+    /// # Errors
+    /// Returns [`ErrorKind::OperationStateError`] unless the state is Completed.
     pub fn result(&self) -> Result<&T, Error> {
         if self.state != OperationState::Completed {
             return Err(state_error());
         }
         self.output.as_ref().ok_or_else(state_error)
     }
+    /// Move the result into caller ownership and enter ResultTaken.
+    /// The result can outlive this operation.
+    ///
+    /// # Errors
+    /// Returns [`ErrorKind::OperationStateError`] unless the state is Completed,
+    /// including on any second attempt.
     pub fn take_result(&mut self) -> Result<T, Error> {
         if self.state != OperationState::Completed {
             return Err(state_error());
@@ -357,6 +460,9 @@ impl<T> Operation<T> {
         self.state = OperationState::ResultTaken;
         Ok(value)
     }
+    /// Discard working data from Created/AwaitingResponse and enter Cancelled.
+    /// Other states are unchanged. Does not cancel transport I/O, send logout, or
+    /// roll back card effects; drain or isolate pending I/O before connection reuse.
     pub fn cancel(&mut self) {
         if matches!(
             self.state,
@@ -367,6 +473,11 @@ impl<T> Operation<T> {
             self.state = OperationState::Cancelled;
         }
     }
+    /// Start a Created operation, exposing its first command or completing locally.
+    ///
+    /// # Errors
+    /// Returns [`ErrorKind::OperationStateError`] in any other state, without changing
+    /// it. Construction/encoding/machine errors enter Failed and are retained.
     pub fn start(&mut self) -> Result<Step, Error> {
         if self.state != OperationState::Created {
             return Err(state_error());
@@ -374,6 +485,14 @@ impl<T> Operation<T> {
         let result = self.drive(None);
         self.record(result)
     }
+    /// Consume one complete response (data followed by SW1/SW2) to the pending command.
+    /// Input is borrowed only during this call. Do not supply transport errors or
+    /// responses already processed by another continuation loop.
+    ///
+    /// # Errors
+    /// Outside AwaitingResponse, returns [`ErrorKind::OperationStateError`] unchanged.
+    /// Malformed responses, exhausted limits, conversation violations and applet
+    /// failures enter Failed, retain the error and release working state.
     pub fn advance(&mut self, bytes: &[u8]) -> Result<Step, Error> {
         if self.state != OperationState::AwaitingResponse {
             return Err(state_error());
@@ -460,7 +579,15 @@ impl Machine<ResponseData> for SingleCommand {
         }
     }
 }
-/// A low-level conversation returns the final status without applet-specific mapping.
+/// Construct a low-level operation that returns the final raw status.
+///
+/// Unlike applet factories, this does not SELECT, authenticate, or turn a final
+/// non-9000 status into an applet error. It handles only the command's declared
+/// chaining, continuation and Le-correction policy.
+///
+/// # Errors
+/// Returns an error before execution for invalid options, input/encoding limits,
+/// or a command that cannot fit the channel under its permitted encoding policy.
 pub fn conversation(
     command: LogicalCommand,
     options: OperationOptions,
@@ -474,7 +601,12 @@ pub fn conversation(
     )
 }
 
-/// Preflight a fully known logical command before starting a multi-command operation.
+/// Preflight a fully known logical command without sending or retaining it.
+///
+/// # Errors
+/// Returns invalid-option, input-limit, or physical-encoding errors that would
+/// otherwise occur when constructing the command's conversation. This validates
+/// host encoding constraints, not card support or authentication.
 pub fn validate_command(command: &LogicalCommand, options: OperationOptions) -> Result<(), Error> {
     ConversationState::new(command.clone(), options.validate()?).map(|_| ())
 }

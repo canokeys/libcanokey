@@ -5,8 +5,7 @@
 //! Output ranges must not alias inputs or handles. Handles are created by this
 //! library, accessed without concurrent mutation, and freed exactly once.
 //! A non-null versioned struct must contain at least its declared supported prefix.
-// These common C ABI contracts apply to every exported unsafe entry point.
-#![allow(clippy::missing_safety_doc)]
+#![deny(missing_docs)]
 use canokey::{
     compatibility::{Capability, DeviceProfile, Support},
     piv, Error, ErrorKind, Operation, OperationOptions, ProbeMode, ProbeOptions, SecretBytes, Step,
@@ -15,27 +14,52 @@ use std::{
     panic::{catch_unwind, AssertUnwindSafe},
     ptr, slice,
 };
+/// Caller-owned error POD; mirrors `cnk_error_v1` in the C header.
+/// Initialize struct_size before passing it. Presence flags govern optional fields.
+/// No allocation, secret payload, or global last-error state is involved.
 #[repr(C)]
 pub struct CnkError {
+    /// Caller-supplied size in bytes; must include the entire supported struct prefix.
     pub struct_size: u32,
+    /// CNK_ERROR_* semantic error code, or zero when cleared.
     pub kind: u32,
+    /// CNK_PHASE_* context code.
     pub phase: u32,
+    /// CNK_REFERENCE_* credential reference; never credential bytes.
     pub reference: u32,
+    /// CNK_ERROR_HAS_SW and CNK_ERROR_HAS_RETRIES bitmap for optional fields.
     pub presence_flags: u32,
+    /// Original SW1/SW2 when CNK_ERROR_HAS_SW is set.
     pub status_word: u16,
+    /// Authentication retries when CNK_ERROR_HAS_RETRIES is set.
     pub retries_remaining: u8,
+    /// Reserved output byte, written as zero.
     pub reserved: u8,
 }
+/// Caller-owned `cnk_operation_options_v1`; constructors copy these limits.
+/// NULL options selects Rust defaults. Zero explicit budgets are invalid.
+/// The logical-command input limit currently remains the Rust default.
 #[repr(C)]
 pub struct CnkOptions {
+    /// Caller-supplied size in bytes; must include the entire supported struct prefix.
     pub struct_size: u32,
+    /// CNK_ALLOW_EXTENDED or zero; other input flag bits are rejected.
     pub flags: u32,
+    /// Maximum physical command bytes, including header and Lc/Le.
     pub max_command_bytes: u32,
+    /// Maximum physical response bytes, including SW1/SW2.
     pub max_response_bytes: u32,
+    /// Cumulative response-data budget, excluding SW; also bounds decoded certificates.
     pub max_total_response_bytes: u32,
+    /// Maximum number of exposed physical commands, including continuations/retries.
     pub max_exchanges: u32,
 }
+/// Opaque caller-owned immutable device snapshot; release with [`cnk_profile_free`].
+/// Never construct this type or inspect its Rust layout from C.
 pub struct CnkProfile(DeviceProfile);
+/// Opaque caller-owned operation; release with [`cnk_operation_free`].
+/// Owns its command, result and error without a registry or connection handle.
+/// Serialize access; never inspect its Rust layout from C.
 pub struct CnkOperation {
     inner: Inner,
     poisoned: bool,
@@ -195,22 +219,44 @@ unsafe fn copy(data: &[u8], buffer: *mut u8, len: *mut usize) -> u32 {
     ptr::copy_nonoverlapping(data.as_ptr(), buffer, data.len());
     OK
 }
+/// Return the ABI version as `(major << 16) | minor`: experimental 0.1.
+/// This is independent of Rust crate and firmware versions.
 #[no_mangle]
 pub extern "C" fn cnk_abi_version() -> u32 {
     0x0000_0001
 }
+/// Release a profile; NULL is a no-op. Existing operations remain independent.
+/// No logout or connection cleanup is performed.
+///
+/// # Safety
+/// A non-NULL profile must be a live handle from this library, exclusively
+/// owned for destruction, and freed exactly once. Do not access it afterward.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_profile_free(profile: *mut CnkProfile) {
     if !profile.is_null() {
         let _ = catch_unwind(AssertUnwindSafe(|| drop(Box::from_raw(profile))));
     }
 }
+/// Release an operation and its remaining owned data; NULL is a no-op.
+/// Does not stop application I/O, undo card effects, or send logout.
+///
+/// # Safety
+/// A non-NULL op must be a live handle from this library, exclusively owned
+/// for destruction and freed exactly once, with no concurrent method calls.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_operation_free(op: *mut CnkOperation) {
     if !op.is_null() {
         let _ = catch_unwind(AssertUnwindSafe(|| drop(Box::from_raw(op))));
     }
 }
+/// Construct a probe for CNK_PROBE_MINIMAL or CNK_PROBE_PIV.
+/// Copies options, initializes `*out` to NULL, and returns a new operation on OK.
+/// No APDU is sent. Invalid mode/options returns INVALID_ARGUMENT.
+///
+/// # Safety
+/// Follow the crate pointer/aliasing contract. `out` must be writable and
+/// non-NULL; optional opts/error must have initialized struct_size. The caller
+/// receives ownership of `*out` only on OK and must free it.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_probe_device_new(
     mode: u32,
@@ -232,6 +278,14 @@ pub unsafe extern "C" fn cnk_probe_device_new(
         .map_err(|e| failure(e, error))
     })
 }
+/// Construct SELECT plus PIN verification, copying all credential bytes/options.
+/// The source profile and input buffers may be released after return. Invalid
+/// PIN returns INVALID_ARGUMENT with error details; capability errors propagate.
+///
+/// # Safety
+/// Follow the crate pointer/aliasing contract. Supply a live non-NULL profile,
+/// a readable pin range (NULL only for length zero), writable non-NULL out,
+/// and valid optional versioned opts/error structs. Free the returned handle once.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_piv_verify_pin_new(
     profile: *const CnkProfile,
@@ -249,6 +303,13 @@ pub unsafe extern "C" fn cnk_piv_verify_pin_new(
             .map_err(|e| failure(e, error))
     })
 }
+/// Construct SELECT plus empty VERIFY. Retry/blocked statuses become typed data.
+/// The operation owns its configuration; it does not retain profile or options.
+///
+/// # Safety
+/// Follow the crate pointer/aliasing contract. Supply a live non-NULL profile,
+/// writable non-NULL out and valid optional versioned opts/error structs.
+/// The caller owns the returned operation.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_piv_get_pin_status_new(
     profile: *const CnkProfile,
@@ -262,6 +323,14 @@ pub unsafe extern "C" fn cnk_piv_get_pin_status_new(
             .map_err(|e| failure(e, error))
     })
 }
+/// Construct an unprotected SELECT/GET DATA read for a complete BER object tag.
+/// Copies tag/options and required profile configuration. Use the byte result
+/// getter after DONE for the normalized object value, excluding its outer tag.
+///
+/// # Safety
+/// Follow the crate pointer/aliasing contract. Supply a live non-NULL profile,
+/// a readable tag range, writable non-NULL out, and valid optional versioned
+/// opts/error structs. The caller owns the returned operation.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_piv_read_object_new(
     profile: *const CnkProfile,
@@ -283,7 +352,14 @@ pub unsafe extern "C" fn cnk_piv_read_object_new(
         .map_err(|e| failure(e, error))
     })
 }
-/// Read a public certificate. Slot is a PIV key reference, not an object tag.
+/// Construct a public certificate read for slot 9A/9C/9D/9E or 82..95.
+/// Other slot references return INVALID_ARGUMENT. The byte result getter returns
+/// the unwrapped/bounded-decompressed payload; no X.509/trust validation occurs.
+///
+/// # Safety
+/// Follow the crate pointer/aliasing contract. Supply a live non-NULL profile,
+/// writable non-NULL out and valid optional versioned opts/error structs.
+/// The operation owns copied configuration and must be freed by its caller.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_piv_read_certificate_new(
     profile: *const CnkProfile,
@@ -352,6 +428,14 @@ unsafe fn drive(
         }
     }
 }
+/// Start a Created operation without performing I/O. On OK, write EXCHANGE or
+/// DONE to step. On error, step is zero and protocol details are copied to error
+/// when supplied. Wrong lifecycle/poisoned operation returns INVALID_STATE.
+///
+/// # Safety
+/// Follow the crate pointer/aliasing contract. op must be live and exclusively
+/// accessible; step must be non-NULL and writable. Optional error must be a
+/// writable versioned struct. No call may race with free or another mutation.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_operation_start(
     op: *mut CnkOperation,
@@ -360,6 +444,16 @@ pub unsafe extern "C" fn cnk_operation_start(
 ) -> u32 {
     drive(op, step, error, None)
 }
+/// Consume one complete response data + SW1/SW2 to the pending command.
+/// Copies/consumes input during this call only. On OK write EXCHANGE/DONE;
+/// on failure write step zero. Protocol failures are retained on the operation.
+/// Wrong lifecycle returns INVALID_STATE; invalid response pointer/length returns
+/// INVALID_ARGUMENT. Transport failures must remain in the application.
+///
+/// # Safety
+/// Follow the crate pointer/aliasing contract. op must be live and exclusively
+/// accessible, response readable for len bytes (NULL only if len is zero),
+/// step writable/non-NULL, and optional error a valid versioned struct.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_operation_advance(
     op: *mut CnkOperation,
@@ -379,6 +473,15 @@ pub unsafe extern "C" fn cnk_operation_advance(
         }
     }
 }
+/// Copy the pending complete APDU without advancing or sending it.
+/// NULL buffer queries required length; too-small updates len and returns
+/// BUFFER_TOO_SMALL without partial writes. Outside AwaitingResponse returns
+/// INVALID_STATE. Copying an APDU may copy credentials: the caller must wipe it.
+///
+/// # Safety
+/// Follow the crate pointer/aliasing contract. op must be live with no concurrent
+/// mutation/free; len must be initialized, writable and non-NULL. A non-NULL
+/// buffer must have at least the incoming *len writable bytes and not alias len.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_operation_command(
     op: *const CnkOperation,
@@ -398,6 +501,14 @@ pub unsafe extern "C" fn cnk_operation_command(
         }
     })
 }
+/// Transfer a completed probe result once; the profile survives operation free.
+/// Initializes `*out` to NULL. Wrong result type returns RESULT_TYPE_MISMATCH;
+/// wrong lifecycle or a second transfer returns INVALID_STATE.
+///
+/// # Safety
+/// Follow the crate pointer/aliasing contract. op must be live and exclusively
+/// accessible and out writable/non-NULL. On OK the caller owns *out and must
+/// release it with cnk_profile_free, never the C allocator.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_operation_take_profile(
     op: *mut CnkOperation,
@@ -426,6 +537,15 @@ pub unsafe extern "C" fn cnk_operation_take_profile(
         }
     })
 }
+/// Copy a completed object value or unwrapped certificate payload.
+/// NULL buffer queries length; too-small updates len without partial writes.
+/// Getters never reread the card. Other result variants return RESULT_TYPE_MISMATCH;
+/// a byte-result operation that is not Completed returns INVALID_STATE.
+///
+/// # Safety
+/// Follow the crate pointer/aliasing contract. op must be live without concurrent
+/// mutation/free; len must be initialized, writable and non-NULL. A non-NULL
+/// buffer must cover the incoming *len writable bytes and not alias len.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_operation_result_copy_bytes(
     op: *const CnkOperation,
@@ -452,15 +572,30 @@ pub unsafe extern "C" fn cnk_operation_result_copy_bytes(
         }
     })
 }
+/// Caller-owned `cnk_pin_status_v1` result. Initialize struct_size before querying.
 #[repr(C)]
 pub struct CnkPinStatus {
+    /// Caller-supplied size in bytes; must include the entire supported struct prefix.
     pub struct_size: u32,
+    /// CNK_PIN_HAS_VERIFIED, CNK_PIN_HAS_REMAINING and CNK_PIN_HAS_TOTAL bitmap.
     pub presence_flags: u32,
+    /// Zero/one verification observation, meaningful only with CNK_PIN_HAS_VERIFIED.
     pub verified: u8,
+    /// Retry observation, meaningful only with CNK_PIN_HAS_REMAINING.
     pub remaining: u8,
+    /// Total retry observation, meaningful only with CNK_PIN_HAS_TOTAL.
     pub total: u8,
+    /// Zero/one blocked observation; always present on a successful query.
     pub blocked: u8,
 }
+/// Copy completed PIN status into caller POD without accessing the device.
+/// Presence bits distinguish unknown verified/remaining/total values. Wrong type
+/// returns RESULT_TYPE_MISMATCH; a pending PIN-status operation returns INVALID_STATE.
+///
+/// # Safety
+/// Follow the crate pointer/aliasing contract. op must be live without concurrent
+/// mutation/free. out must be writable/non-NULL with initialized struct_size
+/// covering the supported CnkPinStatus prefix.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_operation_pin_status(
     op: *const CnkOperation,
@@ -501,6 +636,14 @@ pub unsafe extern "C" fn cnk_operation_pin_status(
         }
     })
 }
+/// Copy raw actual-firmware bytes, without adding a NUL terminator.
+/// NULL buffer queries length; BUFFER_TOO_SMALL updates len without partial copying.
+/// The original text may not be valid UTF-8.
+///
+/// # Safety
+/// Follow the crate pointer/aliasing contract. profile must be live with no
+/// concurrent free; len must be initialized, writable and non-NULL. A non-NULL
+/// buffer must cover the incoming *len writable bytes and not alias len.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_profile_firmware_text(
     profile: *const CnkProfile,
@@ -512,6 +655,12 @@ pub unsafe extern "C" fn cnk_profile_firmware_text(
         None => ARG,
     })
 }
+/// Write CNK_SUPPORT_UNKNOWN/SUPPORTED/UNSUPPORTED for observed PIV availability.
+/// This is a local snapshot query, not a card probe.
+///
+/// # Safety
+/// Follow the crate pointer/aliasing contract. profile must be live with no
+/// concurrent free and out must be writable/non-NULL.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_profile_piv_support(profile: *const CnkProfile, out: *mut u32) -> u32 {
     guard(|| {
@@ -529,6 +678,13 @@ pub unsafe extern "C" fn cnk_profile_piv_support(profile: *const CnkProfile, out
         OK
     })
 }
+/// Discard active operation state locally; terminal states are unchanged.
+/// No APDU or transport cancellation occurs. Drain or isolate in-flight I/O
+/// before reusing the application connection. The handle still needs free.
+///
+/// # Safety
+/// Follow the crate pointer/aliasing contract. op must be live and exclusively
+/// accessible, with no concurrent calls or free.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_operation_cancel(op: *mut CnkOperation) -> u32 {
     guard(|| {
@@ -540,6 +696,12 @@ pub unsafe extern "C" fn cnk_operation_cancel(op: *mut CnkOperation) -> u32 {
     })
 }
 
+/// Write the local CNK_STATE_* value without advancing.
+/// A panic-poisoned operation returns INVALID_STATE instead of a normal state.
+///
+/// # Safety
+/// Follow the crate pointer/aliasing contract. op must be live without concurrent
+/// mutation/free and out must be writable/non-NULL.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_operation_state(op: *const CnkOperation, out: *mut u32) -> u32 {
     guard(|| {
@@ -556,6 +718,13 @@ pub unsafe extern "C" fn cnk_operation_state(op: *const CnkOperation, out: *mut 
         OK
     })
 }
+/// Copy a stored protocol failure into caller POD, returning OK if one exists.
+/// Returns INVALID_STATE when there is no stored failure or op is poisoned.
+/// Clears the supported error fields before querying; this is not global last_error.
+///
+/// # Safety
+/// Follow the crate pointer/aliasing contract. op must be live without concurrent
+/// mutation/free. out must be writable/non-NULL with initialized struct_size.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_operation_error(op: *const CnkOperation, out: *mut CnkError) -> u32 {
     guard(|| {
@@ -580,6 +749,12 @@ pub unsafe extern "C" fn cnk_operation_error(op: *const CnkOperation, out: *mut 
         }
     })
 }
+/// Write CNK_RESULT_* only for a Completed operation.
+/// Returns INVALID_STATE before completion, after take/cancel/failure, or if poisoned.
+///
+/// # Safety
+/// Follow the crate pointer/aliasing contract. op must be live without concurrent
+/// mutation/free and out must be writable/non-NULL.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_operation_result_kind(op: *const CnkOperation, out: *mut u32) -> u32 {
     guard(|| {
