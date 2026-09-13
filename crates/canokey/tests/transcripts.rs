@@ -203,3 +203,57 @@ fn optional_discovery_failure_overrides_version_inference() {
         Evidence::Observed
     );
 }
+
+#[test]
+fn certificate_read_owns_profile_and_authenticates_without_reselect() {
+    let p = profile("3.1.0");
+    let mut op = piv::read_certificate(
+        &p,
+        piv::Slot::Authentication,
+        piv::Access::Pin(piv::Pin::from_bytes(b"123456").unwrap()),
+        Default::default(),
+    )
+    .unwrap();
+    drop(p);
+    op.start().unwrap();
+    exchange(&mut op, &[0, 0xa4, 4, 0, 5, 0xa0, 0, 0, 3, 8], &[0x90, 0]);
+    exchange(
+        &mut op,
+        &[
+            0, 0x20, 0, 0x80, 8, b'1', b'2', b'3', b'4', b'5', b'6', 0xff, 0xff,
+        ],
+        &[0x90, 0],
+    );
+    assert_eq!(
+        exchange(
+            &mut op,
+            &[0, 0xcb, 0x3f, 0xff, 5, 0x5c, 3, 0x5f, 0xc1, 5, 0],
+            &[0x53, 9, 0x70, 2, 0x30, 0, 0x71, 1, 0, 0xfe, 0, 0x90, 0]
+        ),
+        Step::Done
+    );
+    let cert = op.take_result().unwrap();
+    drop(op);
+    assert_eq!(cert.der(), &[0x30, 0]); // Container fixture, not a valid X.509 certificate.
+}
+
+#[test]
+fn certificate_missing_and_auth_failure_remain_errors() {
+    for (response, kind) in [
+        ([0x6a, 0x82], ErrorKind::NotFound),
+        ([0x69, 0x82], ErrorKind::SecurityStatusNotSatisfied),
+    ] {
+        let mut op = piv::read_certificate(
+            &profile("3.1.0"),
+            piv::Slot::Signature,
+            piv::Access::None,
+            Default::default(),
+        )
+        .unwrap();
+        op.start().unwrap();
+        op.advance(&[0x90, 0]).unwrap();
+        assert_eq!(op.advance(&response).unwrap_err().kind, kind);
+        assert_eq!(op.state(), OperationState::Failed);
+        assert!(op.result().is_err());
+    }
+}

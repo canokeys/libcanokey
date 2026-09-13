@@ -28,7 +28,8 @@ impl SecretBytes {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
-    pub(crate) fn extend(&mut self, data: &[u8]) {
+    /// Append bytes, wiping the old allocation if growth requires replacement.
+    pub fn extend(&mut self, data: &[u8]) {
         if data.len() > self.0.capacity() - self.0.len() {
             // Vec::reserve would free a previous allocation without wiping it.
             let mut next = Zeroizing::new(Vec::with_capacity(self.0.len() + data.len()));

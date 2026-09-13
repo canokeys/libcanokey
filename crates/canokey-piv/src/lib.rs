@@ -1,5 +1,6 @@
-//! Initial PIV operations: selection, PIN/PUK and object reads.
+//! PIV selection, PIN/PUK, object and certificate reads.
 #![forbid(unsafe_code)]
+pub mod certificate;
 pub use canokey_compat::Algorithm;
 use canokey_compat::{Capability, DeviceProfile};
 use canokey_protocol::operation::{
@@ -10,6 +11,7 @@ use canokey_protocol::tlv::{Tag, TlvLimits, TlvReader};
 use canokey_protocol::{
     Error, ErrorKind, Operation, OperationOptions, Phase, SecretBytes, SecretReference, StatusWord,
 };
+pub use certificate::Certificate;
 use std::collections::VecDeque;
 
 #[derive(Clone, Debug)]
@@ -386,6 +388,34 @@ pub fn read_object(
     access: Access,
     options: OperationOptions,
 ) -> Result<Operation<ObjectData>, Error> {
+    read_object_with(profile, id, access, options, Ok)
+}
+
+/// Read and unwrap a certificate, with bounded gzip decompression.
+/// This does not validate X.509 syntax, signatures, or trust.
+pub fn read_certificate(
+    profile: &DeviceProfile,
+    slot: Slot,
+    access: Access,
+    options: OperationOptions,
+) -> Result<Operation<Certificate>, Error> {
+    let limit = options.limits.max_total_response_bytes;
+    read_object_with(
+        profile,
+        ObjectId::certificate(slot),
+        access,
+        options,
+        move |data| Certificate::from_object(data.as_bytes(), limit),
+    )
+}
+
+fn read_object_with<T: 'static>(
+    profile: &DeviceProfile,
+    id: ObjectId,
+    access: Access,
+    options: OperationOptions,
+    parse: impl FnOnce(ObjectData) -> Result<T, Error> + Send + 'static,
+) -> Result<Operation<T>, Error> {
     require(profile)?;
     let legacy = profile.legacy_unwrapped_objects();
     let mut commands = vec![request(command::select(), Phase::Select, None)];
@@ -405,7 +435,7 @@ pub fn read_object(
             && ((id.0.value() == 0x5fc102 && data.first() == Some(&0x30))
                 || (id.0.value() == 0x5fc107 && data.first() == Some(&0xf0)))
         {
-            return Ok(r.data);
+            return parse(r.data);
         }
         let mut reader = TlvReader::new(
             data,
@@ -422,6 +452,6 @@ pub fn read_object(
         {
             return Err(Error::new(ErrorKind::InvalidResponse));
         }
-        Ok(SecretBytes::new(tlv.value.to_vec()))
+        parse(SecretBytes::new(tlv.value.to_vec()))
     })
 }

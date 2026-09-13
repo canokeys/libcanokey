@@ -45,6 +45,7 @@ enum Inner {
     Unit(Operation<()>),
     PinStatus(Operation<piv::PinStatus>),
     Object(Operation<SecretBytes>),
+    Certificate(Operation<piv::Certificate>),
 }
 macro_rules! dispatch {
     ($value:expr, $op:ident => $body:expr) => {
@@ -53,6 +54,7 @@ macro_rules! dispatch {
             Inner::Unit($op) => $body,
             Inner::PinStatus($op) => $body,
             Inner::Object($op) => $body,
+            Inner::Certificate($op) => $body,
         }
     };
 }
@@ -281,6 +283,37 @@ pub unsafe extern "C" fn cnk_piv_read_object_new(
         .map_err(|e| failure(e, error))
     })
 }
+/// Read a public certificate. Slot is a PIV key reference, not an object tag.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_read_certificate_new(
+    profile: *const CnkProfile,
+    slot: u32,
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        let slot = match slot {
+            0x9a => piv::Slot::Authentication,
+            0x9c => piv::Slot::Signature,
+            0x9d => piv::Slot::KeyManagement,
+            0x9e => piv::Slot::CardAuthentication,
+            0x82..=0x95 => piv::Slot::Retired(
+                piv::RetiredSlot::new((slot - 0x81) as u8).map_err(|e| failure(e, error))?,
+            ),
+            _ => return Err(ARG),
+        };
+        piv::read_certificate(
+            &profile.as_ref().ok_or(ARG)?.0,
+            slot,
+            piv::Access::None,
+            options(opts)?,
+        )
+        .map(Inner::Certificate)
+        .map_err(|e| failure(e, error))
+    })
+}
+
 unsafe fn drive(
     op: *mut CnkOperation,
     step: *mut u32,
@@ -407,6 +440,10 @@ pub unsafe extern "C" fn cnk_operation_result_copy_bytes(
             return STATE;
         }
         match &op.inner {
+            Inner::Certificate(p) => match p.result() {
+                Ok(v) => copy(v.der(), buffer, len),
+                Err(_) => STATE,
+            },
             Inner::Object(p) => match p.result() {
                 Ok(v) => copy(v.as_bytes(), buffer, len),
                 Err(_) => STATE,
@@ -562,6 +599,7 @@ pub unsafe extern "C" fn cnk_operation_result_kind(op: *const CnkOperation, out:
             Inner::Unit(_) => 2,
             Inner::PinStatus(_) => 3,
             Inner::Object(_) => 4,
+            Inner::Certificate(_) => 5,
         };
         OK
     })

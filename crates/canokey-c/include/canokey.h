@@ -37,7 +37,7 @@ enum { CNK_REFERENCE_NONE=0, CNK_REFERENCE_PIN=1, CNK_REFERENCE_PUK=2,
        CNK_REFERENCE_MANAGEMENT_KEY=3, CNK_REFERENCE_ADMIN_PIN=4 };
 enum { CNK_ERROR_HAS_SW=1, CNK_ERROR_HAS_RETRIES=2 };
 enum { CNK_RESULT_PROFILE=1, CNK_RESULT_UNIT=2, CNK_RESULT_PIN_STATUS=3,
-       CNK_RESULT_OBJECT=4 };
+       CNK_RESULT_OBJECT=4, CNK_RESULT_CERTIFICATE=5 };
 enum { CNK_ALLOW_EXTENDED=1 };
 enum { CNK_PIN_HAS_VERIFIED=1, CNK_PIN_HAS_REMAINING=2, CNK_PIN_HAS_TOTAL=4 };
 typedef struct {
@@ -60,6 +60,10 @@ cnk_status_t cnk_probe_device_new(uint32_t mode,const cnk_operation_options_v1 *
 cnk_status_t cnk_piv_verify_pin_new(const cnk_profile_t *,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_get_pin_status_new(const cnk_profile_t *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_read_object_new(const cnk_profile_t *,const uint8_t *tag,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+/* Public certificate read; slot is 9A/9C/9D/9E or 82..95.
+ * Byte result getter returns unwrapped, bounded-decompressed bytes.
+ * No X.509 syntax or trust validation is performed. */
+cnk_status_t cnk_piv_read_certificate_new(const cnk_profile_t *,uint32_t slot,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_operation_start(cnk_operation_t *,cnk_step_kind_t *,cnk_error_v1 *);
 cnk_status_t cnk_operation_advance(cnk_operation_t *,const uint8_t *,size_t,cnk_step_kind_t *,cnk_error_v1 *);
 /* NULL buffer queries size, success writes length, too-small never partially copies. */
