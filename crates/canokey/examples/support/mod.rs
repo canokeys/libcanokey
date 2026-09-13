@@ -4,12 +4,15 @@ use std::collections::VecDeque;
 pub type AppResult<T> = Result<T, Box<dyn std::error::Error>>;
 
 pub struct Card {
-    transcript: VecDeque<(&'static [u8], &'static [u8])>,
+    transcript: VecDeque<(Vec<u8>, Vec<u8>)>,
 }
 impl Card {
-    pub fn new(transcript: &[(&'static [u8], &'static [u8])]) -> Self {
+    pub fn new(transcript: &[(&[u8], &[u8])]) -> Self {
         Self {
-            transcript: transcript.iter().copied().collect(),
+            transcript: transcript
+                .iter()
+                .map(|(c, r)| (c.to_vec(), r.to_vec()))
+                .collect(),
         }
     }
     fn exchange(&mut self, command: &[u8]) -> AppResult<Vec<u8>> {

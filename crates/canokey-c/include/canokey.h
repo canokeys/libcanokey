@@ -109,6 +109,9 @@ cnk_status_t cnk_piv_read_algorithm_config_new(const cnk_profile_t *,const cnk_p
 cnk_status_t cnk_piv_sign_new(const cnk_profile_t *,uint32_t slot,uint32_t algorithm,uint32_t kind,const uint8_t *,size_t,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_decrypt_new(const cnk_profile_t *,uint32_t slot,uint32_t algorithm,const uint8_t *,size_t,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_derive_new(const cnk_profile_t *,uint32_t slot,uint32_t algorithm,const uint8_t *,size_t,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+/* ML-KEM-768: exactly 1088 ciphertext bytes, 32 result bytes. No KDF or sender
+ * authentication. Uses the observed enabled algorithm ID; inputs are copied. */
+cnk_status_t cnk_piv_decapsulate_new(const cnk_profile_t *,uint32_t slot,const uint8_t *,size_t,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_operation_metadata(const cnk_operation_t *,cnk_metadata_v1 *);
 cnk_status_t cnk_operation_public_key_copy(const cnk_operation_t *,uint32_t field,uint8_t *,size_t *);
 cnk_status_t cnk_operation_key_algorithm(const cnk_operation_t *,uint32_t *);
@@ -117,7 +120,8 @@ enum { CNK_BATCH_VERIFY_PIN=1, CNK_BATCH_AUTHENTICATE_MANAGEMENT=2, CNK_BATCH_LO
        CNK_BATCH_READ_OBJECT=4, CNK_BATCH_READ_CERTIFICATE=5, CNK_BATCH_WRITE_OBJECT=6,
        CNK_BATCH_WRITE_CERTIFICATE=7, CNK_BATCH_DELETE_CERTIFICATE=8, CNK_BATCH_GET_METADATA=9,
        CNK_BATCH_READ_ALGORITHM_CONFIG=10, CNK_BATCH_GENERATE_KEY=11, CNK_BATCH_IMPORT_KEY=12,
-       CNK_BATCH_SIGN=13, CNK_BATCH_DECRYPT=14, CNK_BATCH_DERIVE=15, CNK_BATCH_SET_MANAGEMENT_KEY=16 };
+       CNK_BATCH_SIGN=13, CNK_BATCH_DECRYPT=14, CNK_BATCH_DERIVE=15, CNK_BATCH_SET_MANAGEMENT_KEY=16,
+       CNK_BATCH_DECAPSULATE=17 };
 /* Only fields relevant to kind are read. Unused pointers/lengths should be NULL/0.
  * All nested ranges are copied. No SELECT/probe/nested Batch requests exist. */
 typedef struct {

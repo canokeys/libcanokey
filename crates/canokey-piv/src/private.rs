@@ -258,13 +258,14 @@ fn require_agreement_slot(slot: Slot) -> Result<(), Error> {
     }
 }
 /// Derive a raw ECDH/X25519 shared secret; no KDF is applied.
-/// P-256/P-384 peers must be uncompressed SEC1 points on the named curve, checked
-/// with RustCrypto. X25519 takes exactly 32 RFC 7748 bytes. The owned result is
+/// P-256/P-384/P-521/secp256k1 peers must be uncompressed SEC1 points on the named
+/// curve, checked with RustCrypto. X25519 takes exactly 32 RFC 7748 bytes. The owned result is
 /// wiped on drop; an all-zero X25519 shared secret is rejected.
 ///
 /// # Errors
 /// Requires a key-management/retired slot, evidenced algorithm and a valid peer.
 /// Wrong result lengths/encodings and card statuses fail without replay.
+/// SM2 uses a separate agreement protocol and is not accepted by this factory.
 pub fn derive(
     profile: &DeviceProfile,
     slot: Slot,
@@ -285,6 +286,9 @@ pub(crate) fn prepare_derive(
     options: OperationOptions,
 ) -> Result<Sequence<SecretBytes>, Error> {
     require_agreement_slot(slot)?;
+    if peer.len() > options.limits.max_input_bytes {
+        return Err(Error::new(ErrorKind::LimitExceeded));
+    }
     let width = match algorithm {
         Algorithm::EccP256 => {
             if peer.len() != 65
@@ -304,6 +308,24 @@ pub(crate) fn prepare_derive(
             }
             48
         }
+        Algorithm::EccP521 => {
+            if peer.len() != 133
+                || peer.first() != Some(&4)
+                || p521::PublicKey::from_sec1_bytes(&peer).is_err()
+            {
+                return Err(Error::new(ErrorKind::InvalidArgument));
+            }
+            66
+        }
+        Algorithm::Secp256k1 => {
+            if peer.len() != 65
+                || peer.first() != Some(&4)
+                || k256::PublicKey::from_sec1_bytes(&peer).is_err()
+            {
+                return Err(Error::new(ErrorKind::InvalidArgument));
+            }
+            32
+        }
         Algorithm::X25519 if peer.len() == 32 => 32,
         Algorithm::X25519 => return Err(Error::new(ErrorKind::InvalidArgument)),
         _ => return Err(Error::new(ErrorKind::UnsupportedAlgorithm)),
@@ -319,6 +341,55 @@ pub(crate) fn prepare_derive(
             if bool::from(bytes.as_bytes().ct_eq(&[0; 32])) {
                 return Err(invalid());
             }
+        }
+        Ok(bytes)
+    })
+}
+
+/// Decapsulate an ML-KEM-768 ciphertext using a card-held private key.
+/// The operation owns exactly 1088 ciphertext bytes and returns a 32-byte shared
+/// secret in zeroized storage. Encapsulation, KDF and application key confirmation
+/// remain with the caller. ML-KEM implicit rejection produces a secret even for
+/// an invalid ciphertext; successful completion does not authenticate its sender.
+///
+/// # Errors
+/// Requires a key-management/retired slot and an observed, enabled ML-KEM-768 ID
+/// on evidenced firmware. Wrong lengths, unavailable capabilities, input/response
+/// budgets and card errors fail explicitly. Chaining never repeats authentication
+/// or retries a failed private operation.
+pub fn decapsulate(
+    profile: &DeviceProfile,
+    slot: Slot,
+    ciphertext: SecretBytes,
+    access: Access,
+    options: OperationOptions,
+) -> Result<Operation<SecretBytes>, Error> {
+    let target = prepare_decapsulate(profile, slot, ciphertext, options)?;
+    access::with_access(profile, access, target, options)
+}
+
+pub(crate) fn prepare_decapsulate(
+    profile: &DeviceProfile,
+    slot: Slot,
+    ciphertext: SecretBytes,
+    options: OperationOptions,
+) -> Result<Sequence<SecretBytes>, Error> {
+    require_agreement_slot(slot)?;
+    if ciphertext.len() != 1088 {
+        return Err(Error::new(ErrorKind::InvalidArgument));
+    }
+    let command = command(
+        profile,
+        slot,
+        Algorithm::MlKem768,
+        0x81,
+        ciphertext.as_bytes(),
+        options,
+    )?;
+    access::prepare(command, options, move |r| {
+        let bytes = reply(r, options.limits.max_total_response_bytes)?;
+        if bytes.len() != 32 {
+            return Err(invalid());
         }
         Ok(bytes)
     })

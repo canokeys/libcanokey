@@ -290,3 +290,111 @@ fn rsa_chaining_and_derive_validate_lengths_without_kdf() {
     )
     .is_err());
 }
+
+#[test]
+fn extended_curve_import_checks_scalars_and_wire_ids() {
+    for (algorithm, width, id) in [
+        (Algorithm::EccP521, 66, 0x54),
+        (Algorithm::Secp256k1, 32, 0x53),
+        (Algorithm::Sm2, 32, 0x55),
+    ] {
+        let mut scalar = vec![0; width];
+        scalar[width - 1] = 1;
+        let material = PrivateKeyMaterial::ec_scalar(algorithm, &scalar).unwrap();
+        let mut op = import_key(
+            &profile("3.1.0"),
+            KeyParameters::new(Slot::Signature, algorithm),
+            material,
+            access(),
+            Default::default(),
+        )
+        .unwrap();
+        scalar.fill(0);
+        authenticate(&mut op);
+        let mut expected = vec![0, 0xfe, id, 0x9c, (width + 2) as u8, 6, width as u8];
+        expected.extend(vec![0; width - 1]);
+        expected.push(1);
+        assert_eq!(op.command().unwrap().as_bytes(), expected);
+        op.advance(&[0x90, 0]).unwrap();
+        assert!(PrivateKeyMaterial::ec_scalar(algorithm, &scalar).is_err());
+        assert!(PrivateKeyMaterial::ec_scalar(algorithm, &vec![0xff; width]).is_err());
+        assert!(PrivateKeyMaterial::ec_scalar(algorithm, &vec![1; width - 1]).is_err());
+    }
+}
+
+#[test]
+fn extended_ecdh_validates_points_and_retains_raw_secrets() {
+    // Standard curve generators (SEC 2), independent of the validator under test.
+    let p521 = hex(concat!("04",
+        "00c6858e06b70404e9cd9e3ecb662395b4429c648139053fb521f828af606b4d3dbaa14b5e77efe75928fe1dc127a2ffa8de3348b3c1856a429bf97e7e31c2e5bd66",
+        "011839296a789a3bc0045c8a5fb42c7d1bd998f54449579b446817afbd17273e662c97ee72995ef42640c550b9013fad0761353c7086a272c24088be94769fd16650"));
+    let k256 = hex(concat!(
+        "04",
+        "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        "483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8"
+    ));
+    for (algorithm, point, width, id) in [
+        (Algorithm::EccP521, p521, 66, 0x54),
+        (Algorithm::Secp256k1, k256, 32, 0x53),
+    ] {
+        let mut op = derive(
+            &profile("3.1.0"),
+            Slot::KeyManagement,
+            algorithm,
+            point.clone(),
+            Access::None,
+            Default::default(),
+        )
+        .unwrap();
+        selected(&mut op);
+        let cmd = op.command().unwrap().as_bytes();
+        assert_eq!(&cmd[..4], &[0, 0x87, id, 0x9d]);
+        assert_eq!(&cmd[cmd.len() - point.len()..], point);
+        // Leading zeros are significant in fixed-width agreement results.
+        let mut secret = vec![0; width];
+        secret[width - 1] = 7;
+        op.advance(&response(&tlv(&[0x7c], &tlv(&[0x82], &secret))))
+            .unwrap();
+        assert_eq!(op.take_result().unwrap().as_bytes(), secret);
+        for peer in [
+            vec![4; point.len()],
+            point[..point.len() - 1].to_vec(),
+            vec![0; point.len()],
+        ] {
+            assert!(derive(
+                &profile("3.1.0"),
+                Slot::KeyManagement,
+                algorithm,
+                peer,
+                Access::None,
+                Default::default()
+            )
+            .is_err());
+        }
+        let mut op = derive(
+            &profile("3.1.0"),
+            Slot::KeyManagement,
+            algorithm,
+            point,
+            Access::None,
+            Default::default(),
+        )
+        .unwrap();
+        selected(&mut op);
+        assert_eq!(
+            op.advance(&response(&tlv(&[0x7c], &tlv(&[0x82], &secret[1..]))))
+                .unwrap_err()
+                .kind,
+            ErrorKind::InvalidResponse
+        );
+    }
+    assert!(derive(
+        &profile("3.1.0"),
+        Slot::KeyManagement,
+        Algorithm::Sm2,
+        hex(P256_POINT),
+        Access::None,
+        Default::default()
+    )
+    .is_err());
+}

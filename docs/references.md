@@ -84,6 +84,15 @@ No firmware is linked or built as a dependency.
   ECDH/X25519 uses 85 instead of 81. Empty Ed25519 and ML signing need separate
   streaming-mode support and are not silently mapped to the classic command.
 
+- ML-KEM dispatch and `test_piv_mlkem768_generate_metadata_decaps_and_lifecycle`
+  in the pinned HEAD use `7C { 82 empty, 81 ciphertext }`: 1088 input bytes,
+  32 result bytes, command chaining and implicit rejection. Wire IDs come from
+  the observed algorithm configuration, not a fixed default.
+- `src/key.c` imports short-Weierstrass scalars under tag 06. The classic GA
+  agreement branch accepts uncompressed P-256/P-384/P-521/secp256k1 points and
+  returns a fixed-width scalar-sized secret. SM2 has a separate agreement
+  dispatcher; it must not use this generic ECDH operation.
+
 These sources establish encoding and version rules, not hardware interoperability.
 Newer, development and unrecognized versions remain Unknown for these mutations.
 

@@ -46,7 +46,7 @@ graph TD
 - Optional generic X.509 DER/PEM inspection into owned fields, with timestamp values, raw encodings, and optional Serde serialization. Adapted from Console Rust without its FRB/UI dependencies; no trust verification.
 - Experimental C ABI 0.1: probe, PIN verification/status, public object/certificate reads, management authentication, writes, metadata and key operations, typed results/errors, and copy getters. Only profile/operation handles; see [header](crates/canokey-c/include/canokey.h).
 
-Full Admin, OATH, OpenPGP, and Python/FRB bindings remain planned. Classic signing excludes ML-DSA and empty Ed25519 messages. EC scalar import/derivation currently covers P-256/P-384; other named curves can be parsed/generated, and X25519 derivation is supported. No consumer repository has been integrated. Compatibility is based on host sources and offline transcripts, not hardware/usbip validation.
+Full Admin, OATH, OpenPGP, and Python/FRB bindings remain planned. Classic signing excludes ML-DSA and empty Ed25519 messages. Scalar import covers P-256/P-384/P-521/secp256k1/SM2; ECDH covers the same curves except SM2, and X25519 derivation is supported. ML-KEM-768 decapsulation returns a raw shared secret without a KDF. No consumer repository has been integrated. Compatibility is based on host sources and offline transcripts, not hardware/usbip validation.
 
 ## Runnable examples
 
@@ -59,6 +59,8 @@ cargo run -p canokey --example read_certificate --locked
 # certificate payload: 2 bytes; compressed: false
 cargo run -p canokey --example write_certificate --locked
 # certificate written; profile effect: Unchanged
+cargo run -p canokey --example decapsulate --locked
+# shared secret: 32 bytes
 cargo run -p canokey --example batch --locked
 # completed: 1; failed index: Some(1); error: NotFound during Command
 bash scripts/run-c-example.sh
@@ -70,6 +72,7 @@ These examples run **offline** and compare every emitted command against a deter
 - [Rust probe](crates/canokey/examples/probe.rs): obtain a caller-owned profile.
 - [Rust certificate read](crates/canokey/examples/read_certificate.rs): construct an operation, release its source profile, drive it, and retain the result.
 - [Rust certificate write](crates/canokey/examples/write_certificate.rs): probe, mutual authentication and PUT DATA under one SELECT; fixed test credentials/challenges are never production inputs.
+- [Rust ML-KEM decapsulation](crates/canokey/examples/decapsulate.rs): observed algorithm IDs, PIN verification, chained ciphertext and owned shared secret.
 - [Rust Batch](crates/canokey/examples/batch.rs): inspect successful preceding results after a later failure, with a single operation.
 - [Rust application executor](crates/canokey/examples/support/mod.rs): replace the fixture exchange with application-owned raw I/O.
 - [C probe](crates/canokey-c/examples/probe.c): size queries, handle transfer, command validation, and cleanup on failure.

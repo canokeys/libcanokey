@@ -6,8 +6,8 @@ integration and upstream changes require a separate task.
 
 ## Next: complete PIV
 
-Remaining algorithm extensions: additional curve scalar import/derivation and
-ML/empty-Ed25519 streaming private operations, with explicit firmware evidence.
+Remaining algorithm extensions: ML-DSA/empty-Ed25519 streaming signing and
+SM2 message signing/key agreement, with explicit firmware evidence.
 
 Extend the experimental C ABI alongside useful core operations. Before enabling
 metadata directories, key move/delete, retry/configuration writes, or ML private-operation modes,

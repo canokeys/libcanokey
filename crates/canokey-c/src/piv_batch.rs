@@ -140,6 +140,10 @@ pub unsafe extern "C" fn cnk_piv_batch_new(
                         _ => return Err(ARG),
                     },
                 },
+                17 => piv::BatchRequest::Decapsulate {
+                    slot: slot(r.reference)?,
+                    ciphertext: data()?,
+                },
                 _ => return Err(ARG),
             };
             owned.push(request);

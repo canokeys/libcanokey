@@ -62,7 +62,8 @@ impl PrivateKeyMaterial {
             fields: writer.into_bytes(),
         })
     }
-    /// Copy a P-256 or P-384 scalar in fixed-width, unsigned big-endian encoding.
+    /// Copy a P-256, P-384, P-521, secp256k1 or SM2 scalar in fixed-width,
+    /// unsigned big-endian encoding (32, 48, 66, 32 or 32 bytes respectively).
     /// RustCrypto checks that it is nonzero and below the curve order. Invalid
     /// scalar/length returns InvalidArgument; other curves return UnsupportedAlgorithm.
     pub fn ec_scalar(algorithm: Algorithm, bytes: &[u8]) -> Result<Self, Error> {
@@ -72,6 +73,9 @@ impl PrivateKeyMaterial {
         let valid = match algorithm {
             Algorithm::EccP256 => p256::SecretKey::from_slice(bytes).is_ok(),
             Algorithm::EccP384 => p384::SecretKey::from_slice(bytes).is_ok(),
+            Algorithm::EccP521 => p521::SecretKey::from_slice(bytes).is_ok(),
+            Algorithm::Secp256k1 => k256::SecretKey::from_slice(bytes).is_ok(),
+            Algorithm::Sm2 => sm2::SecretKey::from_slice(bytes).is_ok(),
             _ => return Err(Error::new(ErrorKind::UnsupportedAlgorithm)),
         };
         if !valid {

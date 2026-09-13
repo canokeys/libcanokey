@@ -22,3 +22,6 @@ spki = { version = "0.7", features = ["alloc"] }
 pkcs1 = { version = "0.7", features = ["alloc"] }
 p256 = { version = "0.13", default-features = false, features = ["arithmetic"] }
 p384 = { version = "0.13", default-features = false, features = ["arithmetic"] }
+p521 = { version = "0.13", default-features = false, features = ["arithmetic"] }
+k256 = { version = "0.13", default-features = false, features = ["arithmetic"] }
+sm2 = { version = "0.13", default-features = false, features = ["arithmetic"] }

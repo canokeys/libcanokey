@@ -111,7 +111,9 @@ pub(super) unsafe fn material(
         )
     } else {
         match algorithm {
-            EccP256 | EccP384 => piv::PrivateKeyMaterial::ec_scalar(algorithm, values[0]),
+            EccP256 | EccP384 | EccP521 | Secp256k1 | Sm2 => {
+                piv::PrivateKeyMaterial::ec_scalar(algorithm, values[0])
+            }
             Ed25519 => piv::PrivateKeyMaterial::ed25519_seed(values[0]),
             X25519 => piv::PrivateKeyMaterial::x25519_key(values[0]),
             MlDsa65 => piv::PrivateKeyMaterial::mldsa65_seed(values[0]),
@@ -315,6 +317,7 @@ pub unsafe extern "C" fn cnk_piv_decrypt_new(
     })
 }
 /// Derive a raw ECDH/X25519 shared secret from copied peer bytes; no KDF is performed.
+/// EC peers use uncompressed SEC1 on P-256/P-384/P-521/secp256k1; SM2 is excluded.
 /// # Safety
 /// Follow the crate pointer/aliasing contract. profile must be live/non-NULL;
 /// peer must cover len readable bytes; optional auth/opts/error and nested ranges
@@ -341,6 +344,37 @@ pub unsafe extern "C" fn cnk_piv_derive_new(
             slot(reference)?,
             algorithm(key_algorithm)?,
             bytes(peer, len)?.to_vec(),
+            access(auth, error)?,
+            options,
+        )
+        .map(Inner::Object)
+        .map_err(|e| failure(e, error))
+    })
+}
+/// Decapsulate an ML-KEM-768 ciphertext (1088 bytes) into a 32-byte shared secret.
+/// The normal result-byte getter copies the secret. No KDF or sender authentication
+/// is implied; invalid ciphertexts can produce an implicit-rejection secret.
+/// # Safety
+/// Follow the crate pointer/aliasing contract. profile must be live/non-NULL;
+/// data must cover len readable bytes; optional auth/opts/error and nested ranges
+/// must be valid. out must be writable/non-NULL; all inputs are copied.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_decapsulate_new(
+    profile: *const CnkProfile,
+    reference: u32,
+    data: *const u8,
+    len: usize,
+    auth: *const CnkPivAccess,
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        let options = options(opts)?;
+        piv::decapsulate(
+            &profile.as_ref().ok_or(ARG)?.0,
+            slot(reference)?,
+            input(data, len, options, error)?,
             access(auth, error)?,
             options,
         )

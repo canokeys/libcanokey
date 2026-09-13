@@ -81,6 +81,13 @@ pub enum BatchRequest {
         /// Public peer encoding.
         peer: Vec<u8>,
     },
+    /// ML-KEM-768 decapsulation without a KDF or sender authentication.
+    Decapsulate {
+        /// Key-management/retired slot.
+        slot: Slot,
+        /// Exactly 1088 ciphertext bytes.
+        ciphertext: SecretBytes,
+    },
 }
 impl BatchRequest {
     fn input_len(&self) -> usize {
@@ -96,7 +103,9 @@ impl BatchRequest {
                     b.len()
                 }
             },
-            Self::Decrypt { ciphertext, .. } => ciphertext.len(),
+            Self::Decrypt { ciphertext, .. } | Self::Decapsulate { ciphertext, .. } => {
+                ciphertext.len()
+            }
             Self::Derive { peer, .. } => peer.len(),
             _ => 0,
         }
@@ -375,6 +384,10 @@ pub fn batch(
                 peer,
             } => mapped(
                 private::prepare_derive(profile, slot, algorithm, peer, options)?,
+                BatchItem::Bytes,
+            ),
+            BatchRequest::Decapsulate { slot, ciphertext } => mapped(
+                private::prepare_decapsulate(profile, slot, ciphertext, options)?,
                 BatchItem::Bytes,
             ),
         };
