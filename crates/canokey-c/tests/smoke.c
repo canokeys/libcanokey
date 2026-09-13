@@ -1,0 +1,74 @@
+#include "canokey.h"
+#include <assert.h>
+#include <string.h>
+static void feed(cnk_operation_t *op,const uint8_t *data,size_t n,uint32_t *step) {
+    cnk_error_v1 err={0};err.struct_size=sizeof(err);
+    assert(cnk_operation_advance(op,data,n,step,&err)==CNK_OK);
+}
+int main(void) {
+    cnk_operation_t *op=NULL;
+    cnk_profile_t *profile=NULL;
+    cnk_error_v1 err={0};err.struct_size=sizeof(err);
+    uint32_t step=0;
+    const uint8_t ok[]={0x90,0};
+    assert(cnk_abi_version()==1);
+    assert(cnk_probe_device_new(CNK_PROBE_PIV,NULL,&op,&err)==CNK_OK);
+    assert(cnk_operation_start(op,&step,&err)==CNK_OK);
+    size_t n=0;assert(cnk_operation_command(op,NULL,&n)==CNK_OK&&n==10);
+    uint8_t tiny[2]={0xaa,0xbb};n=sizeof(tiny);
+    assert(cnk_operation_command(op,tiny,&n)==CNK_BUFFER_TOO_SMALL&&n==10);
+    assert(tiny[0]==0xaa&&tiny[1]==0xbb);
+    feed(op,ok,sizeof(ok),&step);
+    const uint8_t fw[]={'9','.','0','.','0',0x90,0};feed(op,fw,sizeof(fw),&step);
+    const uint8_t model[]={'C','K',0x90,0};feed(op,model,sizeof(model),&step);
+    const uint8_t serial[]={1,2,3,4,0x90,0};feed(op,serial,sizeof(serial),&step);
+    feed(op,ok,sizeof(ok),&step);
+    const uint8_t piv[]={5,7,0,0x90,0};feed(op,piv,sizeof(piv),&step);
+    assert(step==CNK_STEP_DONE);
+    assert(cnk_operation_take_profile(op,&profile)==CNK_OK);
+    cnk_profile_t *again=profile;
+    assert(cnk_operation_take_profile(op,&again)==CNK_INVALID_STATE&&again==NULL);
+    cnk_operation_free(op);op=NULL;
+    uint8_t pin[]={'1','2','3','4','5','6'};
+    assert(cnk_piv_verify_pin_new(profile,pin,sizeof(pin),NULL,&op,&err)==CNK_OK);
+    cnk_operation_t *status_op=NULL,*object_op=NULL;
+    assert(cnk_piv_get_pin_status_new(profile,NULL,&status_op,&err)==CNK_OK);
+    const uint8_t tag[]={0x7e};
+    assert(cnk_piv_read_object_new(profile,tag,sizeof(tag),NULL,&object_op,&err)==CNK_OK);
+    cnk_profile_free(profile);profile=NULL;memset(pin,0,sizeof(pin));
+    assert(cnk_operation_start(op,&step,&err)==CNK_OK);feed(op,ok,sizeof(ok),&step);
+    uint8_t command[32];n=sizeof(command);assert(cnk_operation_command(op,command,&n)==CNK_OK);
+    assert(n==13&&memcmp(command+5,"123456",6)==0);
+    const uint8_t wrong[]={0x63,0xc2};
+    assert(cnk_operation_advance(op,wrong,sizeof(wrong),&step,&err)==CNK_PROTOCOL_ERROR);
+    assert(step==0&&err.kind==CNK_ERROR_AUTHENTICATION_FAILED&&err.retries_remaining==2&&err.status_word==0x63c2);
+    uint32_t state=0;
+    assert(cnk_operation_state(op,&state)==CNK_OK&&state==CNK_STATE_FAILED);
+    assert(cnk_operation_start(op,&step,&err)==CNK_INVALID_STATE);
+    assert(cnk_operation_error(op,&err)==CNK_OK&&err.kind==CNK_ERROR_AUTHENTICATION_FAILED);
+    cnk_operation_free(op);op=NULL;
+    assert(cnk_operation_start(status_op,&step,&err)==CNK_OK);
+    feed(status_op,ok,sizeof(ok),&step);feed(status_op,ok,sizeof(ok),&step);
+    cnk_pin_status_v1 ps={0};ps.struct_size=sizeof(ps);
+    assert(cnk_operation_pin_status(status_op,&ps)==CNK_OK);
+    assert(ps.presence_flags==CNK_PIN_HAS_VERIFIED&&ps.verified==1);
+    n=0;assert(cnk_operation_result_copy_bytes(status_op,NULL,&n)==CNK_RESULT_TYPE_MISMATCH);
+    cnk_operation_free(status_op);
+    assert(cnk_operation_start(object_op,&step,&err)==CNK_OK);feed(object_op,ok,sizeof(ok),&step);
+    const uint8_t object[]={0x7e,3,1,2,3,0x90,0};feed(object_op,object,sizeof(object),&step);
+    assert(cnk_operation_result_kind(object_op,&state)==CNK_OK&&state==CNK_RESULT_OBJECT);
+    n=0;assert(cnk_operation_result_copy_bytes(object_op,NULL,&n)==CNK_OK&&n==3);
+    n=2;tiny[0]=0xaa;tiny[1]=0xbb;
+    assert(cnk_operation_result_copy_bytes(object_op,tiny,&n)==CNK_BUFFER_TOO_SMALL);
+    assert(tiny[0]==0xaa&&tiny[1]==0xbb);
+    uint8_t result[3];n=sizeof(result);
+    assert(cnk_operation_result_copy_bytes(object_op,result,&n)==CNK_OK&&n==3);
+    cnk_operation_free(object_op);assert(result[0]==1&&result[2]==3);
+    cnk_operation_options_v1 invalid={0};invalid.struct_size=sizeof(invalid);
+    assert(cnk_probe_device_new(CNK_PROBE_MINIMAL,&invalid,&op,&err)==CNK_INVALID_ARGUMENT&&op==NULL);
+    assert(cnk_probe_device_new(CNK_PROBE_MINIMAL,NULL,&op,&err)==CNK_OK);
+    assert(cnk_operation_cancel(op)==CNK_OK&&cnk_operation_cancel(op)==CNK_OK);
+    assert(cnk_operation_state(op,&state)==CNK_OK&&state==CNK_STATE_CANCELLED);
+    cnk_operation_free(op);cnk_operation_free(NULL);cnk_profile_free(NULL);
+    return 0;
+}

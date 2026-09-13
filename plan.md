@@ -1,6 +1,6 @@
 # libcanokey 实施计划
 
-状态：已实现阶段 1a 基础版本及阶段 1b 的 PIN/PUK、对象读取切片；未发布、未经真机验证。本轮只实现本库，不执行其他仓库的接入。当前可用接口与验证命令见 [README](README.md)。
+状态：已实现阶段 1a 基础版本及阶段 1b 的 PIN/PUK、对象读取切片，另有对应实验性 C ABI；未发布、未经真机验证。本轮只实现本库，不执行其他仓库的接入。当前可用接口与验证命令见 [README](README.md)。
 
 本文只定义目标、范围、实施顺序和验收。公开类型、生命周期及协议契约统一见 [design](docs/api-design.md)；应用用法见 [Console](docs/console-integration.md) 和 [PKCS#11](docs/pkcs11-integration.md)。
 

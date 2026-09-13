@@ -8,6 +8,7 @@ CanoKey Host 侧的 Rust 协议库。库生成 APDU、消费完整响应；连�
 - `canokey-compat`：真实固件/PIV 兼容版本分离、能力证据、未知版本保守回退、历史/观测算法 ID、旧对象容器规则。
 - `canokey-admin` / `canokey`：最小 Admin 命令与 Minimal/Piv 只读 probe。
 - `canokey-piv`：SELECT、PIN 查询/验证/登出、修改 PIN/PUK、解锁 PIN、带可选 PIN 的对象读取。
+- `canokey-c`：实验性 ABI 0.1，提供 probe、PIN 验证/状态、公开对象读取、类型化错误和结果 getter；只有 profile/operation 两种 handle。实际声明见 [canokey.h](crates/canokey-c/include/canokey.h)，尚未冻结完整 ABI v1。
 
 尚未实现管理密钥认证、metadata、生成/导入/签名/解密/派生、证书 API、Batch、完整 Admin/OATH/OpenPGP 和 Python binding。没有修改或接入其他仓库；兼容性目前依据 host 实现和离线 transcript，未经真机/usbip 验证。
 
@@ -22,7 +23,10 @@ cargo fmt --all --check
 cargo build -p canokey --target wasm32-unknown-unknown
 python3 scripts/check-dependencies.py
 cargo run -p canokey --example probe
+bash scripts/test-c-abi.sh
 ```
+
+本地已通过 20 个 Rust 测试（含确定性 parser fuzz smoke）、fmt/clippy、Linux C transcript 与 C++ header/link 检查、wasm 构建和依赖边界检查。CI 配置还覆盖 Windows/macOS，但尚未在本地验证这些平台。
 
 probe 示例仅执行固定响应 transcript，不连接设备。应用的实际执行循环如下：
 

@@ -20,6 +20,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "canokey-c"
+version = "0.1.0"
+dependencies = [
+ "canokey",
+]
+
+[[package]]
 name = "canokey-compat"
 version = "0.1.0"
 dependencies = [

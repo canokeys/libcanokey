@@ -6,6 +6,7 @@ members = [
     "crates/canokey-admin",
     "crates/canokey-piv",
     "crates/canokey",
+    "crates/canokey-c",
 ]
 
 [workspace.package]
