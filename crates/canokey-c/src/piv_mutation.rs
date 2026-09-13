@@ -62,7 +62,10 @@ unsafe fn management(
         _ => Err(ARG),
     }
 }
-unsafe fn access(p: *const CnkPivAccess, error: *mut CnkError) -> Result<piv::Access, u32> {
+pub(super) unsafe fn access(
+    p: *const CnkPivAccess,
+    error: *mut CnkError,
+) -> Result<piv::Access, u32> {
     let Some(p) = p.as_ref() else {
         return Ok(piv::Access::None);
     };
@@ -86,7 +89,7 @@ unsafe fn access(p: *const CnkPivAccess, error: *mut CnkError) -> Result<piv::Ac
         (Some(pin), Some(management)) => piv::Access::PinAndManagement { pin, management },
     })
 }
-fn slot(value: u32) -> Result<piv::Slot, u32> {
+pub(super) fn slot(value: u32) -> Result<piv::Slot, u32> {
     match value {
         0x9a => Ok(piv::Slot::Authentication),
         0x9c => Ok(piv::Slot::Signature),

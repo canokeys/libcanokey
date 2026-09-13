@@ -407,7 +407,7 @@ impl DeviceProfile {
         use {Evidence::*, Support::*};
         match feature {
             Capability::ObjectWrites => return self.firmware_range((1, 5, 2), (3, 1, 0)),
-            Capability::ObjectWriteChaining => return self.firmware_range((1, 6, 0), (3, 1, 0)),
+            Capability::ObjectWriteChaining => return self.firmware_range((1, 5, 2), (3, 1, 0)),
             Capability::CertificateDeletion => return self.firmware_range((3, 1, 0), (3, 1, 0)),
             _ => {}
         }
@@ -534,6 +534,102 @@ impl DeviceProfile {
                 }
             }
         }
+    }
+    /// Resolve an observed asymmetric algorithm byte without authorizing key use.
+    /// Configurable IDs follow this profile; unknown IDs remain absent.
+    pub fn algorithm_from_wire_id(&self, id: u8) -> Option<Algorithm> {
+        [
+            Algorithm::Rsa1024,
+            Algorithm::Rsa2048,
+            Algorithm::Rsa3072,
+            Algorithm::Rsa4096,
+            Algorithm::EccP256,
+            Algorithm::EccP384,
+            Algorithm::EccP521,
+            Algorithm::Secp256k1,
+            Algorithm::Sm2,
+            Algorithm::Ed25519,
+            Algorithm::X25519,
+            Algorithm::MlDsa65,
+            Algorithm::MlKem768,
+        ]
+        .into_iter()
+        .find(|a| self.algorithm_wire_id(*a) == Some(id))
+    }
+    /// Whether a slot reference is implemented in the inspected firmware range.
+    /// Primary slots are available from 1.5.2; 82/83 from 2.0; 84..95 from 3.1.
+    /// Management/PIN references are not asymmetric slots.
+    pub fn piv_slot_support(&self, reference: u8) -> CapabilityStatus {
+        match reference {
+            0x9a | 0x9c | 0x9d | 0x9e => self.firmware_range((1, 5, 2), (3, 1, 0)),
+            0x82 | 0x83 => self.firmware_range((2, 0, 0), (3, 1, 0)),
+            0x84..=0x95 => self.firmware_range((3, 1, 0), (3, 1, 0)),
+            _ => CapabilityStatus {
+                support: Support::Unsupported,
+                evidence: Evidence::FirmwareMatrix,
+            },
+        }
+    }
+    /// Whether the configuration read is known, independently of extension enablement
+    /// and authentication requirements. Disabled extensions do not disable this read.
+    pub fn algorithm_config_read_support(&self) -> CapabilityStatus {
+        if self
+            .warnings
+            .contains(&CompatibilityWarning::OptionalCommandUnsupported(
+                "algorithm_config",
+            ))
+        {
+            return CapabilityStatus {
+                support: Support::Unsupported,
+                evidence: Evidence::Observed,
+            };
+        }
+        self.firmware_range((2, 0, 0), (3, 1, 0))
+    }
+    /// Whether an asymmetric algorithm is evidenced for key operations.
+    /// Extended algorithms require observed, enabled IDs; guessed fallback IDs
+    /// never authorize a key write. RSA-1024 is not implemented by inspected firmware.
+    /// Ed/X operations require the encoding fixes from 3.0.1 onward.
+    pub fn key_algorithm_support(&self, algorithm: Algorithm) -> CapabilityStatus {
+        let baseline = self.firmware_range((1, 5, 2), (3, 1, 0));
+        if baseline.support != Support::Supported {
+            return baseline;
+        }
+        match algorithm {
+            Algorithm::Rsa2048 | Algorithm::EccP256 | Algorithm::EccP384 => baseline,
+            Algorithm::Rsa1024 => CapabilityStatus {
+                support: Support::Unsupported,
+                evidence: Evidence::FirmwareMatrix,
+            },
+            _ => {
+                let range = self.firmware_range(
+                    match algorithm {
+                        Algorithm::Ed25519 | Algorithm::X25519 => (3, 0, 1),
+                        Algorithm::EccP521 | Algorithm::MlDsa65 | Algorithm::MlKem768 => (3, 1, 0),
+                        _ => (2, 0, 0),
+                    },
+                    (3, 1, 0),
+                );
+                if range.support != Support::Supported {
+                    return range;
+                }
+                CapabilityStatus {
+                    support: match &self.config {
+                        Some(config) if config.wire_id(algorithm).is_some() => Support::Supported,
+                        Some(config) if !config.enabled() => Support::Unsupported,
+                        _ => Support::Unknown,
+                    },
+                    evidence: Evidence::Observed,
+                }
+            }
+        }
+    }
+    /// Whether GET METADATA on a known empty key slot may return legacy 6900.
+    pub fn legacy_empty_key_metadata(&self) -> bool {
+        self.info
+            .firmware
+            .as_ref()
+            .is_some_and(|v| v.suffix.is_none() && ((2, 0, 0)..(3, 0, 0)).contains(&v.tuple()))
     }
     /// Whether proven legacy firmware returns unwrapped CCC/CHUID objects.
     /// Applet code applies this narrowly to those object types; callers should prefer

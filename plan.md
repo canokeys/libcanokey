@@ -6,9 +6,11 @@ integration and upstream changes require a separate task.
 
 ## Next: complete PIV
 
-1. Add metadata, key generation/import, signing, decryption, and derivation.
-2. Implement Batch for explicit authentication and dependent operations under one
-   SELECT. Preserve completed-item counts on failure without rollback or replay.
+Implement Batch for explicit authentication and dependent operations under one
+SELECT. Preserve completed-item counts on failure without rollback or replay.
+
+Remaining algorithm extensions: additional curve scalar import/derivation and
+ML/empty-Ed25519 streaming private operations, with explicit firmware evidence.
 
 Extend the experimental C ABI alongside useful core operations. Before enabling
 metadata directories, key move/delete, retry/configuration writes, or ML algorithms,

@@ -12,14 +12,14 @@ pub enum ManagementTouchPolicy {
     Always,
 }
 
-fn mutation(response: ResponseData) -> Result<MutationResult, Error> {
+pub(crate) fn mutation(response: ResponseData) -> Result<MutationResult, Error> {
     response.ensure_success(Phase::Command)?;
     if !response.data.is_empty() {
         return Err(Error::new(ErrorKind::InvalidResponse).at(Phase::Parsing));
     }
     Ok(unchanged())
 }
-fn require_management(access: &Access) -> Result<(), Error> {
+pub(crate) fn require_management(access: &Access) -> Result<(), Error> {
     if matches!(
         access,
         Access::Management(_) | Access::PinAndManagement { .. }

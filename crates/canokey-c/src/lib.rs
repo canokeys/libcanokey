@@ -6,6 +6,8 @@
 //! library, accessed without concurrent mutation, and freed exactly once.
 //! A non-null versioned struct must contain at least its declared supported prefix.
 #![deny(missing_docs)]
+mod piv_keys;
+pub use piv_keys::*;
 mod piv_mutation;
 use canokey::{
     compatibility::{Capability, DeviceProfile, Support},
@@ -73,6 +75,10 @@ enum Inner {
     Object(Operation<SecretBytes>),
     Certificate(Operation<piv::Certificate>),
     Mutation(Operation<piv::MutationResult>),
+    Metadata(Operation<piv::Metadata>),
+    PublicKey(Operation<piv::PublicKey>),
+    Signature(Operation<piv::Signature>),
+    AlgorithmConfig(Operation<canokey::compatibility::AlgorithmConfig>),
 }
 macro_rules! dispatch {
     ($value:expr, $op:ident => $body:expr) => {
@@ -83,6 +89,10 @@ macro_rules! dispatch {
             Inner::Object($op) => $body,
             Inner::Certificate($op) => $body,
             Inner::Mutation($op) => $body,
+            Inner::Metadata($op) => $body,
+            Inner::PublicKey($op) => $body,
+            Inner::Signature($op) => $body,
+            Inner::AlgorithmConfig($op) => $body,
         }
     };
 }
@@ -542,7 +552,8 @@ pub unsafe extern "C" fn cnk_operation_take_profile(
         }
     })
 }
-/// Copy a completed object value or unwrapped certificate payload.
+/// Copy completed object/secret bytes, an unwrapped certificate, a raw signature,
+/// complete metadata TLV, or the original algorithm configuration.
 /// NULL buffer queries length; too-small updates len without partial writes.
 /// Getters never reread the card. Other result variants return RESULT_TYPE_MISMATCH;
 /// a byte-result operation that is not Completed returns INVALID_STATE.
@@ -565,6 +576,18 @@ pub unsafe extern "C" fn cnk_operation_result_copy_bytes(
             return STATE;
         }
         match &op.inner {
+            Inner::Metadata(p) => match p.result() {
+                Ok(v) => copy(v.fields().raw.as_bytes(), buffer, len),
+                Err(_) => STATE,
+            },
+            Inner::Signature(p) => match p.result() {
+                Ok(v) => copy(v.as_bytes(), buffer, len),
+                Err(_) => STATE,
+            },
+            Inner::AlgorithmConfig(p) => match p.result() {
+                Ok(v) => copy(v.raw(), buffer, len),
+                Err(_) => STATE,
+            },
             Inner::Certificate(p) => match p.result() {
                 Ok(v) => copy(v.der(), buffer, len),
                 Err(_) => STATE,
@@ -781,6 +804,10 @@ pub unsafe extern "C" fn cnk_operation_result_kind(op: *const CnkOperation, out:
             Inner::Object(_) => 4,
             Inner::Certificate(_) => 5,
             Inner::Mutation(_) => 6,
+            Inner::Metadata(_) => 7,
+            Inner::PublicKey(_) => 8,
+            Inner::Signature(_) => 9,
+            Inner::AlgorithmConfig(_) => 10,
         };
         OK
     })

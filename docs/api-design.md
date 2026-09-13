@@ -90,9 +90,9 @@ Factories take `&DeviceProfile`, owned semantic inputs and `OperationOptions`, r
 | read_object | ObjectData | Implemented; optional PIN |
 | read_certificate | Certificate | Implemented; optional PIN |
 | authenticate_management_key / set_management_key | () / MutationResult | Implemented |
-| get_metadata / read_algorithm_config | Metadata / AlgorithmConfig | Planned standalone factories |
-| generate_key / import_key | PublicKey / MutationResult | Planned |
-| sign / decrypt / derive | Signature / SecretBytes / SecretBytes | Planned |
+| get_metadata / read_algorithm_config | Metadata / AlgorithmConfig | Implemented |
+| generate_key / import_key | PublicKey / MutationResult | Implemented with evidenced algorithms |
+| sign / decrypt / derive | Signature / SecretBytes / SecretBytes | Implemented for classic signing, RSA decryption and P-256/P-384/X25519 agreement |
 | write_object / write_certificate / delete_certificate | MutationResult | Implemented |
 
 Slot references cover authentication 9A, signature 9C, key management 9D, card authentication 9E, and checked retired indices 1..20 (wire 82..95). Management reference 9B is not a signing slot. `ObjectId` accepts a complete checked BER tag; certificate mapping is library-owned.
@@ -107,14 +107,14 @@ Management authentication explicitly selects External or Mutual; no silent downg
 | ObjectData | Normalized container value, with discovery 7E and narrow proven legacy CCC/CHUID exceptions; secret-buffer handling |
 | Certificate | Unwrapped payload and original compression flag; bounded gzip decoding; no X.509 syntax/trust validation |
 | MutationResult | Unchanged or ReprobeRequired profile effect; no claim that application caches were refreshed |
-| Metadata (planned) | Key/PIN/PUK/management variants, optional public key and policy, Known/Unknown(raw) fields; unknown values cannot construct commands |
-| PublicKey (planned) | Unsigned big-endian RSA n/e, uncompressed SEC1 EC points, raw Ed/X/ML bytes; pure SPKI conversion |
-| PrivateKeyMaterial (planned) | Typed, checked secret RSA CRT components, fixed EC scalar, Ed25519 seed, X25519 key, ML-DSA 32-byte / ML-KEM 64-byte seed |
-| Signature (planned) | Algorithm-tagged result; RSA/Ed/ML raw bytes, ECDSA/SM2 DER or fixed-width P1363 conversion |
+| Metadata | Key/PIN/PUK/management variants, optional public key and policy, Known/Unknown(raw) fields; unknown values cannot construct commands |
+| PublicKey | Unsigned big-endian RSA n/e, uncompressed SEC1 EC points, raw Ed/X/ML bytes; pure SPKI conversion |
+| PrivateKeyMaterial | Typed, checked secret RSA CRT components, P-256/P-384 scalar, Ed25519 seed, X25519 key, ML-DSA 32-byte / ML-KEM 64-byte seed |
+| Signature | Algorithm-tagged result; RSA/Ed raw bytes, ECDSA/SM2 DER or fixed-width P1363 conversion |
 
-Certificate parsing requires exactly one nonempty 70 field, accepts absent 71 as uncompressed, accepts 71=00/01 only, and permits an optional empty FE. Duplicate, unknown, malformed fields and trailing gzip members/data fail. Input and decoded payload are independently bounded by max_total_response_bytes; gzip CRC and size must validate. Empty/malformed containers are not silently treated as empty slots. Object NotFound remains a status-derived error. Certificate deletion uses the empty 53 container on 3.1.0 without deleting a private key; older versions cannot claim deletion and are rejected. Chained writes are enabled from 1.6.0; partial writes are never rolled back or replayed.
+Certificate parsing requires exactly one nonempty 70 field, accepts absent 71 as uncompressed, accepts 71=00/01 only, and permits an optional empty FE. Duplicate, unknown, malformed fields and trailing gzip members/data fail. Input and decoded payload are independently bounded by max_total_response_bytes; gzip CRC and size must validate. Empty/malformed containers are not silently treated as empty slots. Object NotFound remains a status-derived error. Certificate deletion uses the empty 53 container on 3.1.0 without deleting a private key; older versions cannot claim deletion and are rejected. Chained writes use common APDU reassembly on 1.5.2 and applet streaming from 1.6.0; partial writes are never rolled back or replayed.
 
-Planned SignInput distinguishes RSA encoded block (host owns hash/PKCS1/PSS), ECDSA digest (order-bit truncation and short-value padding), Ed25519 message, SM2 digest (host computes SM3(ZA||M)), and ML-DSA message/context. Unverified contexts are rejected before sending. RSA decrypt returns the modulus-sized raw block; unpadding stays in the application. ECDH/X25519 derive validates peer encoding and returns raw shared secret; no KDF. ML-KEM decapsulation is separate with checked ciphertext/secret lengths. Algorithm names are semantic identifiers, not reconfigurable wire IDs or support promises.
+SignInput distinguishes RSA encoded block (host owns hash/PKCS1/PSS), ECDSA digest (order-bit truncation and short-value padding), nonempty Ed25519 messages and SM2 digests (host computes SM3(ZA||M)). ML-DSA message/context and empty-message streaming require separate factories. Unverified contexts are rejected before sending. RSA decrypt returns the modulus-sized raw block; unpadding stays in the application. ECDH/X25519 derive validates peer encoding and returns raw shared secret; no KDF. ML-KEM decapsulation is separate with checked ciphertext/secret lengths. Algorithm names are semantic identifiers, not reconfigurable wire IDs or support promises.
 
 File I/O, private-key PEM/PKCS#8 import, CSR/X.509 policy, PKCS#11 padding/KDF and object records stay outside the library. Generic certificate DER/PEM inspection is an optional pure module, described below. Enable directories, retry configuration, move/delete key, algorithm writes and new algorithms individually by evidence.
 
@@ -189,8 +189,8 @@ Use established libraries for standard cryptography and standard key formats. Th
 | Certificate gzip | `flate2` with `rust_backend` and default features disabled | Already used by PIV. The applet layer still enforces input/output bounds, container rules, and trailing-data rejection |
 | Management-key block cryptography | RustCrypto [`aes`](https://docs.rs/aes), [`des`](https://docs.rs/des), and their matching [`cipher`](https://docs.rs/cipher) traits | Used for external/mutual authentication. Use exact single-block operations without padding. 3DES is for legacy protocol interoperability; do not implement primitives locally |
 | Authentication response comparison | [`subtle`](https://docs.rs/subtle) | Used for constant-time comparison of fixed-size authentication values; reject incorrect public lengths first. Do not compare secrets with ordinary slice equality |
-| Signature/public-key encoding | RustCrypto [`der`](https://docs.rs/der), [`spki`](https://docs.rs/spki), and curve-specific signature types where appropriate | Planned DER/P1363 and SPKI conversion. Reuse canonical integer/length handling; no handwritten generic ASN.1 codec |
-| EC point validation | RustCrypto [`p256`](https://docs.rs/p256) and the matching curve crates | Planned only when key/peer validation requires it. Use checked point decoding, not just SEC1 prefix/length checks; private signing/key agreement still occurs on the card |
+| Signature/public-key encoding | RustCrypto [`der`](https://docs.rs/der), [`spki`](https://docs.rs/spki), and curve-specific signature types where appropriate | Used for DER/P1363 and SPKI conversion. Reuse canonical integer/length handling; no handwritten generic ASN.1 codec |
+| EC point validation | RustCrypto [`p256`](https://docs.rs/p256) and the matching curve crates | Used for P-256/P-384 scalar and peer validation. Use checked point decoding, not just SEC1 prefix/length checks; private signing/key agreement still occurs on the card |
 
 Random bytes remain explicit caller inputs. Do not enable a dependency's OS RNG, runtime, or transport features in the core. Host hashing/padding/KDF that belongs to PKCS#11 or application policy stays in that application; introduce hash/MAC/KDF dependencies only when an implemented protocol requires them.
 

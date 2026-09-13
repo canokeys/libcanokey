@@ -349,7 +349,7 @@ fn chained_write_stops_without_replay_after_intermediate_error() {
     assert!(op.command().is_err());
     assert!(op.start().is_err());
     assert!(write_object(
-        &profile("1.5.2"),
+        &profile("unknown"),
         id,
         SecretBytes::new(vec![0; 600]),
         Access::Management(auth(v, false)),

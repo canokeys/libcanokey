@@ -42,13 +42,27 @@
 //! ```
 //!
 //! The [`command`] module is lower-level: its builders do not SELECT or authenticate
-//! on behalf of the caller. Metadata, keys, private operations and Batch remain
-//! planned. Use [`Access::Management`] or [`Access::PinAndManagement`] to keep
+//! on behalf of the caller. Batch remains planned. Use [`Access::Management`] or [`Access::PinAndManagement`] to keep
 //! authentication and a dependent operation under one SELECT.
 //!
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 mod access;
+/// Signing, decryption, derivation and signature encodings.
+pub mod private;
+pub use private::{decrypt, derive, sign, SignInput, Signature};
+/// Key generation, import material and policies.
+pub mod keys;
+pub use keys::{generate_key, import_key, KeyParameters, PrivateKeyMaterial};
+/// Owned metadata records and key policy values.
+pub mod metadata;
+pub use metadata::{
+    get_metadata, read_algorithm_config, KeyOrigin, KnownOrUnknown, Metadata, MetadataFields,
+    MetadataReference, PinPolicy, TouchPolicy,
+};
+/// Owned public-key fields and standard SPKI encoding.
+pub mod public_key;
+pub use public_key::PublicKey;
 /// Authenticated object/certificate writes and management-key replacement.
 pub mod write;
 pub use write::{
@@ -282,6 +296,10 @@ pub mod command {
     /// Build algorithm-configuration discovery; the caller must establish probe safety.
     pub fn algorithm_config() -> LogicalCommand {
         read(0xee, 1, 0, vec![])
+    }
+    /// Build an individual metadata read; does not query the metadata directory.
+    pub fn metadata(reference: MetadataReference) -> LogicalCommand {
+        read(0xf7, 0, reference.reference(), vec![])
     }
     /// Build empty VERIFY. Interpret 63Cx as status data, not a submitted-PIN failure.
     pub fn pin_status() -> LogicalCommand {

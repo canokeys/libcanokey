@@ -40,11 +40,12 @@ graph TD
 - Firmware/PIV version separation, capability evidence, conservative unknown-version handling, observed algorithm IDs, and narrow legacy object quirks.
 - Minimal/PIV read-only probe; PIV SELECT, PIN status/verify/logout, PIN/PUK changes, PIN unblock, object reads with optional PIN, and certificate reads.
 - Explicit External/Mutual management authentication using RustCrypto 3DES/AES-192, with caller-supplied mutual challenges. Authenticated object/certificate writes, certificate deletion on evidenced firmware, and management-key replacement.
+- PIV metadata/configuration reads, owned public keys with SPKI export, key generation/import, classic signing with DER/P1363 conversion, raw RSA decryption, and P-256/P-384/X25519 derivation. Extended key operations require observed enabled algorithm IDs.
 - Certificate container parsing and bounded gzip decompression. `Certificate::der()` returns the payload; X.509 syntax, signatures, and trust validation remain application responsibilities.
 - Optional generic X.509 DER/PEM inspection into owned fields, with timestamp values, raw encodings, and optional Serde serialization. Adapted from Console Rust without its FRB/UI dependencies; no trust verification.
-- Experimental C ABI 0.1: probe, PIN verification/status, public object/certificate reads, management authentication and writes, typed mutation results/errors, and copy getters. Only profile/operation handles; see [header](crates/canokey-c/include/canokey.h).
+- Experimental C ABI 0.1: probe, PIN verification/status, public object/certificate reads, management authentication, writes, metadata and key operations, typed results/errors, and copy getters. Only profile/operation handles; see [header](crates/canokey-c/include/canokey.h).
 
-Metadata, key generation/import/sign/decrypt/derive, Batch, full Admin, OATH, OpenPGP, and Python/FRB bindings are **not implemented**. No consumer repository has been integrated. Compatibility is based on host sources and offline transcripts, not hardware/usbip validation.
+Batch, full Admin, OATH, OpenPGP, and Python/FRB bindings remain planned. Classic signing excludes ML-DSA and empty Ed25519 messages. EC scalar import/derivation currently covers P-256/P-384; other named curves can be parsed/generated, and X25519 derivation is supported. No consumer repository has been integrated. Compatibility is based on host sources and offline transcripts, not hardware/usbip validation.
 
 ## Runnable examples
 

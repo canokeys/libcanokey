@@ -66,11 +66,23 @@ No firmware is linked or built as a dependency.
 - [AES-192 transition](https://github.com/canokeys/canokey-core/commit/5e0b978)
   and the pinned HEAD implement AES-192 in both modes; manager's firmware matrix
   places this transition at 3.1.0. The host never tries both algorithms automatically.
-- PUT DATA stores 5C's following container verbatim. 1.5.2 has no short write
-  chaining; inspected releases from 1.6.0 do. The pinned HEAD explicitly removes
+- PUT DATA stores 5C's following container verbatim. On 1.5.2, the common
+  `src/apdu.c` layer reassembles chained commands; from 1.6.0 the applet handles
+  PUT DATA chaining itself. Other legacy commands use common reassembly. The pinned HEAD explicitly removes
   a certificate file for `53 00`; legacy releases merely store that container.
 - SET MANAGEMENT KEY accepts exactly 24 bytes: old releases require 03/9B/18
   and P2=FF; AES-192 uses 0A/9B/18 and permits P2=FE for touch Always.
+
+- GET METADATA uses tags 01..06 for algorithm, policies, origin, public key,
+  default credential and retries. Unknown values/fields stay observable. Retired
+  slots 82/83 occur in 2.x/3.0 sources; the full 82..95 range is in the pinned HEAD.
+- Key generation wraps 80/AA/AB in AC and returns 7F49; import uses five RSA CRT
+  fields (implicit e=65537), scalar 06, Ed/X 07/08 and ML seed 09/0A. Public-key
+  TLV and seed formats are defined by `src/key.c`. RSA-1024 is not in the inspected
+  firmware algorithm switch. Ed/X private operations require the 3.0.1 fixes.
+- Classic signing requires a nonempty challenge (81) and empty response (82).
+  ECDH/X25519 uses 85 instead of 81. Empty Ed25519 and ML signing need separate
+  streaming-mode support and are not silently mapped to the classic command.
 
 These sources establish encoding and version rules, not hardware interoperability.
 Newer, development and unrecognized versions remain Unknown for these mutations.

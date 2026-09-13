@@ -38,7 +38,9 @@ enum { CNK_REFERENCE_NONE=0, CNK_REFERENCE_PIN=1, CNK_REFERENCE_PUK=2,
        CNK_REFERENCE_MANAGEMENT_KEY=3, CNK_REFERENCE_ADMIN_PIN=4 };
 enum { CNK_ERROR_HAS_SW=1, CNK_ERROR_HAS_RETRIES=2 };
 enum { CNK_RESULT_PROFILE=1, CNK_RESULT_UNIT=2, CNK_RESULT_PIN_STATUS=3,
-       CNK_RESULT_OBJECT=4, CNK_RESULT_CERTIFICATE=5, CNK_RESULT_MUTATION=6 };
+       CNK_RESULT_OBJECT=4, CNK_RESULT_CERTIFICATE=5, CNK_RESULT_MUTATION=6,
+       CNK_RESULT_METADATA=7, CNK_RESULT_PUBLIC_KEY=8, CNK_RESULT_SIGNATURE=9,
+       CNK_RESULT_ALGORITHM_CONFIG=10 };
 enum { CNK_MANAGEMENT_TDES=1, CNK_MANAGEMENT_AES192=2 };
 enum { CNK_AUTH_EXTERNAL=1, CNK_AUTH_MUTUAL=2 };
 enum { CNK_MANAGEMENT_TOUCH_NEVER=0, CNK_MANAGEMENT_TOUCH_ALWAYS=1 };
@@ -78,6 +80,39 @@ typedef struct {
 typedef struct {
     uint32_t struct_size,profile_effect;
 } cnk_mutation_result_v1;
+/* Semantic algorithms are distinct from configurable on-wire IDs. */
+enum { CNK_ALGORITHM_RSA1024=1, CNK_ALGORITHM_RSA2048=2,
+       CNK_ALGORITHM_RSA3072=3, CNK_ALGORITHM_RSA4096=4,
+       CNK_ALGORITHM_P256=5, CNK_ALGORITHM_P384=6, CNK_ALGORITHM_P521=7,
+       CNK_ALGORITHM_SECP256K1=8, CNK_ALGORITHM_SM2=9,
+       CNK_ALGORITHM_ED25519=10, CNK_ALGORITHM_X25519=11,
+       CNK_ALGORITHM_MLDSA65=12, CNK_ALGORITHM_MLKEM768=13 };
+enum { CNK_KEY_PIN_DEFAULT=0, CNK_KEY_PIN_NEVER=1, CNK_KEY_PIN_ONCE=2, CNK_KEY_PIN_ALWAYS=3 };
+enum { CNK_KEY_TOUCH_DEFAULT=0, CNK_KEY_TOUCH_NEVER=1, CNK_KEY_TOUCH_ALWAYS=2, CNK_KEY_TOUCH_CACHED=3 };
+enum { CNK_SIGN_RSA_BLOCK=1, CNK_SIGN_DIGEST=2, CNK_SIGN_MESSAGE=3 };
+enum { CNK_PUBLIC_MODULUS=1, CNK_PUBLIC_EXPONENT=2, CNK_PUBLIC_POINT_OR_RAW=3, CNK_PUBLIC_SPKI=4 };
+enum { CNK_METADATA_HAS_ALGORITHM=1, CNK_METADATA_HAS_POLICY=2,
+       CNK_METADATA_HAS_ORIGIN=4, CNK_METADATA_HAS_DEFAULT=8, CNK_METADATA_HAS_RETRIES=16 };
+typedef struct {
+    uint32_t struct_size,slot,algorithm,pin_policy,touch_policy;
+} cnk_piv_key_parameters_v1;
+typedef struct { const uint8_t *data; size_t len; } cnk_bytes_t;
+typedef struct {
+    uint32_t struct_size,presence_flags;
+    uint8_t algorithm_id,pin_policy,touch_policy,origin,is_default,retries_total,retries_remaining,reserved;
+} cnk_metadata_v1;
+cnk_status_t cnk_piv_generate_key_new(const cnk_profile_t *,const cnk_piv_key_parameters_v1 *,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+/* RSA: five components p/q/dP/dQ/qInv, implicit e=65537. Others: one scalar/seed. */
+cnk_status_t cnk_piv_import_key_new(const cnk_profile_t *,const cnk_piv_key_parameters_v1 *,const cnk_bytes_t *,size_t count,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_piv_get_metadata_new(const cnk_profile_t *,uint32_t reference,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_piv_read_algorithm_config_new(const cnk_profile_t *,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_piv_sign_new(const cnk_profile_t *,uint32_t slot,uint32_t algorithm,uint32_t kind,const uint8_t *,size_t,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_piv_decrypt_new(const cnk_profile_t *,uint32_t slot,uint32_t algorithm,const uint8_t *,size_t,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_piv_derive_new(const cnk_profile_t *,uint32_t slot,uint32_t algorithm,const uint8_t *,size_t,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_operation_metadata(const cnk_operation_t *,cnk_metadata_v1 *);
+cnk_status_t cnk_operation_public_key_copy(const cnk_operation_t *,uint32_t field,uint8_t *,size_t *);
+cnk_status_t cnk_operation_key_algorithm(const cnk_operation_t *,uint32_t *);
+cnk_status_t cnk_operation_signature_p1363(const cnk_operation_t *,uint8_t *,size_t *);
 uint32_t cnk_abi_version(void);
 void cnk_profile_free(cnk_profile_t *);
 void cnk_operation_free(cnk_operation_t *);
@@ -97,7 +132,9 @@ cnk_status_t cnk_piv_set_management_key_new(const cnk_profile_t *,uint32_t algor
 cnk_status_t cnk_operation_mutation_result(const cnk_operation_t *,cnk_mutation_result_v1 *);
 cnk_status_t cnk_operation_start(cnk_operation_t *,cnk_step_kind_t *,cnk_error_v1 *);
 cnk_status_t cnk_operation_advance(cnk_operation_t *,const uint8_t *,size_t,cnk_step_kind_t *,cnk_error_v1 *);
-/* NULL buffer queries size, success writes length, too-small never partially copies. */
+/* NULL buffer queries size, success writes length, too-small never partially copies.
+ * result_copy_bytes returns object/secret data, certificate payload, raw signature,
+ * complete metadata TLV or raw algorithm configuration according to result kind. */
 cnk_status_t cnk_operation_command(const cnk_operation_t *,uint8_t *,size_t *);
 cnk_status_t cnk_operation_take_profile(cnk_operation_t *,cnk_profile_t **);
 cnk_status_t cnk_operation_result_copy_bytes(const cnk_operation_t *,uint8_t *,size_t *);

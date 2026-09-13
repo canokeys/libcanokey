@@ -17,3 +17,8 @@ aes = { version = "0.8", features = ["zeroize"] }
 des = { version = "0.8", features = ["zeroize"] }
 subtle = { version = "2.6", default-features = false }
 zeroize.workspace = true
+der = { version = "0.7", features = ["alloc", "derive", "oid"] }
+spki = { version = "0.7", features = ["alloc"] }
+pkcs1 = { version = "0.7", features = ["alloc"] }
+p256 = { version = "0.13", default-features = false, features = ["arithmetic"] }
+p384 = { version = "0.13", default-features = false, features = ["arithmetic"] }
