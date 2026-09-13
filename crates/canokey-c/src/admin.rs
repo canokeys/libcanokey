@@ -6,21 +6,23 @@ use canokey::admin;
 pub struct CnkAdminRequest {
     /// Size of the complete supported descriptor.
     pub struct_size: u32,
-    /// CNK_ADMIN_* request identifier, 1..19.
+    /// CNK_ADMIN_* request identifier, 1..24 (11 is reserved).
     pub kind: u32,
     /// Optional explicit current PIN; NULL/zero omits verification.
     pub pin: *const u8,
     /// Current PIN byte count.
     pub pin_len: usize,
-    /// New PIN bytes for CHANGE_PIN only.
+    /// New PIN bytes for CHANGE_PIN, or nine raw bytes for WRITE_LEGACY_SM2.
     pub data: *const u8,
-    /// New PIN byte count; zero for other requests.
+    /// Byte count of data; zero for other requests.
     pub data_len: usize,
     /// CONFIGURE: boolean presence bits 0 LED, 1 NDEF read-only, 2 NDEF, 3 WebUSB.
-    /// CONFIGURE_SM2: presence bits 0 curve, 1 algorithm. Otherwise zero.
+    /// CONFIGURE_SM2: presence bits 0 curve, 1 algorithm.
+    /// SET_LEGACY_OPENPGP_TOUCH: index 0 SIG, 1 DEC, 2 AUT, 3 cache seconds.
     pub present: u32,
     /// CONFIGURE: values of selected boolean bits. SET_NFC: zero/one.
     /// RESET_APPLET: 1 OpenPGP, 2 PIV, 3 OATH, 4 NDEF, 5 CTAP, 6 PASS.
+    /// Historical switches: zero/one. Legacy touch: boolean or cache seconds.
     pub values: u32,
     /// CONFIGURE: feature bits to modify, limited to 0x3f.
     pub feature_mask: u8,
@@ -37,11 +39,11 @@ unsafe fn request(d: &CnkAdminRequest) -> Result<admin::Request, u32> {
     use admin::Request as R;
     if d.struct_size < std::mem::size_of::<CnkAdminRequest>() as u32
         || d.reserved != [0; 2]
-        || (d.kind != 12 && (!d.data.is_null() || d.data_len != 0))
+        || (!matches!(d.kind, 12 | 24) && (!d.data.is_null() || d.data_len != 0))
         || (d.kind != 13 && (d.feature_mask != 0 || d.feature_values != 0))
         || (d.kind != 17 && (d.curve_id != 0 || d.algorithm_id != 0))
-        || (!matches!(d.kind, 13 | 17) && d.present != 0)
-        || (!matches!(d.kind, 13 | 15 | 18) && d.values != 0)
+        || (!matches!(d.kind, 13 | 17 | 23) && d.present != 0)
+        || (!matches!(d.kind, 13 | 15 | 18 | 20..=23) && d.values != 0)
     {
         return Err(ARG);
     }
@@ -96,6 +98,20 @@ unsafe fn request(d: &CnkAdminRequest) -> Result<admin::Request, u32> {
             _ => return Err(ARG),
         }),
         19 => R::FactoryReset,
+        20 if d.values <= 1 => R::SetKeyboardInterface(d.values != 0),
+        21 if d.values <= 1 => R::SetKeyboardReturn(d.values != 0),
+        22 if d.values <= 1 => R::SetLegacyPivExtensions(d.values != 0),
+        23 => R::SetLegacyOpenPgpTouch(match (d.present, d.values) {
+            (0, 0..=1) => admin::LegacyOpenPgpTouch::Signature(d.values != 0),
+            (1, 0..=1) => admin::LegacyOpenPgpTouch::Decryption(d.values != 0),
+            (2, 0..=1) => admin::LegacyOpenPgpTouch::Authentication(d.values != 0),
+            (3, 0..=255) => admin::LegacyOpenPgpTouch::CacheSeconds(d.values as u8),
+            _ => return Err(ARG),
+        }),
+        24 => R::WriteLegacySm2(
+            admin::LegacySm2Configuration::from_bytes(bytes(d.data, d.data_len)?)
+                .map_err(|_| ARG)?,
+        ),
         _ => return Err(ARG),
     })
 }
@@ -135,7 +151,8 @@ pub unsafe extern "C" fn cnk_admin_new(
 pub struct CnkAdminOutcome {
     /// Initialized supported structure size.
     pub struct_size: u32,
-    /// 0 none, 1 bytes, 2 configuration, 3 flash, 4 applet usage, 5 PIN, 6 NFC, 7 SM2.
+    /// 0 none, 1 bytes, 2 configuration, 3 flash, 4 applet usage, 5 PIN, 6 NFC,
+    /// 7 SM2, 8 legacy configuration, 9 legacy SM2 (flags bit 0: enabled).
     pub value_kind: u32,
     /// Number of writes confirmed by empty 9000 responses.
     pub confirmed_writes: usize,
@@ -198,6 +215,11 @@ pub unsafe extern "C" fn cnk_operation_admin_outcome(
             Value::None => 0,
             Value::Bytes(_) => 1,
             Value::Configuration(_) => 2,
+            Value::LegacyConfiguration(_) => 8,
+            Value::LegacySm2Configuration(c) => {
+                value.flags = u32::from(c.enabled());
+                9
+            }
             Value::FlashUsage(f) => {
                 value.used_kib = f.used_kib.into();
                 value.total_kib = f.total_kib.into();
@@ -229,6 +251,8 @@ pub(super) fn result_bytes(value: &admin::Value) -> Option<Vec<u8>> {
     Some(match value {
         admin::Value::Bytes(b) => b.clone(),
         admin::Value::Configuration(c) => c.raw().to_vec(),
+        admin::Value::LegacyConfiguration(c) => c.raw().to_vec(),
+        admin::Value::LegacySm2Configuration(c) => c.raw().to_vec(),
         admin::Value::AppletUsage(entries) => entries
             .iter()
             .flat_map(|e| {

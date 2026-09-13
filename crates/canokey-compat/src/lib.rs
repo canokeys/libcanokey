@@ -141,6 +141,30 @@ pub enum Capability {
     OathReliablePagination,
     /// Baseline Admin commands; layouts and newer commands have separate gates.
     Admin,
+    /// Admin NDEF/WebUSB availability flags introduced in 1.5.2.
+    AdminNdefWebUsb,
+    /// Admin keyboard interface switch, removed in 3.0.
+    AdminKeyboard,
+    /// Admin keyboard-return switch from 1.6.2, removed in 3.0.
+    AdminKeyboardReturn,
+    /// Admin PIV extension enable switch in 2.x (40/07); not PIV EE.
+    AdminLegacyPivExtensions,
+    /// Admin 09 configures OpenPGP touch on 1.3; it resets CTAP on 3.x.
+    AdminLegacyOpenPgpTouch,
+    /// CTAP and PASS resets introduced in 3.0.
+    AdminCtapPassReset,
+    /// Vendor NFC switch introduced in 3.0.
+    AdminNfc,
+    /// Reading NFC status without Admin PIN from 3.0.1.
+    AdminPublicNfcStatus,
+    /// Public Admin configuration/flash reads in the pinned 3.1 layout.
+    AdminPublicConfiguration,
+    /// Applet usage, core commit and feature-mask configuration in pinned 3.1.
+    AdminExtendedConfiguration,
+    /// CTAP SM2 configuration read introduced in 3.0.
+    AdminSm2,
+    /// Legacy nine-byte native-layout CTAP SM2 configuration, 3.0.x only.
+    AdminLegacySm2,
     /// Observed PIV applet availability.
     Piv,
     /// PIV metadata command availability.
@@ -175,6 +199,20 @@ pub enum Capability {
     PivReset,
     /// Certificate removal using an empty 53 container.
     CertificateDeletion,
+}
+/// Admin READ CONFIG layout selected from actual firmware, never response length.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AdminConfigurationLayout {
+    /// 1.3: seven bytes, ending with OpenPGP SIG/DEC/AUT touch flags and cache time.
+    TouchPolicies,
+    /// 1.5.2–1.6.1: five bytes including keyboard, NDEF and WebUSB flags.
+    Basic,
+    /// 1.6.2–2.x: six bytes; the final byte controls keyboard return.
+    KeyboardReturn,
+    /// 3.0.x: six bytes; bytes 1 and 5 are reserved.
+    Reserved,
+    /// 3.1: six bytes; byte 5 is the applet feature mask.
+    Features,
 }
 /// Management-key block algorithm, separate from asymmetric key algorithms.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -474,8 +512,25 @@ impl DeviceProfile {
             Capability::OpenPgpRetryReset
             | Capability::OpenPgpWrappedAlgorithmInformation
             | Capability::OpenPgpShortDigest => return self.firmware_range((3, 1, 0), (3, 1, 0)),
-            Capability::Admin
-            | Capability::CertificateDeletion
+            Capability::Admin => return self.firmware_range((1, 3, 0), (3, 1, 0)),
+            Capability::AdminNdefWebUsb => return self.firmware_range((1, 5, 2), (3, 1, 0)),
+            Capability::AdminKeyboard => return self.firmware_range((1, 3, 0), (2, 0, 1)),
+            Capability::AdminKeyboardReturn => return self.firmware_range((1, 6, 2), (2, 0, 1)),
+            Capability::AdminLegacyPivExtensions => {
+                return self.firmware_range((2, 0, 0), (2, 0, 1))
+            }
+            Capability::AdminLegacyOpenPgpTouch => {
+                return self.firmware_range((1, 3, 0), (1, 3, 0))
+            }
+            Capability::AdminCtapPassReset | Capability::AdminNfc | Capability::AdminSm2 => {
+                return self.firmware_range((3, 0, 0), (3, 1, 0))
+            }
+            Capability::AdminPublicNfcStatus => return self.firmware_range((3, 0, 1), (3, 1, 0)),
+            Capability::AdminLegacySm2 => return self.firmware_range((3, 0, 0), (3, 0, 3)),
+            Capability::AdminPublicConfiguration | Capability::AdminExtendedConfiguration => {
+                return self.firmware_range((3, 1, 0), (3, 1, 0))
+            }
+            Capability::CertificateDeletion
             | Capability::MetadataDirectory
             | Capability::ContainerNames
             | Capability::KeyMoveDelete
@@ -616,6 +671,27 @@ impl DeviceProfile {
             }
         };
         self.firmware_range(first, (3, 1, 0))
+    }
+    /// Select READ CONFIG framing, failing for unknown/development firmware.
+    pub fn admin_configuration_layout(&self) -> Result<AdminConfigurationLayout, Error> {
+        self.capability(Capability::Admin).require()?;
+        let v = self
+            .info
+            .firmware
+            .as_ref()
+            .ok_or_else(|| Error::new(ErrorKind::CapabilityUnknown))?
+            .tuple();
+        Ok(if v == (1, 3, 0) {
+            AdminConfigurationLayout::TouchPolicies
+        } else if v < (1, 6, 2) {
+            AdminConfigurationLayout::Basic
+        } else if v < (3, 0, 0) {
+            AdminConfigurationLayout::KeyboardReturn
+        } else if v < (3, 1, 0) {
+            AdminConfigurationLayout::Reserved
+        } else {
+            AdminConfigurationLayout::Features
+        })
     }
     fn extension_wire_id(&self, algorithm: Algorithm) -> Option<u8> {
         let id = self.config.as_ref()?.wire_id(algorithm)?;

@@ -16,11 +16,10 @@
 
 ## Compatibility and adoption
 
-Admin factories currently target known 3.1.0 firmware. OpenPGP supports historical
-DO framing and independent operation/algorithm gates. OATH supports
-1.3 legacy and 1.5.2–3.1.0 modern commands with independent feature gates. Extending older layouts
-requires per-command source evidence and transcripts; legacy framing must be selected from actual Admin firmware evidence.
-PIV retains its existing version matrix. Hardware/usbip checks remain necessary to
+Admin, OATH and OpenPGP factories now select audited historical layouts from actual
+firmware with independent feature gates. Legacy CTAP SM2 identifiers remain explicit
+raw native-layout bytes until byte order is established for the target hardware.
+Hardware/usbip checks remain necessary to
 establish interoperability across firmware and transport variants.
 
 Consumer integration, FIDO/CTAP operations and Python bindings require separate

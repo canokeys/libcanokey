@@ -1,5 +1,5 @@
 use crate::{command, types::invalid, *};
-use canokey_compat::{Capability, DeviceProfile};
+use canokey_compat::{AdminConfigurationLayout, Capability, DeviceProfile, Support};
 use canokey_protocol::{
     operation::{
         engine::{Action, Machine},
@@ -48,7 +48,10 @@ fn sm2_valid(s: Sm2Configuration) -> Result<(), Error> {
 
 /// Build an Admin operation, copying only required profile evidence and owning inputs.
 ///
-/// The current command/configuration layout requires known firmware 3.1.0. SELECT
+/// Baseline commands cover audited 1.3–3.1.0; individual requests and layouts
+/// have independent capability gates. Old configuration/flash reads require PIN;
+/// NFC reads require PIN on 3.0.0. Legacy SM2 identifier bytes stay uninterpreted.
+/// SELECT
 /// occurs once; `Some(pin)` causes explicit VERIFY before the request. Protected
 /// requests require it. PinStatus and FactoryReset reject a PIN to prevent hidden
 /// credential attempts. Patches are sequential, not atomic; confirmed writes remain
@@ -66,16 +69,65 @@ pub fn operation(
     options: OperationOptions,
 ) -> Result<Operation<Outcome>, Error> {
     profile.capability(Capability::Admin).require()?;
-    let protected = matches!(
-        request,
-        Request::VerifyPin
-            | Request::ChangePin(_)
-            | Request::Configure(_)
-            | Request::SetNfc(_)
-            | Request::Sm2Configuration
-            | Request::ConfigureSm2(_)
-            | Request::ResetApplet(_)
-    );
+    match &request {
+        Request::CoreCommit | Request::AppletUsage | Request::ConfigureSm2(_) => profile
+            .capability(Capability::AdminExtendedConfiguration)
+            .require()?,
+        Request::SetKeyboardInterface(_) => {
+            profile.capability(Capability::AdminKeyboard).require()?
+        }
+        Request::SetKeyboardReturn(_) => profile
+            .capability(Capability::AdminKeyboardReturn)
+            .require()?,
+        Request::SetLegacyPivExtensions(_) => profile
+            .capability(Capability::AdminLegacyPivExtensions)
+            .require()?,
+        Request::SetLegacyOpenPgpTouch(_) => profile
+            .capability(Capability::AdminLegacyOpenPgpTouch)
+            .require()?,
+        Request::WriteLegacySm2(_) => profile.capability(Capability::AdminLegacySm2).require()?,
+        Request::ResetApplet(Applet::Ctap | Applet::Pass) => profile
+            .capability(Capability::AdminCtapPassReset)
+            .require()?,
+        Request::NfcStatus | Request::SetNfc(_) => {
+            profile.capability(Capability::AdminNfc).require()?
+        }
+        Request::Sm2Configuration => profile.capability(Capability::AdminSm2).require()?,
+        Request::Configure(p) => {
+            if p.ndef_enabled.is_some() || p.webusb_landing.is_some() {
+                profile.capability(Capability::AdminNdefWebUsb).require()?;
+            }
+            if p.feature_mask != 0 {
+                profile
+                    .capability(Capability::AdminExtendedConfiguration)
+                    .require()?;
+            }
+        }
+        _ => {}
+    }
+    let protected_read = matches!(request, Request::Configuration | Request::FlashUsage)
+        && profile
+            .capability(Capability::AdminPublicConfiguration)
+            .support
+            == Support::Unsupported
+        || matches!(request, Request::NfcStatus)
+            && profile.capability(Capability::AdminPublicNfcStatus).support == Support::Unsupported;
+    let protected = protected_read
+        || matches!(
+            request,
+            Request::VerifyPin
+                | Request::ChangePin(_)
+                | Request::Configure(_)
+                | Request::SetNfc(_)
+                | Request::Sm2Configuration
+                | Request::ConfigureSm2(_)
+                | Request::ResetApplet(_)
+                | Request::SetKeyboardInterface(_)
+                | Request::SetKeyboardReturn(_)
+                | Request::SetLegacyPivExtensions(_)
+                | Request::SetLegacyOpenPgpTouch(_)
+                | Request::WriteLegacySm2(_)
+        );
     if protected && pin.is_none() {
         return Err(Error::new(ErrorKind::SecurityStatusNotSatisfied));
     }
@@ -138,6 +190,31 @@ pub fn operation(
             )),
             Stage::Write(true),
         ),
+        Request::SetKeyboardInterface(on) => (
+            Some(write(0x40, 3, u8::from(*on), vec![])),
+            Stage::Write(true),
+        ),
+        Request::SetKeyboardReturn(on) => (
+            Some(write(0x40, 6, u8::from(*on), vec![])),
+            Stage::Write(true),
+        ),
+        Request::SetLegacyPivExtensions(on) => (
+            Some(write(0x40, 7, u8::from(*on), vec![])),
+            Stage::Write(true),
+        ),
+        Request::SetLegacyOpenPgpTouch(t) => {
+            let (index, value) = match t {
+                LegacyOpenPgpTouch::Signature(on) => (0, u8::from(*on)),
+                LegacyOpenPgpTouch::Decryption(on) => (1, u8::from(*on)),
+                LegacyOpenPgpTouch::Authentication(on) => (2, u8::from(*on)),
+                LegacyOpenPgpTouch::CacheSeconds(seconds) => (3, *seconds),
+            };
+            (Some(write(9, index, value, vec![])), Stage::Write(true))
+        }
+        Request::WriteLegacySm2(config) => (
+            Some(write(0x12, 0, 0, config.raw().to_vec())),
+            Stage::Write(true),
+        ),
         Request::FactoryReset => (
             Some(write(0x50, 0, 0, b"RESET".to_vec())),
             Stage::Write(true),
@@ -146,7 +223,10 @@ pub fn operation(
     if let Some(c) = target {
         queue.push_back((c, stage));
     }
-    for (c, _) in &queue {
+    for (c, _) in &mut queue {
+        if profile.legacy_explicit_le() && c.le == ExpectedLength::Absent {
+            c.le = ExpectedLength::Exact(256);
+        }
         validate_command(c, options)?;
     }
     // Dynamic patch commands have the same short, data-free shape (SM2: eight bytes).
@@ -171,6 +251,7 @@ pub fn operation(
             pending: None,
             request,
             options,
+            profile: profile.clone(),
             outcome: Some(Outcome {
                 value: Value::None,
                 confirmed_writes: 0,
@@ -192,6 +273,7 @@ struct Admin {
     pending: Option<Stage>,
     request: Request,
     options: OperationOptions,
+    profile: DeviceProfile,
     outcome: Option<Outcome>,
 }
 impl Admin {
@@ -199,6 +281,32 @@ impl Admin {
         self.outcome.as_mut().ok_or_else(invalid)
     }
     fn patch(&mut self, raw: &[u8], p: ConfigurationPatch) -> Result<(), Error> {
+        if self.profile.admin_configuration_layout()? != AdminConfigurationLayout::Features {
+            let config = LegacyConfiguration::parse(&self.profile, raw)?;
+            let mut writes = Vec::new();
+            for (value, old, ins, p1) in [
+                (p.led_on, Some(config.led_on()), 0x40, 1),
+                (p.ndef_read_only, Some(config.ndef_read_only()), 8, 0),
+                (p.ndef_enabled, config.ndef_enabled(), 0x40, 4),
+                (p.webusb_landing, config.webusb_landing(), 0x40, 5),
+            ] {
+                if let Some(value) = value {
+                    let old = old.ok_or_else(|| Error::new(ErrorKind::UnsupportedFeature))?;
+                    if value != old {
+                        let mut c = if ins == 8 {
+                            write(ins, u8::from(value), 0, vec![])
+                        } else {
+                            write(ins, p1, u8::from(value), vec![])
+                        };
+                        c.le = ExpectedLength::Exact(256);
+                        validate_command(&c, self.options)?;
+                        writes.push((c, Stage::Write(true)));
+                    }
+                }
+            }
+            self.queue.extend(writes);
+            return Ok(());
+        }
         let config = Configuration::parse(raw)?;
         let mut writes = Vec::new();
         for (value, old, ins, p1) in [
@@ -274,12 +382,26 @@ impl Admin {
                 }
                 Value::Bytes(raw.to_vec())
             }
-            Request::Configuration => Value::Configuration(Configuration::parse(raw)?),
+            Request::Configuration => {
+                if self.profile.admin_configuration_layout()? == AdminConfigurationLayout::Features
+                {
+                    Value::Configuration(Configuration::parse(raw)?)
+                } else {
+                    Value::LegacyConfiguration(LegacyConfiguration::parse(&self.profile, raw)?)
+                }
+            }
             Request::Configure(p) => {
                 self.patch(raw, *p)?;
                 Value::None
             }
-            Request::Sm2Configuration => Value::Sm2Configuration(Sm2Configuration::parse(raw)?),
+            Request::Sm2Configuration => {
+                if self.profile.capability(Capability::AdminLegacySm2).support == Support::Supported
+                {
+                    Value::LegacySm2Configuration(LegacySm2Configuration::from_bytes(raw)?)
+                } else {
+                    Value::Sm2Configuration(Sm2Configuration::parse(raw)?)
+                }
+            }
             Request::ConfigureSm2(p) => {
                 let old = Sm2Configuration::parse(raw)?;
                 let new = Sm2Configuration {

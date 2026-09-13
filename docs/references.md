@@ -170,3 +170,12 @@ FA availability, the pre-2.0 RSA generation restriction and short-digest rejecti
 Core 1.3 also returns the whole ECDH point, and pre-1.6.1 Ed/X key responses include
 one extra trailing byte. These are narrow format normalizations, not generic
 acceptance of malformed public keys.
+
+Historical Admin checks use the same core versions. READ CONFIG changes from
+seven touch-policy bytes (1.3) to five flags, then six with keyboard return;
+3.0 reserves the removed keyboard fields. Core 1.3's `admin_set_touch_policy`
+uses INS 09, which collides with the 3.0 CTAP reset. The 2.x extension switch is
+40/07 and is not reported by READ CONFIG. `ctap-internal.h` and `ctap.c` at
+3.0.0/3.0.3 serialize nine native-layout SM2 bytes, unlike Console's big-endian
+decoder. Legacy SM2 reads/writes therefore preserve raw identifier bytes; the
+current eight-byte format is explicitly big-endian at core `a0f0c09`.

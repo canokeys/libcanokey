@@ -169,6 +169,33 @@ Current Admin layout is gated to pinned 3.1.0 evidence. CTAP SM2 configuration c
 two signed big-endian i32 identifiers, without an enable flag. NFC commands are vendor
 hooks; a supported firmware layout does not establish vendor hardware support.
 
+### Historical Admin layouts
+
+Actual firmware chooses `AdminConfigurationLayout`: 1.3 has seven bytes ending
+in OpenPGP touch flags/cache time; 1.5.2–1.6.1 has five configuration flags;
+1.6.2–2.x adds keyboard return; 3.0 reserves bytes 1/5; 3.1 uses byte 5 for applet
+feature bits. Reads return `Value::LegacyConfiguration` before 3.1. Optional
+getters never invent NDEF/WebUSB or keyboard flags. Common configuration patches
+preserve all unrelated fields; feature-mask writes require 3.1.
+
+Explicit historical requests cover keyboard interface, keyboard return, the 2.x
+PIV extension switch and 1.3 OpenPGP touch settings. Admin 09 is touch configuration
+only on 1.3 and CTAP reset only from 3.0. Factory/app-specific resets never block
+PINs or guess credentials. Old configuration/flash reads require supplied Admin
+PIN; NFC status requires it on 3.0.0 but not from 3.0.1. Core-commit/app-usage reads
+remain gated to pinned 3.1 evidence.
+
+3.0.x CTAP SM2 reads return `LegacySm2Configuration`: one enable flag and eight
+uninterpreted native-layout identifier bytes. `WriteLegacySm2` copies this explicit
+nine-byte payload. Old core serializes a packed native struct, while Console's
+current decoder assumes big-endian; the library does not guess across that conflict.
+The 3.1 identifier patch API remains eight-byte big-endian and has no enable flag.
+This is Admin/CTAP configuration, not OpenPGP SM2 support.
+
+C request IDs 20–24 expose the historical writes without changing descriptor size.
+Admin result kinds 8/9 distinguish legacy configuration/SM2; byte-copy getters return
+the original payload. Applications select its interpretation from actual firmware.
+
 ## OATH
 
 `oath::operation` selects once and performs explicit mutual HMAC-SHA1 validation
