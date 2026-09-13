@@ -19,7 +19,7 @@ jobs:
       # Local sibling dependency; remove when switching to crates.io.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: Harry-Chen/x509-info
+          repository: canokeys/x509-info
           ref: 231e2947bfd7e0a8dc8c751fd739b5622a24187c
           path: x509-info
           persist-credentials: false

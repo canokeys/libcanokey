@@ -87,7 +87,7 @@ let json = serde_json::to_string(&info.summary())?;
 ```
 
 Certificate inspection is maintained in the independent
-[x509-info repository](https://github.com/Harry-Chen/x509-info). Its README owns
+[x509-info repository](https://github.com/canokeys/x509-info). Its README owns
 library, CLI and schema documentation. This workspace currently uses a sibling
 checkout for local development:
 
