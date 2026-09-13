@@ -1,5 +1,5 @@
 use crate::{types::invalid, *};
-use canokey_compat::{Capability, DeviceProfile};
+use canokey_compat::{Capability, DeviceProfile, Support};
 use canokey_protocol::{
     operation::{
         engine::{Action, Machine},
@@ -47,14 +47,14 @@ fn select() -> LogicalCommand {
         ExpectedLength::Absent,
     )
 }
-fn target(request: &Request) -> Result<Option<LogicalCommand>, Error> {
+fn target(request: &Request, legacy: bool) -> Result<Option<LogicalCommand>, Error> {
     let mut data = SecretBytes::default();
     let mut paged = false;
     let (ins, p2, le) = match request {
         Request::Select | Request::Validate => return Ok(None),
         Request::List => {
             paged = true;
-            (0xa1, 0, ExpectedLength::Exact(255))
+            (if legacy { 3 } else { 0xa1 }, 0, ExpectedLength::Exact(255))
         }
         Request::Put(c) => {
             if !(4..=8).contains(&c.digits)
@@ -74,7 +74,11 @@ fn target(request: &Request) -> Result<Option<LogicalCommand>, Error> {
             data.extend(c.secret.as_bytes());
             let properties = u8::from(c.increasing) | (u8::from(c.require_touch) << 1);
             if properties != 0 {
-                data.extend(&[0x78, properties]);
+                if legacy {
+                    field(&mut data, 0x78, &[properties]);
+                } else {
+                    data.extend(&[0x78, properties]);
+                }
             } // Property is tag/value, not TLV.
             if c.kind == Kind::Hotp {
                 field(&mut data, 0x7a, &c.initial_counter.to_be_bytes());
@@ -105,8 +109,8 @@ fn target(request: &Request) -> Result<Option<LogicalCommand>, Error> {
                 field(&mut data, 0x74, challenge);
             }
             (
-                0xa2,
-                u8::from(*format == Format::Truncated),
+                if legacy { 4 } else { 0xa2 },
+                u8::from(!legacy && *format == Format::Truncated),
                 ExpectedLength::Absent,
             )
         }
@@ -114,8 +118,8 @@ fn target(request: &Request) -> Result<Option<LogicalCommand>, Error> {
             field(&mut data, 0x74, challenge);
             paged = true;
             (
-                0xa4,
-                u8::from(*format == Format::Truncated),
+                if legacy { 5 } else { 0xa4 },
+                u8::from(!legacy && *format == Format::Truncated),
                 ExpectedLength::Exact(255),
             )
         }
@@ -134,7 +138,7 @@ fn target(request: &Request) -> Result<Option<LogicalCommand>, Error> {
     let mut c = command(ins, 0, p2, data, le);
     if paged {
         c.continuation = Continuation::Oath {
-            instruction: 0xa5,
+            instruction: if legacy { 6 } else { 0xa5 },
             probe_after_success: true,
         };
     }
@@ -214,8 +218,26 @@ fn calculation(
         code,
     })
 }
-fn result(request: &Request, data: SecretBytes) -> Result<Outcome, Error> {
+fn result(request: &Request, data: SecretBytes, legacy: bool) -> Result<Outcome, Error> {
     match request {
+        Request::List if legacy => {
+            let f = fields(data.as_bytes())?;
+            if f.len() % 2 != 0 {
+                return Err(invalid());
+            }
+            let mut entries = Vec::new();
+            for pair in f.chunks_exact(2) {
+                if pair[0].0 != 0x71 || pair[1].0 != 0x75 || pair[1].1.len() != 2 {
+                    return Err(invalid());
+                }
+                entries.push(Entry {
+                    name: Name::from_bytes(pair[0].1).map_err(|_| invalid())?,
+                    algorithm_type: pair[1].1[0],
+                    digits: Some(pair[1].1[1]),
+                });
+            }
+            Ok(Outcome::Entries(entries))
+        }
         Request::List => Ok(Outcome::Entries(
             fields(data.as_bytes())?
                 .into_iter()
@@ -226,6 +248,7 @@ fn result(request: &Request, data: SecretBytes) -> Result<Outcome, Error> {
                     Ok(Entry {
                         name: Name::from_bytes(&bytes[1..]).map_err(|_| invalid())?,
                         algorithm_type: bytes[0],
+                        digits: None,
                     })
                 })
                 .collect::<Result<_, _>>()?,
@@ -265,7 +288,11 @@ fn result(request: &Request, data: SecretBytes) -> Result<Outcome, Error> {
         _ => Err(invalid()),
     }
 }
-/// Construct an owned OATH operation for the pinned 3.1.0 firmware layout.
+/// Construct an owned OATH operation using the actual firmware's command dialect.
+/// Legacy 1.3 has no access code, rename, SHA-512 or full response. Full response
+/// requests require 2.0; they are never silently downgraded. Before 2.0, rename does
+/// not detect duplicate destinations. Before 3.0.1, firmware may omit records at
+/// page boundaries; the host cannot establish completeness or safely replay codes.
 ///
 /// `None` access is allowed only when SELECT reports no access challenge (except
 /// Select itself). A supplied key requires a challenge, preventing silent fallback
@@ -291,11 +318,57 @@ pub fn operation(
     {
         return Err(argument());
     }
-    let mut target = target(&request)?;
+    let legacy = profile.capability(Capability::OathLegacy).support == Support::Supported;
+    if access.is_some()
+        || matches!(
+            request,
+            Request::Validate
+                | Request::SetCode { .. }
+                | Request::ClearCode
+                | Request::Rename { .. }
+        )
+        || matches!(&request, Request::Put(c) if c.algorithm == Algorithm::Sha512)
+        || matches!(
+            request,
+            Request::Calculate {
+                algorithm: Algorithm::Sha512,
+                ..
+            }
+        )
+    {
+        profile.capability(Capability::OathModern).require()?;
+    }
+    if matches!(
+        request,
+        Request::Calculate {
+            format: Format::Full,
+            ..
+        } | Request::CalculateAll {
+            format: Format::Full,
+            ..
+        }
+    ) {
+        profile.capability(Capability::OathFullResponse).require()?;
+    }
+    let explicit_le = profile.legacy_explicit_le();
+    let mut target = target(&request, legacy)?;
+    if explicit_le {
+        if let Some(c) = &mut target {
+            c.le = ExpectedLength::Exact(256);
+        }
+    }
+    let mut selection = select();
+    if explicit_le {
+        selection.le = ExpectedLength::Exact(256);
+    }
     // The current firmware reserves up to 133 bytes for one full CalculateAll entry.
     if matches!(request, Request::List | Request::CalculateAll { .. }) {
         let minimum = if matches!(request, Request::List) {
-            67
+            if legacy {
+                70
+            } else {
+                67
+            }
         } else {
             133
         };
@@ -306,7 +379,7 @@ pub fn operation(
             c.le = ExpectedLength::Exact(255.min(options.exchange.max_response_bytes - 2) as u32);
         }
     }
-    validate_command(&select(), options)?;
+    validate_command(&selection, options)?;
     if let Some(c) = &target {
         validate_command(c, options)?;
     }
@@ -328,6 +401,9 @@ pub fn operation(
             access,
             target,
             phase: 0,
+            legacy,
+            explicit_le,
+            serial: profile.info().serial().and_then(|s| s.try_into().ok()),
         },
         options,
     )
@@ -337,6 +413,9 @@ struct Oath {
     access: Option<Access>,
     target: Option<LogicalCommand>,
     phase: u8,
+    legacy: bool,
+    explicit_le: bool,
+    serial: Option<[u8; 4]>,
 }
 impl Oath {
     fn target(&mut self) -> Result<Action<Outcome>, Error> {
@@ -351,7 +430,11 @@ impl Machine<Outcome> for Oath {
     fn next(&mut self, response: Option<ResponseData>) -> Result<Action<Outcome>, Error> {
         if self.phase == 0 {
             self.phase = 1;
-            return Ok(Action::Command(select()));
+            let mut c = select();
+            if self.explicit_le {
+                c.le = ExpectedLength::Exact(256);
+            }
+            return Ok(Action::Command(c));
         }
         let response = response.ok_or_else(invalid)?;
         let phase = match self.phase {
@@ -381,6 +464,18 @@ impl Machine<Outcome> for Oath {
         }
         match self.phase {
             1 => {
+                if self.legacy {
+                    if !response.data.is_empty() {
+                        return Err(invalid());
+                    }
+                    return if matches!(self.request, Request::Select) {
+                        Ok(Action::Done(Outcome::LegacySelection {
+                            serial: self.serial,
+                        }))
+                    } else {
+                        self.target()
+                    };
+                }
                 let selection = selection(response.data)?;
                 if matches!(self.request, Request::Select) {
                     return Ok(Action::Done(Outcome::Selection(selection)));
@@ -407,7 +502,11 @@ impl Machine<Outcome> for Oath {
                             0,
                             0,
                             data,
-                            ExpectedLength::Absent,
+                            if self.explicit_le {
+                                ExpectedLength::Exact(256)
+                            } else {
+                                ExpectedLength::Absent
+                            },
                         )))
                     }
                 }
@@ -425,7 +524,11 @@ impl Machine<Outcome> for Oath {
                     })?;
                 self.target()
             }
-            3 => Ok(Action::Done(result(&self.request, response.data)?)),
+            3 => Ok(Action::Done(result(
+                &self.request,
+                response.data,
+                self.legacy,
+            )?)),
             _ => Err(invalid()),
         }
     }

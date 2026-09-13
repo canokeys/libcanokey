@@ -16,9 +16,9 @@
 
 ## Compatibility and adoption
 
-Admin, OATH and OpenPGP factories target known 3.1.0 firmware. Extending older layouts
-requires per-command source evidence and transcripts; legacy OATH 06 continuation
-is available in the conversation engine, without guessed legacy semantic factories.
+Admin and OpenPGP factories currently target known 3.1.0 firmware. OATH supports
+1.3 legacy and 1.5.2–3.1.0 modern commands with independent feature gates. Extending older layouts
+requires per-command source evidence and transcripts; legacy framing must be selected from actual Admin firmware evidence.
 PIV retains its existing version matrix. Hardware/usbip checks remain necessary to
 establish interoperability across firmware and transport variants.
 

@@ -131,8 +131,12 @@ No firmware is linked or built as a dependency.
   raw one-byte OATH lengths, the tag/value (not TLV) property field, SHA-1 mutual
   access validation, full/truncated output and HOTP pre-increment behavior. LIST
   and CalculateAll end in nonempty 9000 followed by empty 6985 on a final A5 poll.
-  Older inspected tags and Console establish 06/A5 conversation shapes; semantic
-  factories remain gated to current evidence rather than inferring old layouts.
+  ckman’s [firmware changelog](https://github.com/canokeys/canokey-manager/blob/89a52a7ec237b93b01f1158f6ffc3d26a57e13f9/doc/CanoKey-Firmware-Versions.md)
+  and `yubikit/oath.py` establish legacy 1.3 dialect selection and the 2.0 full-HMAC
+  boundary. Core `5f1e95f8341856d994abb4566995e2379cc0612d` confirms empty
+  SELECT, LIST 71/75 pairs, truncated 76, touch TLV and continuation 06. The
+  1.5.2/1.6.2/2.0/3.0 sources confirm modern command formats and old pagination
+  limitations. Semantic factories select these layouts only from actual firmware.
 
 - `applets/openpgp/openpgp.c` and `src/key.c` at pinned HEAD establish independent
   PW1 usage modes, algorithm attributes nested in 6E/73, certificate occurrence state,

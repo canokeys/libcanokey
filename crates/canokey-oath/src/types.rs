@@ -146,7 +146,7 @@ pub enum Request {
     Rename {
         /// Existing name.
         old: Name,
-        /// New unique name.
+        /// New name. Before 2.0, firmware does not reject an existing destination.
         new: Name,
     },
     /// Calculate one credential. Name/type/algorithm come from caller records.
@@ -187,6 +187,8 @@ pub struct Entry {
     pub name: Name,
     /// High nibble type (1 HOTP, 2 TOTP); low nibble algorithm (1/2/3).
     pub algorithm_type: u8,
+    /// Decimal digits observed by legacy LIST; modern LIST does not report them.
+    pub digits: Option<u8>,
 }
 /// Calculation payload or explicit non-calculation marker. Code bytes are secret.
 #[derive(Debug)]
@@ -234,6 +236,12 @@ impl Calculation {
 pub enum Outcome {
     /// SELECT data; not a persistent authenticated session.
     Selection(Selection),
+    /// Legacy SELECT returned no applet version, salt or challenge. The optional
+    /// four-byte Admin serial is copied from the profile, never synthesized as salt.
+    LegacySelection {
+        /// Independently observed Admin serial, when available.
+        serial: Option<[u8; 4]>,
+    },
     /// Credential list, in card order.
     Entries(Vec<Entry>),
     /// Individual or all-credential calculations, in card order.

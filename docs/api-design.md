@@ -283,3 +283,20 @@ hold a private enum of concrete Operation types and Option for idempotent close,
 but must not duplicate protocol state. Dart owns async execution; Python bindings
 would follow the same model with a caller-owned synchronous loop. Binding examples:
 [Console](console-integration.md), [PKCS#11](pkcs11-integration.md).
+
+### Historical OATH commands
+
+`Capability::Oath` covers baseline operations. `OathLegacy` selects the 1.3
+instruction set; `OathModern` authorizes access codes, rename and SHA-512 from
+1.5.2. `OathFullResponse` and `OathRenameCollisionCheck` start at 2.0. Legacy
+SELECT returns `Outcome::LegacySelection`, with an optional independently observed
+Admin serial and no synthetic version or password salt. Legacy LIST retains its
+digit metadata. C result kind 5 represents legacy selection; copy field 5 returns
+the observed serial when present, and info.flags bit 0 reports its presence.
+
+Old final APDUs carry explicit Le. LIST and CalculateAll use 06 on 1.3 and A5
+on modern firmware, including a bounded poll after a nonempty successful page.
+Before 3.0.1, `OathReliablePagination` is Unsupported: firmware may omit records
+at page boundaries. Success does not prove completeness, and calculations are
+never replayed to compensate. Full-response requests fail before execution on
+pre-2.0 firmware; ordinary rename remains available without a collision guarantee.

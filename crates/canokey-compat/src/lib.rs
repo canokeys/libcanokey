@@ -109,11 +109,21 @@ impl CapabilityStatus {
 /// Semantic feature keys used by the current compatibility model.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Capability {
-    /// OpenPGP command and algorithm layout in pinned firmware 3.1.0.
+    /// Baseline OpenPGP commands; individual features have separate gates.
     OpenPgp,
-    /// OATH commands and full/truncated calculation layout in firmware 3.1.0.
+    /// Baseline OATH commands; dialect and full responses have separate gates.
     Oath,
-    /// Admin configuration layout and commands observed in firmware 3.1.0.
+    /// OATH 1.3 instruction set, empty SELECT and TLV touch property.
+    OathLegacy,
+    /// Modern OATH instruction set, access validation, rename and SHA-512.
+    OathModern,
+    /// Full HMAC responses (older firmware only returns dynamic truncation).
+    OathFullResponse,
+    /// RENAME rejects an existing destination instead of creating duplicate names.
+    OathRenameCollisionCheck,
+    /// LIST/CalculateAll continuation no longer drops exact-buffer-fit records.
+    OathReliablePagination,
+    /// Baseline Admin commands; layouts and newer commands have separate gates.
     Admin,
     /// Observed PIV applet availability.
     Piv,
@@ -430,8 +440,14 @@ impl DeviceProfile {
         match feature {
             Capability::ObjectWrites => return self.firmware_range((1, 5, 2), (3, 1, 0)),
             Capability::ObjectWriteChaining => return self.firmware_range((1, 5, 2), (3, 1, 0)),
+            Capability::Oath => return self.firmware_range((1, 3, 0), (3, 1, 0)),
+            Capability::OathLegacy => return self.firmware_range((1, 3, 0), (1, 3, 0)),
+            Capability::OathModern => return self.firmware_range((1, 5, 2), (3, 1, 0)),
+            Capability::OathFullResponse | Capability::OathRenameCollisionCheck => {
+                return self.firmware_range((2, 0, 0), (3, 1, 0))
+            }
+            Capability::OathReliablePagination => return self.firmware_range((3, 0, 1), (3, 1, 0)),
             Capability::OpenPgp
-            | Capability::Oath
             | Capability::Admin
             | Capability::CertificateDeletion
             | Capability::MetadataDirectory
@@ -525,7 +541,8 @@ impl DeviceProfile {
     fn firmware_range(&self, first: (u16, u16, u16), last: (u16, u16, u16)) -> CapabilityStatus {
         if let Some(version) = &self.info.firmware {
             let v = version.tuple();
-            if version.suffix.is_none() && (((1, 5, 2)..=(3, 0, 3)).contains(&v) || v == (3, 1, 0))
+            if version.suffix.is_none()
+                && (v == (1, 3, 0) || ((1, 5, 2)..=(3, 0, 3)).contains(&v) || v == (3, 1, 0))
             {
                 return CapabilityStatus {
                     support: if (first..=last).contains(&v) {
@@ -541,6 +558,11 @@ impl DeviceProfile {
             support: Support::Unknown,
             evidence: Evidence::LatestKnownFallback,
         }
+    }
+    /// Whether audited historical firmware needs explicit Le on final short APDUs.
+    /// This is a format selector, not authorization: require the applet/feature first.
+    pub fn legacy_explicit_le(&self) -> bool {
+        self.firmware_range((1, 3, 0), (3, 0, 3)).support == Support::Supported
     }
     fn extension_wire_id(&self, algorithm: Algorithm) -> Option<u8> {
         let id = self.config.as_ref()?.wire_id(algorithm)?;

@@ -249,11 +249,16 @@ pub unsafe extern "C" fn cnk_operation_oath_info(
                 info.handle = s.handle;
                 info.challenge = s.challenge.unwrap_or([0; 8]);
             }
+            Outcome::LegacySelection { serial } if index == 0 => {
+                info.kind = 5;
+                info.flags = u32::from(serial.is_some());
+            }
             Outcome::Entries(entries) => {
                 info.kind = 2;
                 info.count = entries.len();
                 if let Some(e) = entries.get(index) {
                     info.algorithm_type = e.algorithm_type.into();
+                    info.digits = e.digits.unwrap_or(0).into();
                 } else if index != 0 || !entries.is_empty() {
                     return ARG;
                 }
@@ -282,7 +287,7 @@ pub unsafe extern "C" fn cnk_operation_oath_info(
     })
 }
 /// Copy OATH data: field 1 original SELECT bytes, 2 indexed name, 3 indexed code,
-/// 4 indexed decimal code. NULL buffer queries size. Markers/full decimal return
+/// 4 indexed decimal code, 5 legacy SELECT Admin serial when observed. NULL buffer queries size. Markers/full decimal return
 /// RESULT_TYPE_MISMATCH. Code copies are secrets and must be wiped by the caller.
 ///
 /// # Safety
@@ -312,6 +317,12 @@ pub unsafe extern "C" fn cnk_operation_oath_copy(
         match v {
             oath::Outcome::Selection(s) if index == 0 && field == 1 => {
                 copy(s.raw.as_bytes(), buffer, len)
+            }
+            oath::Outcome::LegacySelection { .. } if index == 0 && field == 1 => {
+                copy(&[], buffer, len)
+            }
+            oath::Outcome::LegacySelection { serial: Some(s) } if index == 0 && field == 5 => {
+                copy(s, buffer, len)
             }
             oath::Outcome::Entries(entries) if field == 2 => match entries.get(index) {
                 Some(e) => copy(e.name.as_bytes(), buffer, len),

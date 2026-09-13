@@ -288,18 +288,19 @@ typedef struct {
  uint32_t format; /* CALCULATE/CALCULATE_ALL: 1 truncated, 2 full */
 } cnk_oath_request_v1;
 typedef struct {
- uint32_t struct_size, kind; /* 1 selection, 2 entries, 3 calculations, 4 unit */
+ uint32_t struct_size, kind; /* 1 modern selection, 2 entries, 3 calculations, 4 unit, 5 legacy selection */
  size_t count;
  uint32_t algorithm_type, digits;
  uint32_t code_kind; /* 1 truncated, 2 full, 3 HOTP marker, 4 touch marker */
- uint32_t flags; /* bit 0: SELECT challenge or calculation name present */
+ uint32_t flags; /* bit 0: modern challenge, legacy serial, or calculation name present */
  uint8_t version[3], reserved, handle[8], challenge[8];
 } cnk_oath_info_v1;
 uint32_t cnk_oath_new(const cnk_profile_t *, const cnk_oath_request_v1 *,
  const cnk_operation_options_v1 *, cnk_operation_t **, cnk_error_v1 *);
 /* Index zero queries empty lists too (count=0); nonzero indices must exist. */
 uint32_t cnk_operation_oath_info(const cnk_operation_t *, size_t index, cnk_oath_info_v1 *);
-/* Field 1 SELECT raw, 2 name, 3 code bytes, 4 decimal. No implicit full-HMAC
+/* Field 1 SELECT raw (empty on legacy), 2 name, 3 code bytes, 4 decimal,
+ * 5 legacy Admin serial when present. Legacy SELECT has no version/handle. No implicit full-HMAC
  * truncation. Query/copy contracts apply. Caller must wipe copied codes. */
 uint32_t cnk_operation_oath_copy(const cnk_operation_t *, size_t index, uint32_t field,
  uint8_t *buffer, size_t *length);
