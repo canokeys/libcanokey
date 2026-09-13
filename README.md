@@ -99,3 +99,9 @@ Core external dependencies provide zeroization and pure Rust gzip decoding, with
 - [API design](docs/api-design.md): ownership and protocol contracts, including explicitly marked future APIs.
 - [Reference sources](docs/references.md): pinned upstream evidence.
 - [Contributor instructions](AGENTS.md): English repository language, architecture, checks, and commits.
+
+## License
+
+Copyright 2026 canokeys.org.
+
+Licensed under the [Apache License, Version 2.0](LICENSE). The root license applies to all original workspace crates, examples, and documentation. Each crate inherits the SPDX identifier, license file, authors, and homepage from workspace metadata; Cargo includes the shared license file in packaged crates. Third-party dependencies and read-only reference repositories retain their own licenses.

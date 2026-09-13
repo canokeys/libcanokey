@@ -3,6 +3,11 @@ name = "canokey"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+license-file.workspace = true
+homepage.workspace = true
+description = "Transport-free CanoKey host protocol library"
 publish = false
 
 [dependencies]

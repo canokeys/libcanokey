@@ -3,6 +3,11 @@ name = "canokey-compat"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+license-file.workspace = true
+homepage.workspace = true
+description = "CanoKey firmware compatibility rules and immutable capability profiles"
 publish = false
 
 [dependencies]

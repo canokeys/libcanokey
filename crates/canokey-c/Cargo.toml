@@ -3,6 +3,11 @@ name = "canokey-c"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+license-file.workspace = true
+homepage.workspace = true
+description = "C ABI for caller-owned CanoKey host protocol operations"
 publish = false
 
 [dependencies]

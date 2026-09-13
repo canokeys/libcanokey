@@ -5,6 +5,7 @@
 - Write all repository content, documentation, comments, diagnostics, and commit messages in English. Conversation may follow the user's language.
 - `plan.md` owns milestones and acceptance criteria; `docs/api-design.md` owns API contracts; README describes implemented features and build commands. Never describe a design target as implemented.
 - Implement and test only this repository. `references/` contains read-only upstream clones: never modify, commit, or use them as build dependencies. Do not integrate consumers without instructions.
+- Original workspace code is Apache-2.0, authored by canokeys.org. New crates must inherit workspace license, license-file, authors, and homepage metadata; retain upstream notices for any third-party code. Keep one canonical root LICENSE.
 - Deliver buildable, reviewable increments. Do not substitute empty implementations or constant Unsupported responses for unfinished protocols.
 
 ## Architecture and ownership

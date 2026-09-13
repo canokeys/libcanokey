@@ -3,6 +3,11 @@ name = "canokey-piv"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+license-file.workspace = true
+homepage.workspace = true
+description = "Caller-owned CanoKey PIV protocol operations and certificate parsing"
 publish = false
 
 [dependencies]
