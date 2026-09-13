@@ -25,5 +25,4 @@ canokey-compat = { path = "crates/canokey-compat" }
 canokey-admin = { path = "crates/canokey-admin" }
 canokey-piv = { path = "crates/canokey-piv" }
 canokey = { path = "crates/canokey" }
-# Local sibling checkout; replace with version = "0.1.0" to use crates.io.
-x509-info = { path = "../x509-info", version = "0.1.0" }
+x509-info = "0.1.0"

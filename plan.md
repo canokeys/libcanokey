@@ -37,11 +37,6 @@ Integration requires controlled hardware/usbip checks across supported firmware;
 offline tests alone do not establish interoperability. Existing and new consumer
 paths must share one connection lock and disable duplicated continuation/retries.
 
-## External certificate dependency
-
-Switch the sibling path dependency to the x509-info crates.io version when ready and remove its extra CI checkout. Certificate-library development
-and release tracking belong to the independent repository.
-
 ## Delivery
 
 Follow [AGENTS.md](AGENTS.md) for implementation checks and staged Conventional

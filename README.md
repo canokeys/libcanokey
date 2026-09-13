@@ -88,21 +88,9 @@ let json = serde_json::to_string(&info.summary())?;
 
 Certificate inspection is maintained in the independent
 [x509-info repository](https://github.com/canokeys/x509-info). Its README owns
-library, CLI and schema documentation. This workspace currently uses a sibling
-checkout for local development:
-
-```text
-parent/
-  libcanokey/
-  x509-info/
-```
-
-The dependency is `x509-info = { path = "../x509-info", version = "0.1.0" }`.
-CI checks out the pinned x509-info commit beside libcanokey. To use crates.io,
-replace that dependency with `x509-info = "0.1.0"`, refresh Cargo.lock, and remove
-the sibling checkout step and the temporary checkout paths/default working directory
-from CI. Default builds still omit certificate inspection; `canokey/serde` retains
-the existing re-export and owned result API.
+library, CLI and schema documentation. This workspace uses `x509-info = "0.1.0"`
+from crates.io. Default builds omit certificate inspection; `canokey/serde` enables
+serialization through the same re-export and owned result API.
 
 ## Rust API documentation
 
@@ -139,7 +127,7 @@ is tracked; reference clones, build outputs, and caches are ignored.
 - [Plan](plan.md): milestones, remaining scope, acceptance.
 - [API design](docs/api-design.md): ownership and protocol contracts, including explicitly marked future APIs.
 - [Reference sources](docs/references.md): pinned upstream evidence.
-- [X.509 ecosystem research](docs/research/x509-ecosystem.md): alternatives and dependency reuse decisions.
+- [X.509 ecosystem research](https://github.com/canokeys/x509-info/blob/main/docs/x509-ecosystem.md): alternatives and dependency reuse decisions.
 - [Contributor instructions](AGENTS.md): English repository language, architecture, checks, and commits.
 
 ## License

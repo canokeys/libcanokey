@@ -2,9 +2,6 @@ name: checks
 on: [push, pull_request]
 permissions:
   contents: read
-defaults:
-  run:
-    working-directory: libcanokey
 jobs:
   rust:
     strategy:
@@ -14,14 +11,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          path: libcanokey
-          persist-credentials: false
-      # Local sibling dependency; remove when switching to crates.io.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: canokeys/x509-info
-          ref: 231e2947bfd7e0a8dc8c751fd739b5622a24187c
-          path: x509-info
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable action revision
         with:
