@@ -5,10 +5,10 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
-license-file.workspace = true
 homepage.workspace = true
 description = "Transport-free APDU and TLV codecs with caller-owned protocol operations"
 publish = false
 
 [dependencies]
 zeroize.workspace = true
+thiserror.workspace = true

@@ -5,7 +5,6 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
-license-file.workspace = true
 homepage.workspace = true
 description = "Transport-free CanoKey host protocol library"
 publish = false
@@ -15,3 +14,9 @@ canokey-protocol.workspace = true
 canokey-compat.workspace = true
 canokey-admin.workspace = true
 canokey-piv.workspace = true
+
+x509-info = { workspace = true, optional = true }
+
+[features]
+x509 = ["dep:x509-info"]
+serde = ["x509", "x509-info/serde"]

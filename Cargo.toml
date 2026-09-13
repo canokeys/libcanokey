@@ -15,13 +15,15 @@ edition = "2021"
 rust-version = "1.85"
 authors = ["canokeys.org"]
 license = "Apache-2.0"
-license-file = "LICENSE"
 homepage = "https://canokeys.org"
 
 [workspace.dependencies]
 zeroize = "1.8"
+thiserror = "2"
 canokey-protocol = { path = "crates/canokey-protocol" }
 canokey-compat = { path = "crates/canokey-compat" }
 canokey-admin = { path = "crates/canokey-admin" }
 canokey-piv = { path = "crates/canokey-piv" }
 canokey = { path = "crates/canokey" }
+# Local sibling checkout; replace with version = "0.1.0" to use crates.io.
+x509-info = { path = "../x509-info", version = "0.1.0" }

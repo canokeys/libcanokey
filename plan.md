@@ -1,53 +1,50 @@
 # Implementation plan
 
-Status: phase 1a foundation implemented; phase 1b includes PIN/PUK, object reads, and certificate reads with bounded gzip decoding. A matching subset of the experimental C ABI exists. This work is confined to libcanokey; consumer integration requires a separate task. See [README](README.md) for actual APIs and commands, [design](docs/api-design.md) for contracts, and [references](docs/references.md) for evidence.
+Current APIs and examples are listed in [README](README.md); contracts live in
+[API design](docs/api-design.md). This plan tracks remaining work. Consumer
+integration and upstream changes require a separate task.
 
-## Goal and boundaries
+## Next: complete PIV
 
-Share host protocol encoding, state machines, errors, and firmware compatibility across Console, ckman, and canokey-pkcs11. The library owns PIV/Admin/OATH/OpenPGP protocol logic and pure in-memory protocol cryptography. Applications own PCSC/USB/WebUSB/NFC/CCID/HID, device enumeration, permissions, connections, locking, runtimes, timeouts, system randomness, clocks, files, UI, and PKCS#11 state.
+1. Verify management-key modes and firmware coverage against CanoKey evidence.
+   Implement explicit external/mutual authentication with maintained block-cipher
+   and constant-time comparison dependencies; randomness remains caller-supplied.
+2. Add authenticated object/certificate writes and management-key updates.
+3. Add metadata, key generation/import, signing, decryption, and derivation.
+4. Implement Batch for explicit authentication and dependent operations under one
+   SELECT. Preserve completed-item counts on failure without rollback or replay.
 
-Caller-owned profiles and operations are the common Rust/binding model. No transport trait, manager, runtime, or mutable global state belongs in the core. The crate responsibilities and dependency graph are maintained in README rather than duplicated here.
+Extend the experimental C ABI alongside useful core operations. Before enabling
+metadata directories, key move/delete, retry/configuration writes, or ML algorithms,
+resolve the [evidence gaps](docs/api-design.md#later-protocols-and-evidence-gaps).
 
-## Milestones
+Acceptance: transcript coverage for SELECT/authentication/target ordering,
+continuation/chaining, failure/cancellation, bounds, and secret cleanup; typed C
+results and size queries that never execute operations. Do not introduce factories
+that always return Unsupported.
 
-| Phase | Deliverables | Acceptance focus |
-| --- | --- | --- |
-| 1a: foundation | protocol, owned operations, compatibility model, read-only probe, minimal Admin builders | Offline transcripts, bounded parsing/conversations, conservative unknown firmware |
-| 1b: PIV | PIN/PUK, management authentication, metadata, keys, private operations, objects/certificates, Batch | Each high-level operation covers SELECT/authentication/target; consumers do not encode APDUs/TLV |
-| 1c: first consumer | Complete relevant C ABI and incremental PKCS#11 adoption | Two handle types; typed results; size queries do not sign |
-| 1d: reuse | Console FRB, Python binding, ckman PIV adoption | Same core under Dart async and C/Python sync; native/wasm builds |
-| 2: Admin | Full device/config/storage information, NFC/NDEF, explicit applet reset | Profile invalidation and partial-write semantics |
-| 3: OATH | Credentials, access keys, calculations, legacy/current conversations | Applet-specific continuation, touch, HOTP side effects |
-| 4: OpenPGP | DOs, PIN/KDF, keys, certificates, policies, private operations | Independent references, algorithms, authentication, firmware coverage |
-| Later evaluation | Additional PIV extensions and shareable FIDO components | Evidence-based enablement; do not force CTAP into APDU operations |
+## Subsequent milestones
 
-Next PIV work: verify management-key modes against CanoKey evidence, then implement authentication using established block-cipher/comparison dependencies and add authenticated writes; follow with metadata, key generation/import and private operations, and Batch. Extend C bindings alongside useful core increments. Do not add placeholder APIs that always return Unsupported.
-
-Algorithm enums do not promise firmware support. Enable metadata directories, key move/delete, retry configuration, algorithm configuration writes, and ML-KEM decapsulation individually by observed capability. Pending verification is listed in design.
-
-## Engineering and delivery
-
-The first version need not be no_std; prioritize no platform I/O, no runtime, and wasm compatibility. Reuse established pure in-memory cryptography, compression, and standard key-format dependencies rather than implementing primitives. Selection criteria and candidates are maintained in [design](docs/api-design.md#dependency-reuse). PCSC, USB/HID, Tokio, FRB, and PyO3 must stay out of the core dependency closure. Add future applet/binding crates only when implemented; PyO3 belongs exclusively in its binding crate.
-
-Rust uses SemVer; C ABI major/minor is independent; a future Python public version follows the library major. Freeze the C ABI only after its complete header and implementation are validated. The current ABI is experimental 0.1. Firmware protocol variants are unrelated to package versions.
-
-Deliver coherent buildable stages with Conventional Commits. Repository text, comments, examples, and CI messages are English. Examples must execute against validated transcripts, show application-owned state and cleanup, and remain part of CI. Keep the current Actions revisions pinned separately from the intentional compiler/MSRV choice.
-
-## Future migration
-
-Validate PIV adoption in the order PKCS#11, Console, ckman. Existing and new paths may coexist behind a build switch until each feature is replaced. Disable consumer APDU continuation and serialize all old/new paths through one device lock and connection lifecycle. Never insert application identity queries or SELECT inside an operation.
-
-Reference clones are read-only evidence, not dependencies or proof of all firmware support. Integration and upstream modifications are out of scope for the current implementation task.
-
-## Acceptance matrix
-
-| Layer | Required checks |
+| Work | Acceptance focus |
 | --- | --- |
-| Codecs | APDU golden vectors, TLV bounds, certificate containers, key/signature formats as implemented |
-| Operations | SELECT/auth order, 61xx/6Cxx, chaining, failures, cancellation, budgets; Batch partial progress when implemented |
-| Compatibility | Version rules, historical IDs/containers/empty-slot statuses, unknown versions, evidence provenance |
-| Bindings | C ownership, buffer queries, errors and cleanup; FRB native/wasm and Python typed results when implemented |
-| Integration | Controlled usbip/hardware tests across stable, previous and next firmware, independent application transport |
-| Engineering | fmt, strict clippy, public rustdoc coverage and warning-free documentation builds, doctests, relevant tests, C/C++ linking, wasm, dependency checks, parser fuzz smoke, runnable examples |
+| PKCS#11 adoption, then Console and ckman | Application-owned connections/state; raw transport; one device lease across each operation; complete relevant bindings |
+| Full Admin | Configuration/storage reads and writes, PIN, NFC/NDEF and explicit reset; profile invalidation and partial-write semantics |
+| OATH | Credentials/access/calculations, applet-specific continuation, touch and HOTP side effects |
+| OpenPGP | DOs, PIN/KDF, keys and private operations with independent firmware/algorithm evidence |
+| Additional PIV/FIDO scope | Enable by demonstrated capability; retain existing CTAP backends until separately evaluated |
 
-Phase 1 as a whole is complete only when all three consumers can reuse the same PIV implementation while retaining their own application state and connections. Current offline tests establish neither full phase 1 completion nor hardware compatibility.
+Integration requires controlled hardware/usbip checks across supported firmware;
+offline tests alone do not establish interoperability. Existing and new consumer
+paths must share one connection lock and disable duplicated continuation/retries.
+
+## External certificate dependency
+
+Switch the sibling path dependency to the x509-info crates.io version when ready and remove its extra CI checkout. Certificate-library development
+and release tracking belong to the independent repository.
+
+## Delivery
+
+Follow [AGENTS.md](AGENTS.md) for implementation checks and staged Conventional
+Commits. Keep native/wasm dependency boundaries, runnable examples, public rustdoc,
+and C/C++ ABI checks in CI. Freeze the C ABI only after its complete implementation
+and integration are validated.

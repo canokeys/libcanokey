@@ -5,7 +5,7 @@
 - Write all repository content, documentation, comments, diagnostics, and commit messages in English. Conversation may follow the user's language.
 - `plan.md` owns milestones and acceptance criteria; `docs/api-design.md` owns API contracts; README describes implemented features and build commands. Never describe a design target as implemented.
 - Implement and test only this repository. `references/` contains read-only upstream clones: never modify, commit, or use them as build dependencies. Do not integrate consumers without instructions.
-- Original workspace code is Apache-2.0, authored by canokeys.org. New crates must inherit workspace license, license-file, authors, and homepage metadata; retain upstream notices for any third-party code. Keep one canonical root LICENSE.
+- Original workspace code is Apache-2.0, authored by canokeys.org. New crates must inherit workspace license (SPDX), authors, and homepage metadata; do not also set license-file. Retain upstream notices for any third-party code. Keep the root LICENSE canonical and an identical regular-file copy in every crate for portable Cargo packaging; run scripts/check-licenses.py after license or package changes.
 - Deliver buildable, reviewable increments. Do not substitute empty implementations or constant Unsupported responses for unfinished protocols.
 
 ## Architecture and ownership
@@ -14,6 +14,8 @@
 - Callers own `DeviceProfile` and `Operation<T>`. Constructors own required configuration and inputs; never retain borrowed FFI buffers, connections, or application sessions.
 - Only start/advance drive execution. Command/result getters never advance or resend. take_result transfers ownership once. Cancel/drop never send APDUs, roll back, or reconnect.
 - Reuse maintained dependencies for standard cryptography and key formats; do not implement cryptographic primitives or constant-time comparison locally. Add dependencies with their first concrete use, choose minimal features, and check MSRV, licenses, secret handling and native/wasm dependency closure. Randomness remains caller-supplied.
+- Certificate inspection parses fields and encodings without enforcing certificate validity, identity, trust, attestation profiles, or agreement between inner/outer signature algorithms. Preserve asserted values and original bytes; application policy remains outside parsing.
+- Public errors must retain typed categories/fields; use thiserror for implementations, leaving anyhow-style aggregation to applications. Standard certificate inspection lives in the optional external x509-info crate (currently ../x509-info); trust policy stays in callers. Test default and all-feature builds when optional APIs change.
 - Put protocol logic in its applet crate, firmware rules in compat, and probe orchestration in the facade. The internal machine interface is for composition, not transport callbacks.
 - Distinguish Unknown from Unsupported. PIV compatibility versions are not actual firmware versions. Generic YubiKey support is not CanoKey support evidence.
 

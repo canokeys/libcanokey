@@ -1,6 +1,5 @@
 //! Structured protocol failures, independent of transport and binding errors.
 use crate::StatusWord;
-use std::fmt;
 /// Stable semantic categories for protocol failures. Transport errors stay outside
 /// the core; callers must allow future variants of this non-exhaustive enum.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,7 +70,8 @@ pub enum SecretReference {
 }
 /// Owned, cloneable protocol failure with no secret payload.
 /// Display is diagnostic English; applications own localization and transport errors.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("{kind:?} during {phase:?}")]
 pub struct Error {
     /// Semantic failure category.
     pub kind: ErrorKind,
@@ -130,9 +130,3 @@ impl Error {
         }
     }
 }
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?} during {:?}", self.kind, self.phase)
-    }
-}
-impl std::error::Error for Error {}

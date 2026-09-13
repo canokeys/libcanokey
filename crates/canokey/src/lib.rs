@@ -5,6 +5,8 @@
 //! low-level codecs. [`admin`] currently contains bootstrap command builders only.
 //! C consumers use the separate `canokey-c` crate; a Rust/FRB wrapper uses this crate
 //! directly. No layer here owns a transport, runtime, or mutable global state.
+//! The optional `x509` feature adds owned DER/PEM certificate inspection; `serde`
+//! additionally enables serialization of its results. Neither is enabled by default.
 //!
 //! # Quick start: offline probe
 //!
@@ -54,5 +56,8 @@ pub use canokey_protocol::{
     Error, ErrorKind, ExchangeOptions, Operation, OperationLimits, OperationOptions,
     OperationState, SecretBytes, Step,
 };
+/// Optional, transport-free X.509 inspection (`x509` feature).
+#[cfg(feature = "x509")]
+pub use x509_info as x509;
 mod probe;
 pub use probe::{probe_device, ProbeMode, ProbeOptions};

@@ -117,6 +117,12 @@ Use a raw exchange that does not issue identity APDUs, log credentials, or proce
 
 Per-use-case probing is conservative and convenient for NFC. A stable USB device context may cache the profile by connection generation and close it on replacement/disconnection. The operation stays local either way. UI disposal requests cancellation; it must not race the executor to close the operation. Show protocol errors separately from transport failures. Immutable UI/plugin strings cannot be guaranteed erasable.
 
+## Certificate inspection
+
+Console can enable `canokey`'s `x509` feature in its Rust wrapper and replace its local certificate metadata extraction with `canokey::x509::parse_der` or `parse_pem`. These are implemented pure functions returning owned `CertificateInfo`; they need no operation or card lease. The wrapper maps `DistinguishedName`, numeric validity bounds, OIDs, raw key/SPKI and extension data to concrete FRB DTOs. Format dates and labels in Dart. Map unknown key size to an optional DTO field instead of substituting encoded key length.
+
+If another caller needs JSON, enable the `serde` feature and serialize the same result in that caller. Do not require Console to encode/decode JSON merely to cross FRB. Card/PIV errors and local X.509 errors remain distinguishable in the wrapper. MacOS role policy, trust decisions, CSR construction, private-key import and QR decoding still belong to the application.
+
 ## Planned private operations
 
 When signing is implemented, add a Sign variant and `newSign` factory with the same lifecycle. It will perform SELECT, explicit VERIFY where needed, GENERAL AUTHENTICATE and continuation internally. Dart will still only exchange bytes and display typed results/errors. Management mutual-authentication challenges come from the application's CSPRNG.
