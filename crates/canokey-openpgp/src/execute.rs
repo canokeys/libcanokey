@@ -1,5 +1,5 @@
 use crate::{keys, types::invalid, *};
-use canokey_compat::{Capability, DeviceProfile};
+use canokey_compat::{Capability, DeviceProfile, Support};
 use canokey_protocol::{
     operation::{
         engine::{Action, Machine},
@@ -250,7 +250,10 @@ enum Stage {
     Acknowledge,
     Target,
 }
-/// Construct an OpenPGP operation for pinned firmware 3.1.0, owning every input.
+/// Construct an OpenPGP operation for audited firmware 1.3–3.1.0, owning inputs.
+/// Separate gates cover UIF, FA, retry reset, algorithm generation and short
+/// digests. Older final APDUs carry explicit Le. GET DATA results retain their
+/// original framing; use the profile-aware field parsers for historical responses.
 ///
 /// SELECT happens once. Key operations read 6E/73 algorithm attributes before
 /// explicit password verification and the target, so stale caller algorithms fail
@@ -270,6 +273,32 @@ pub fn operation(
     options: OperationOptions,
 ) -> Result<Operation<Outcome>, Error> {
     profile.capability(Capability::OpenPgp).require()?;
+    match &request {
+        Request::ResetRetries(_) => profile
+            .capability(Capability::OpenPgpRetryReset)
+            .require()?,
+        Request::WriteData(DataWrite::TouchPolicy(..) | DataWrite::TouchCacheTime(_))
+        | Request::ReadData(0xd6..=0xd8 | 0x0102) => {
+            profile.capability(Capability::OpenPgpUif).require()?
+        }
+        Request::ReadData(0xfa) => profile
+            .capability(Capability::OpenPgpAlgorithmInformation)
+            .require()?,
+        Request::WriteData(DataWrite::Algorithm(_, a)) => {
+            profile.openpgp_algorithm_support(*a, false).require()?
+        }
+        _ => {}
+    }
+    if let Some((_, Some(a))) = key_request(&request) {
+        profile.openpgp_algorithm_support(a, false).require()?;
+    }
+    if let Request::Sign(a, bytes) | Request::Authenticate(a, bytes) = &request {
+        if canokey_key::curve_len(*a).is_some_and(|n| bytes.len() < n) {
+            profile
+                .capability(Capability::OpenPgpShortDigest)
+                .require()?;
+        }
+    }
     use PasswordReference::*;
     let required = match request {
         Request::WriteCertificate(..)
@@ -329,7 +358,10 @@ pub fn operation(
     if let Some(target) = target {
         queue.push_back((target, Stage::Target));
     }
-    for (c, _) in &queue {
+    for (c, _) in &mut queue {
+        if profile.legacy_explicit_le() && c.le == ExpectedLength::Absent {
+            c.le = ExpectedLength::Exact(256);
+        }
         validate_command(c, options)?;
     }
     // Streaming import's first fragment must contain the complete 4D + CRT prefix.
@@ -343,6 +375,7 @@ pub fn operation(
             request,
             algorithm: None,
             limit: options.limits.max_total_response_bytes,
+            profile: profile.clone(),
         },
         options,
     )
@@ -353,6 +386,7 @@ struct OpenPgp {
     request: Request,
     algorithm: Option<Algorithm>,
     limit: usize,
+    profile: DeviceProfile,
 }
 impl OpenPgp {
     fn reference(&self, stage: Stage) -> Option<SecretReference> {
@@ -375,7 +409,28 @@ impl OpenPgp {
             Request::ReadPublicKey(_) | Request::GenerateKey(_) => {
                 Outcome::PublicKey(PublicKey::from_tlv(
                     self.algorithm.ok_or_else(invalid)?,
-                    keys::one(bytes.as_bytes(), 0x7f49)?,
+                    keys::one(
+                        {
+                            let raw = bytes.as_bytes();
+                            if matches!(
+                                self.algorithm,
+                                Some(Algorithm::Ed25519 | Algorithm::X25519)
+                            ) && self
+                                .profile
+                                .capability(Capability::OpenPgpPublicKeyLengthFix)
+                                .support
+                                == Support::Unsupported
+                            {
+                                if raw.len() != 38 || raw[..5] != [0x7f, 0x49, 34, 0x86, 32] {
+                                    return Err(invalid());
+                                }
+                                &raw[..37]
+                            } else {
+                                raw
+                            }
+                        },
+                        0x7f49,
+                    )?,
                     self.limit,
                 )?)
             }
@@ -399,6 +454,21 @@ impl OpenPgp {
                 Outcome::Bytes(bytes)
             }
             Request::Derive(a, _) => {
+                let bytes = if *a != Algorithm::X25519
+                    && self
+                        .profile
+                        .capability(Capability::OpenPgpBareAgreement)
+                        .support
+                        == Support::Unsupported
+                {
+                    let n = canokey_key::curve_len(*a).ok_or_else(invalid)?;
+                    if bytes.len() != 1 + 2 * n || bytes.as_bytes()[0] != 4 {
+                        return Err(invalid());
+                    }
+                    SecretBytes::new(bytes.as_bytes()[1..1 + n].to_vec())
+                } else {
+                    bytes
+                };
                 if bytes.len() != canokey_key::curve_len(*a).unwrap_or(32)
                     || *a == Algorithm::X25519 && bytes.as_bytes().iter().all(|b| *b == 0)
                 {
@@ -446,7 +516,11 @@ impl Machine<Outcome> for OpenPgp {
                     return Ok(Action::Done(Outcome::PinStatus(status)));
                 }
             }
-            if !response.status.is_success() {
+            let terminated_select = matches!(stage, Stage::Select)
+                && matches!(self.request, Request::Activate)
+                && response.status.raw() == 0x6285
+                && response.data.is_empty();
+            if !response.status.is_success() && !terminated_select {
                 let reference = self.reference(stage);
                 let phase = match stage {
                     Stage::Select => Phase::Select,
@@ -463,10 +537,16 @@ impl Machine<Outcome> for OpenPgp {
             match stage {
                 Stage::Metadata => {
                     let (slot, expected) = key_request(&self.request).ok_or_else(invalid)?;
-                    let observed = keys::observed(response.data.as_bytes(), slot)?;
+                    let observed = keys::observed(response.data.as_bytes(), slot, &self.profile)?;
                     if expected.is_some_and(|a| a != observed) {
                         return Err(Error::new(ErrorKind::UnsupportedAlgorithm));
                     }
+                    self.profile
+                        .openpgp_algorithm_support(
+                            observed,
+                            matches!(self.request, Request::GenerateKey(_)),
+                        )
+                        .require()?;
                     self.algorithm = Some(observed);
                 }
                 Stage::Target => return Ok(Action::Done(self.result(response)?)),

@@ -87,6 +87,7 @@ pub struct Tlv<'a> {
     pub value: &'a [u8],
     depth: usize,
     limits: TlvLimits,
+    minimal_lengths: bool,
 }
 impl<'a> Tlv<'a> {
     /// Interpret this value as nested TLV using the inherited limits.
@@ -105,17 +106,20 @@ impl<'a> Tlv<'a> {
             bytes: self.value,
             depth: self.depth + 1,
             limits: self.limits,
+            minimal_lengths: self.minimal_lengths,
         })
     }
 }
 /// A zero-copy, fallible reader that preserves field order and duplicates.
 ///
-/// Supports definite, minimally encoded lengths only. It is not an ASN.1 DER
+/// Uses definite, minimally encoded lengths by default; `new_ber` permits the
+/// nonminimal definite forms used by OpenPGP firmware. It is not an ASN.1 DER
 /// schema validator. Use semantic applet parsers to check required/unique fields.
 pub struct TlvReader<'a> {
     bytes: &'a [u8],
     depth: usize,
     limits: TlvLimits,
+    minimal_lengths: bool,
 }
 impl<'a> TlvReader<'a> {
     /// Borrow an input slice without parsing it. Limits are enforced by `next`.
@@ -124,6 +128,16 @@ impl<'a> TlvReader<'a> {
             bytes,
             depth: 1,
             limits,
+            minimal_lengths: true,
+        }
+    }
+    /// Read definite BER lengths, including nonminimal long forms emitted by
+    /// OpenPGP cards. Indefinite lengths, overflow and limits remain rejected.
+    /// Child readers inherit this choice; [`Self::new`] remains strict.
+    pub fn new_ber(bytes: &'a [u8], limits: TlvLimits) -> Self {
+        Self {
+            minimal_lengths: false,
+            ..Self::new(bytes, limits)
         }
     }
     /// Read the next field, or `None` at the exact end of input.
@@ -161,7 +175,7 @@ impl<'a> TlvReader<'a> {
                 return Err(malformed());
             }
             let encoded = self.bytes.get(offset..offset + n).ok_or_else(malformed)?;
-            if encoded[0] == 0 {
+            if self.minimal_lengths && encoded[0] == 0 {
                 return Err(malformed());
             }
             offset += n;
@@ -172,7 +186,7 @@ impl<'a> TlvReader<'a> {
                     .and_then(|v| v.checked_add(*b as usize))
                     .ok_or_else(malformed)?;
             }
-            if len < 128 {
+            if self.minimal_lengths && len < 128 {
                 return Err(malformed());
             }
             len
@@ -188,6 +202,7 @@ impl<'a> TlvReader<'a> {
             value,
             depth: self.depth,
             limits: self.limits,
+            minimal_lengths: self.minimal_lengths,
         }))
     }
 }

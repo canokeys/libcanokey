@@ -111,6 +111,22 @@ impl CapabilityStatus {
 pub enum Capability {
     /// Baseline OpenPGP commands; individual features have separate gates.
     OpenPgp,
+    /// OpenPGP constructed 65/6E/7A responses carry outer tags from 2.0.
+    OpenPgpWrappedData,
+    /// OpenPGP algorithm information FA exists from 1.6.1.
+    OpenPgpAlgorithmInformation,
+    /// OpenPGP FA has its outer tag from 3.1.
+    OpenPgpWrappedAlgorithmInformation,
+    /// Standard OpenPGP UIF objects and touch cache from 1.5.2.
+    OpenPgpUif,
+    /// OpenPGP configurable retries, resetting passwords, from 3.1.
+    OpenPgpRetryReset,
+    /// OpenPGP signs digests shorter than the curve width from 3.1.
+    OpenPgpShortDigest,
+    /// OpenPGP returns a bare ECDH secret rather than a point from 1.5.2.
+    OpenPgpBareAgreement,
+    /// OpenPGP Ed/X public-key responses have no stray trailing byte from 1.6.1.
+    OpenPgpPublicKeyLengthFix,
     /// Baseline OATH commands; dialect and full responses have separate gates.
     Oath,
     /// OATH 1.3 instruction set, empty SELECT and TLV touch property.
@@ -447,8 +463,18 @@ impl DeviceProfile {
                 return self.firmware_range((2, 0, 0), (3, 1, 0))
             }
             Capability::OathReliablePagination => return self.firmware_range((3, 0, 1), (3, 1, 0)),
-            Capability::OpenPgp
-            | Capability::Admin
+            Capability::OpenPgp => return self.firmware_range((1, 3, 0), (3, 1, 0)),
+            Capability::OpenPgpWrappedData => return self.firmware_range((2, 0, 0), (3, 1, 0)),
+            Capability::OpenPgpAlgorithmInformation | Capability::OpenPgpPublicKeyLengthFix => {
+                return self.firmware_range((1, 6, 1), (3, 1, 0))
+            }
+            Capability::OpenPgpUif | Capability::OpenPgpBareAgreement => {
+                return self.firmware_range((1, 5, 2), (3, 1, 0))
+            }
+            Capability::OpenPgpRetryReset
+            | Capability::OpenPgpWrappedAlgorithmInformation
+            | Capability::OpenPgpShortDigest => return self.firmware_range((3, 1, 0), (3, 1, 0)),
+            Capability::Admin
             | Capability::CertificateDeletion
             | Capability::MetadataDirectory
             | Capability::ContainerNames
@@ -563,6 +589,33 @@ impl DeviceProfile {
     /// This is a format selector, not authorization: require the applet/feature first.
     pub fn legacy_explicit_le(&self) -> bool {
         self.firmware_range((1, 3, 0), (3, 0, 3)).support == Support::Supported
+    }
+    /// OpenPGP algorithm availability, independent of PIV IDs/configuration.
+    /// Generation is narrower than import/use: pre-2.0 RSA generation accepts
+    /// only 2048 bits even when FA advertises 4096. Slot and input checks still apply.
+    pub fn openpgp_algorithm_support(
+        &self,
+        algorithm: Algorithm,
+        generate: bool,
+    ) -> CapabilityStatus {
+        let first = match algorithm {
+            Algorithm::Rsa2048
+            | Algorithm::EccP256
+            | Algorithm::EccP384
+            | Algorithm::Secp256k1
+            | Algorithm::Ed25519
+            | Algorithm::X25519 => (1, 3, 0),
+            Algorithm::Rsa4096 if !generate => (1, 3, 0),
+            Algorithm::Rsa3072 | Algorithm::Rsa4096 => (2, 0, 0),
+            Algorithm::EccP521 => (3, 1, 0),
+            _ => {
+                return CapabilityStatus {
+                    support: Support::Unsupported,
+                    evidence: Evidence::FirmwareMatrix,
+                }
+            }
+        };
+        self.firmware_range(first, (3, 1, 0))
     }
     fn extension_wire_id(&self, algorithm: Algorithm) -> Option<u8> {
         let id = self.config.as_ref()?.wire_id(algorithm)?;

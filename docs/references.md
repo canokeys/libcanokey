@@ -162,3 +162,11 @@ Newer, development and unrecognized versions remain Unknown for these mutations.
 | Console smartcard.dart / FRB configuration | Dart owns transport; process includes identity APDUs, raw paths log complete APDUs, bridge calls default to synchronous Dart methods |
 
 Host observations supplement the firmware evidence above; neither establishes hardware interoperability. Generic YubiKey APIs in manager are not proof of CanoKey support. No upstream application tests or hardware sessions were run. Any future code copying requires a per-file license and attribution review.
+
+Historical OpenPGP checks additionally use ckman's firmware changelog and
+`yubikit/openpgp.py`, cross-checked against core 1.3 (`5f1e95f`), 1.5.2, 1.6.2,
+2.0.0 and 3.0.0. They establish missing outer DO tags, fixed-width definite BER,
+FA availability, the pre-2.0 RSA generation restriction and short-digest rejection.
+Core 1.3 also returns the whole ECDH point, and pre-1.6.1 Ed/X key responses include
+one extra trailing byte. These are narrow format normalizations, not generic
+acceptance of malformed public keys.

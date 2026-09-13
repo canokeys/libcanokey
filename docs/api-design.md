@@ -192,6 +192,23 @@ lack of progress. No OATH calculation, mutation or continuation retries 6C. Lost
 responses and later-page failures may leave HOTP/increasing-TOTP state changed;
 no result getter, retry, cancel or drop can recover or roll back that state.
 
+### Historical OATH commands
+
+`Capability::Oath` covers baseline operations. `OathLegacy` selects the 1.3
+instruction set; `OathModern` authorizes access codes, rename and SHA-512 from
+1.5.2. `OathFullResponse` and `OathRenameCollisionCheck` start at 2.0. Legacy
+SELECT returns `Outcome::LegacySelection`, with an optional independently observed
+Admin serial and no synthetic version or password salt. Legacy LIST retains its
+digit metadata. C result kind 5 represents legacy selection; copy field 5 returns
+the observed serial when present, and info.flags bit 0 reports its presence.
+
+Old final APDUs carry explicit Le. LIST and CalculateAll use 06 on 1.3 and A5
+on modern firmware, including a bounded poll after a nonempty successful page.
+Before 3.0.1, `OathReliablePagination` is Unsupported: firmware may omit records
+at page boundaries. Success does not prove completeness, and calculations are
+never replayed to compensate. Full-response requests fail before execution on
+pre-2.0 firmware; ordinary rename remains available without a collision guarantee.
+
 ## OpenPGP
 
 `openpgp::operation` owns a Request and optional explicit Access. PW1-sign (81),
@@ -284,19 +301,26 @@ but must not duplicate protocol state. Dart owns async execution; Python binding
 would follow the same model with a caller-owned synchronous loop. Binding examples:
 [Console](console-integration.md), [PKCS#11](pkcs11-integration.md).
 
-### Historical OATH commands
 
-`Capability::Oath` covers baseline operations. `OathLegacy` selects the 1.3
-instruction set; `OathModern` authorizes access codes, rename and SHA-512 from
-1.5.2. `OathFullResponse` and `OathRenameCollisionCheck` start at 2.0. Legacy
-SELECT returns `Outcome::LegacySelection`, with an optional independently observed
-Admin serial and no synthetic version or password salt. Legacy LIST retains its
-digit metadata. C result kind 5 represents legacy selection; copy field 5 returns
-the observed serial when present, and info.flags bit 0 reports its presence.
+### Historical OpenPGP formats
 
-Old final APDUs carry explicit Le. LIST and CalculateAll use 06 on 1.3 and A5
-on modern firmware, including a bounded poll after a nonempty successful page.
-Before 3.0.1, `OathReliablePagination` is Unsupported: firmware may omit records
-at page boundaries. Success does not prove completeness, and calculations are
-never replayed to compensate. Full-response requests fail before execution on
-pre-2.0 firmware; ordinary rename remains available without a collision guarantee.
+Baseline commands cover audited 1.3–3.1.0 firmware. Actual firmware selects
+65/6E/7A contents before 2.0 and wrapped objects from 2.0. Algorithm information
+is absent before 1.6.1, bare until 3.1, then wrapped in FA. `ReadData` preserves
+wire bytes; `parse_with_profile` and `data_object_contents` interpret these layouts
+without guessing. OpenPGP uses explicit definite BER parsing, including firmware's
+fixed-width lengths; other TLV readers keep their strict default.
+
+Key operations read current attributes in 6E even when FA is unavailable.
+Advertisements and configured attributes do not authorize every operation:
+pre-2.0 RSA generation accepts only 2048 bits, P-521 requires 3.1, and digests
+shorter than the curve width require 3.1. UIF starts at 1.5.2; retry reset at 3.1.
+Old Ed/X public-key responses have one extraneous trailing byte until 1.6.1;
+only that exact evidenced layout is normalized. On 1.3, short-Weierstrass ECDH
+returns a point; Derive extracts its fixed-width X coordinate as the shared secret.
+Neither normalization validates a peer or applies an OpenPGP KDF. X25519 import
+bytes remain caller-supplied firmware bytes; the library never reverses them.
+
+Final historical APDUs use explicit Le. Certificate occurrences remain sig=0,
+dec=1, aut=2. Only explicit Activate accepts empty SELECT status 6285 and proceeds
+to 44; unrelated requests preserve the failure.

@@ -44,30 +44,20 @@ pub(crate) fn attributes(slot: Slot, a: Algorithm) -> Result<Vec<u8>, Error> {
     Ok(v)
 }
 pub(crate) fn one(bytes: &[u8], tag: u32) -> Result<&[u8], Error> {
-    let mut r = TlvReader::new(bytes, TlvLimits::default());
+    let mut r = TlvReader::new_ber(bytes, TlvLimits::default());
     let f = r.next()?.ok_or_else(invalid)?;
     if f.tag.value() != tag || r.next()?.is_some() {
         return Err(invalid());
     }
     Ok(f.value)
 }
-fn find(bytes: &[u8], tag: u32) -> Result<&[u8], Error> {
-    let mut r = TlvReader::new(bytes, TlvLimits::default());
-    let mut found = None;
-    while let Some(f) = r.next()? {
-        if f.tag.value() == tag {
-            if found.is_some() {
-                return Err(invalid());
-            }
-            found = Some(f.value);
-        }
-    }
-    found.ok_or_else(invalid)
-}
-pub(crate) fn observed(bytes: &[u8], slot: Slot) -> Result<Algorithm, Error> {
-    let app = one(bytes, 0x6e)?;
-    let discretionary = find(app, 0x73)?;
-    let attr = find(discretionary, slot.attributes().into())?;
+pub(crate) fn observed(
+    bytes: &[u8],
+    slot: Slot,
+    profile: &canokey_compat::DeviceProfile,
+) -> Result<Algorithm, Error> {
+    let app = ApplicationData::parse_with_profile(profile, bytes, bytes.len())?;
+    let attr = app.algorithm_attributes(slot)?.ok_or_else(invalid)?;
     for a in ALGORITHMS {
         if let Ok(expected) = attributes(slot, a) {
             if attr == expected
