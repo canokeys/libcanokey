@@ -32,7 +32,9 @@ protocol state.
 - External/Mutual 3DES or AES-192 management authentication, explicit caller-supplied
   mutual challenges; authenticated object/certificate writes and management-key replacement.
 - Object/certificate reads, bounded gzip decoding, certificate deletion, metadata
-  and algorithm-configuration reads.
+  and algorithm-configuration reads; compact directory with entry diagnostics,
+  UTF-16 container names, key move/delete, explicit PIN/PUK retry reset, algorithm
+  configuration replacement, attestation DER and explicit reset of blocked PIV.
 - Key generation/import and public-key SPKI export. Scalar import supports
   P-256/P-384/P-521/secp256k1/SM2; RSA CRT and Ed25519/X25519/ML seeds are typed inputs.
 - Classic RSA/ECDSA/SM2/Ed25519 signing, original signature encoding and DER/P1363

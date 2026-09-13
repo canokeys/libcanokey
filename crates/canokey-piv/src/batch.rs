@@ -8,6 +8,38 @@ pub const MAX_BATCH_REQUESTS: usize = 128;
 /// Authenticate explicitly before mutations; repeat VERIFY before PIN-always uses.
 #[derive(Debug)]
 pub enum BatchRequest {
+    /// Read the compact key/certificate directory.
+    ReadMetadataDirectory,
+    /// Read a slot's UTF-16 container name.
+    ReadContainerName(Slot),
+    /// Set/clear a name after explicit management authentication.
+    SetContainerName {
+        /// Ordinary asymmetric slot.
+        slot: Slot,
+        /// Owned validated name; empty clears it.
+        name: ContainerName,
+    },
+    /// Move only a key/name, leaving certificates in place.
+    MoveKey {
+        /// Existing key slot.
+        source: Slot,
+        /// Empty destination slot.
+        target: Slot,
+    },
+    /// Delete only a key and its name, leaving its certificate in place.
+    DeleteKey(Slot),
+    /// Reset PIN/PUK to defaults with retry limits. Requires preceding management
+    /// authentication and an immediately preceding VerifyPin request. Clears auth.
+    ResetPinPukRetries {
+        /// PIN retry limit, 1..=15.
+        pin_retries: u8,
+        /// PUK retry limit, 1..=15.
+        puk_retries: u8,
+    },
+    /// Replace algorithm IDs; must be the final request, since the profile becomes stale.
+    SetAlgorithmConfig(AlgorithmConfig),
+    /// Obtain an attestation certificate as opaque DER bytes.
+    Attest(Slot),
     /// Explicit PIN verification.
     VerifyPin(Pin),
     /// Explicit External/Mutual management authentication, with owned fresh inputs.
@@ -99,6 +131,8 @@ pub enum BatchRequest {
 impl BatchRequest {
     fn input_len(&self) -> usize {
         match self {
+            Self::SetContainerName { name, .. } => name.as_utf16le().len(),
+            Self::SetAlgorithmConfig(config) => config.raw().len(),
             Self::VerifyPin(pin) => pin.0.len(),
             Self::AuthenticateManagement(auth) => auth.input_len(),
             Self::WriteObject { data, .. } => data.len(),
@@ -122,6 +156,10 @@ impl BatchRequest {
 /// One completed request's owned result; order matches the request list.
 #[derive(Debug)]
 pub enum BatchItem {
+    /// Compact directory observation, including entry diagnostics.
+    Directory(MetadataDirectory),
+    /// Validated per-slot container name.
+    ContainerName(ContainerName),
     /// Authentication/logout completed.
     Unit,
     /// Normalized object or raw private-operation bytes, redacted and wiped on drop.
@@ -142,6 +180,8 @@ pub enum BatchItem {
 impl BatchItem {
     fn byte_len(&self) -> usize {
         match self {
+            Self::Directory(d) => d.raw().len(),
+            Self::ContainerName(n) => n.as_utf16le().len(),
             Self::Unit | Self::Mutation(_) => 0,
             Self::Bytes(b) => b.len(),
             Self::Certificate(c) => c.der().len(),
@@ -278,10 +318,24 @@ pub fn batch(
     }
     let mut pending = VecDeque::new();
     let mut management = false;
-    for request in requests {
+    let mut previous_verify = false;
+    let count = requests.len();
+    for (index, request) in requests.into_iter().enumerate() {
+        if matches!(request, BatchRequest::ResetPinPukRetries { .. }) && !previous_verify {
+            return Err(Error::new(ErrorKind::InvalidArgument));
+        }
+        if matches!(request, BatchRequest::SetAlgorithmConfig(_)) && index + 1 != count {
+            return Err(Error::new(ErrorKind::InvalidArgument));
+        }
+        previous_verify = matches!(request, BatchRequest::VerifyPin(_));
         if matches!(
             request,
-            BatchRequest::WriteObject { .. }
+            BatchRequest::SetContainerName { .. }
+                | BatchRequest::MoveKey { .. }
+                | BatchRequest::DeleteKey(_)
+                | BatchRequest::ResetPinPukRetries { .. }
+                | BatchRequest::SetAlgorithmConfig(_)
+                | BatchRequest::WriteObject { .. }
                 | BatchRequest::WriteCertificate { .. }
                 | BatchRequest::DeleteCertificate(_)
                 | BatchRequest::SetManagementKey { .. }
@@ -292,6 +346,44 @@ pub fn batch(
             return Err(Error::new(ErrorKind::InvalidArgument));
         }
         let machine = match request {
+            BatchRequest::ReadMetadataDirectory => mapped(
+                directory::prepare_directory(profile, options)?,
+                BatchItem::Directory,
+            ),
+            BatchRequest::ReadContainerName(slot) => mapped(
+                configuration::prepare_read_name(profile, slot, options)?,
+                BatchItem::ContainerName,
+            ),
+            BatchRequest::SetContainerName { slot, name } => mapped(
+                configuration::prepare_set_name(profile, slot, name, options)?,
+                BatchItem::Mutation,
+            ),
+            BatchRequest::MoveKey { source, target } => mapped(
+                configuration::prepare_move_delete(profile, source, Some(target), options)?,
+                BatchItem::Mutation,
+            ),
+            BatchRequest::DeleteKey(slot) => mapped(
+                configuration::prepare_move_delete(profile, slot, None, options)?,
+                BatchItem::Mutation,
+            ),
+            BatchRequest::ResetPinPukRetries {
+                pin_retries,
+                puk_retries,
+            } => {
+                management = false;
+                mapped(
+                    configuration::prepare_retry_reset(profile, pin_retries, puk_retries, options)?,
+                    BatchItem::Mutation,
+                )
+            }
+            BatchRequest::SetAlgorithmConfig(config) => mapped(
+                configuration::prepare_config(profile, config, options)?,
+                BatchItem::Mutation,
+            ),
+            BatchRequest::Attest(slot) => mapped(
+                configuration::prepare_attest(profile, slot, options)?,
+                BatchItem::Bytes,
+            ),
             BatchRequest::VerifyPin(pin) => mapped(
                 access::prepare(command::verify_pin(&pin), options, |r| {
                     require_auth(&r, SecretReference::Pin)?;

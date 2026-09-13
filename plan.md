@@ -10,10 +10,6 @@ repository. Consumer integration and upstream changes require a separate task.
    context and exposes no such modes. Requires new firmware evidence before enablement.
 2. SM2 key agreement: specify peer exchange, ephemeral state, cancellation and
    application key confirmation within the caller-owned operation model.
-3. Metadata directory and per-slot container names; retain certificate-only entries,
-   unknown fields and malformed-entry diagnostics where the protocol permits them.
-4. Key move/delete, retry configuration and algorithm-configuration writes. Confirm
-   version/slot support, authentication, cache invalidation and partial-write effects.
 
 Extend Batch and the experimental C ABI alongside core operations. Acceptance:
 transcripts for SELECT/authentication/target ordering, chaining/continuation,

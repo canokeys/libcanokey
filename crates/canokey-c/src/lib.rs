@@ -6,6 +6,8 @@
 //! library, accessed without concurrent mutation, and freed exactly once.
 //! A non-null versioned struct must contain at least its declared supported prefix.
 #![deny(missing_docs)]
+mod piv_configuration;
+pub use piv_configuration::*;
 mod piv_batch;
 pub use piv_batch::*;
 mod piv_keys;
@@ -71,6 +73,8 @@ pub struct CnkOperation {
     poisoned: bool,
 }
 enum Inner {
+    Directory(Operation<piv::MetadataDirectory>),
+    ContainerName(Operation<piv::ContainerName>),
     Probe(Operation<DeviceProfile>),
     Unit(Operation<()>),
     PinStatus(Operation<piv::PinStatus>),
@@ -86,6 +90,8 @@ enum Inner {
 macro_rules! dispatch {
     ($value:expr, $op:ident => $body:expr) => {
         match $value {
+            Inner::Directory($op) => $body,
+            Inner::ContainerName($op) => $body,
             Inner::Probe($op) => $body,
             Inner::Unit($op) => $body,
             Inner::PinStatus($op) => $body,
@@ -588,6 +594,14 @@ pub unsafe extern "C" fn cnk_operation_result_copy_bytes(
                 Ok(v) => copy(v.as_bytes(), buffer, len),
                 Err(_) => STATE,
             },
+            Inner::Directory(p) => match p.result() {
+                Ok(d) => copy(d.raw(), buffer, len),
+                Err(_) => STATE,
+            },
+            Inner::ContainerName(p) => match p.result() {
+                Ok(n) => copy(n.as_utf16le(), buffer, len),
+                Err(_) => STATE,
+            },
             Inner::AlgorithmConfig(p) => match p.result() {
                 Ok(v) => copy(v.raw(), buffer, len),
                 Err(_) => STATE,
@@ -813,6 +827,8 @@ pub unsafe extern "C" fn cnk_operation_result_kind(op: *const CnkOperation, out:
             Inner::Signature(_) => 9,
             Inner::AlgorithmConfig(_) => 10,
             Inner::Batch(_) => 11,
+            Inner::Directory(_) => 12,
+            Inner::ContainerName(_) => 13,
         };
         OK
     })

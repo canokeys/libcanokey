@@ -123,6 +123,20 @@ rejects an all-zero result. ML-KEM-768 decapsulation requires 1088 ciphertext by
 and returns 32 secret bytes; implicit rejection does not authenticate the sender.
 No KDF is applied. SM2 agreement is a separate protocol, not generic ECDH.
 
+The compact directory uses a fixed five-byte header with a single-byte payload
+length, including values above 127 (not BER long-form). Version 1 has at most 24
+six-byte entries. Unknown versions retain their payload without guessed decoding;
+unknown/duplicate slots, flags and inconsistent key fields remain diagnostic entries.
+Names are at most 78 UTF-16LE bytes without NUL/unpaired surrogates; empty clears
+an attribute. Moving/deleting keys leaves certificate objects in their original slots.
+
+`reset_pin_puk_retries` requires management then PIN and restores both credentials
+to firmware defaults; attempted writes invalidate credential caches, even on failure.
+Batch requires an immediately preceding explicit VERIFY and discards assumed
+management authorization afterward. Algorithm-configuration writes must end a Batch
+and require reprobe. `reset_piv` never exhausts retries itself; firmware requires both
+credentials already blocked. Attestation returns DER without trust verification.
+
 File I/O, private-key PEM/PKCS#8 decoding, CSR policy, PKCS#11 hashing/padding/KDF,
 object records and user prompts belong to applications. Optional `canokey::x509`
 re-exports the external [x509-info](https://github.com/canokeys/x509-info) parser;

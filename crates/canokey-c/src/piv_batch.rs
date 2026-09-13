@@ -151,6 +151,27 @@ pub unsafe extern "C" fn cnk_piv_batch_new(
                     slot: slot(r.reference)?,
                     ciphertext: data()?,
                 },
+                19 => piv::BatchRequest::ReadMetadataDirectory,
+                20 => piv::BatchRequest::ReadContainerName(slot(r.reference)?),
+                21 => piv::BatchRequest::SetContainerName {
+                    slot: slot(r.reference)?,
+                    name: piv::ContainerName::from_utf16le(bytes(r.data, r.data_len)?)
+                        .map_err(|e| failure(e, error))?,
+                },
+                22 => piv::BatchRequest::MoveKey {
+                    source: slot(r.reference)?,
+                    target: slot(r.algorithm)?,
+                },
+                23 => piv::BatchRequest::DeleteKey(slot(r.reference)?),
+                24 => piv::BatchRequest::ResetPinPukRetries {
+                    pin_retries: u8::try_from(r.reference).map_err(|_| ARG)?,
+                    puk_retries: u8::try_from(r.algorithm).map_err(|_| ARG)?,
+                },
+                25 => piv::BatchRequest::SetAlgorithmConfig(
+                    canokey::compatibility::AlgorithmConfig::parse(bytes(r.data, r.data_len)?)
+                        .map_err(|e| failure(e, error))?,
+                ),
+                26 => piv::BatchRequest::Attest(slot(r.reference)?),
                 18 => piv::BatchRequest::SignStreaming {
                     slot: slot(r.reference)?,
                     input: piv_keys::streaming_input(
@@ -242,6 +263,8 @@ pub unsafe extern "C" fn cnk_operation_batch_item_kind(
             return ARG;
         };
         *out = match item {
+            piv::BatchItem::Directory(_) => 12,
+            piv::BatchItem::ContainerName(_) => 13,
             piv::BatchItem::Unit => 2,
             piv::BatchItem::Bytes(_) => 4,
             piv::BatchItem::Certificate(_) => 5,
@@ -277,6 +300,8 @@ pub unsafe extern "C" fn cnk_operation_batch_item_copy_bytes(
             return ARG;
         };
         match item {
+            piv::BatchItem::Directory(d) => copy(d.raw(), buffer, len),
+            piv::BatchItem::ContainerName(n) => copy(n.as_utf16le(), buffer, len),
             piv::BatchItem::Bytes(b) => copy(b.as_bytes(), buffer, len),
             piv::BatchItem::Certificate(c) => copy(c.der(), buffer, len),
             piv::BatchItem::Metadata(m) => copy(m.fields().raw.as_bytes(), buffer, len),

@@ -48,6 +48,15 @@
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 mod access;
+/// Compact directory observations and per-entry diagnostics.
+pub mod directory;
+pub use directory::{read_metadata_directory, DirectoryEntry, DirectoryIssue, MetadataDirectory};
+/// Explicit PIV configuration changes and key lifecycle operations.
+pub mod configuration;
+pub use configuration::{
+    attest, delete_key, move_key, read_container_name, reset_pin_puk_retries, reset_piv,
+    set_algorithm_config, set_container_name, ContainerName,
+};
 /// Explicit firmware streaming signature modes.
 pub mod streaming;
 pub use streaming::{sign_streaming, StreamingSignInput};

@@ -105,6 +105,13 @@ No firmware is linked or built as a dependency.
   returns a fixed-width scalar-sized secret. SM2 has a separate agreement
   dispatcher; it must not use this generic ECDH operation.
 
+- `include/piv.h` and the pinned `piv.c` document F5 container names, F6 key
+  move/delete, FA retry reset, F7/01 directory, EE/02 algorithm replacement,
+  F9 attestation and FB blocked-credential reset. Directory lengths are one-byte
+  fixed fields, not BER; names are bounded UTF-16LE. FA clears authorization and
+  rewrites default credentials. F6 moves names with keys but leaves certificates.
+  These factories are enabled for the pinned 3.1.0 evidence only.
+
 These sources establish encoding and version rules, not hardware interoperability.
 Newer, development and unrecognized versions remain Unknown for these mutations.
 

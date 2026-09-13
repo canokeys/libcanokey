@@ -125,6 +125,20 @@ pub enum Capability {
     ObjectWrites,
     /// Short command chaining for PUT DATA.
     ObjectWriteChaining,
+    /// Compact PIV key/certificate directory.
+    MetadataDirectory,
+    /// Per-slot UTF-16LE container names.
+    ContainerNames,
+    /// Move/delete ordinary asymmetric keys without moving certificates.
+    KeyMoveDelete,
+    /// Retry configuration that resets both PIN and PUK to defaults.
+    RetryReset,
+    /// Replacement of the complete algorithm configuration.
+    AlgorithmConfigWrite,
+    /// On-device PIV attestation certificate generation.
+    Attestation,
+    /// Explicit reset after both PIN and PUK are blocked.
+    PivReset,
     /// Certificate removal using an empty 53 container.
     CertificateDeletion,
 }
@@ -408,7 +422,14 @@ impl DeviceProfile {
         match feature {
             Capability::ObjectWrites => return self.firmware_range((1, 5, 2), (3, 1, 0)),
             Capability::ObjectWriteChaining => return self.firmware_range((1, 5, 2), (3, 1, 0)),
-            Capability::CertificateDeletion => return self.firmware_range((3, 1, 0), (3, 1, 0)),
+            Capability::CertificateDeletion
+            | Capability::MetadataDirectory
+            | Capability::ContainerNames
+            | Capability::KeyMoveDelete
+            | Capability::RetryReset
+            | Capability::AlgorithmConfigWrite
+            | Capability::Attestation
+            | Capability::PivReset => return self.firmware_range((3, 1, 0), (3, 1, 0)),
             _ => {}
         }
         if feature == Capability::Piv {
