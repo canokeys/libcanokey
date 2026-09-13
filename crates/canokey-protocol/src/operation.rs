@@ -475,8 +475,8 @@ impl<T> Operation<T> {
         self.error.as_ref()
     }
     /// Borrow partial results only for an operation explicitly designed to expose
-    /// progress (PIV Batch and Admin). Other operations return None. Failed
-    /// batches retain completed items without retaining execution secrets.
+    /// progress (PIV Batch and Admin). Other operations return None. Failures
+    /// retain completed items/write counts without retaining execution secrets.
     /// Returns None after cancellation/result transfer and on completion, when
     /// the ordinary result getter applies. Repeated calls never advance execution.
     pub fn progress(&self) -> Option<&T> {

@@ -542,7 +542,25 @@ impl DeviceProfile {
             evidence: Evidence::LatestKnownFallback,
         }
     }
-    /// A wire identifier alone is not evidence that a key operation is supported.
+    fn extension_wire_id(&self, algorithm: Algorithm) -> Option<u8> {
+        let id = self.config.as_ref()?.wire_id(algorithm)?;
+        // 3.1 introduces AES management (0A) and randomized Ed25519 (FF).
+        // Preserve the observation, but never use a colliding ID for another mode.
+        if self
+            .info
+            .firmware
+            .as_ref()
+            .is_some_and(|f| f.tuple() >= (3, 1, 0))
+            && [0x0a, 0xff].contains(&id)
+        {
+            return None;
+        }
+        Some(id)
+    }
+    /// Resolve a wire identifier without authorizing key use. On 3.1 and newer,
+    /// reserved AES-management/randomized-signing IDs never resolve as extensions,
+    /// even if malformed configuration observations assign them. Raw bytes remain
+    /// available through algorithm_config; older layouts retain their own IDs.
     pub fn algorithm_wire_id(&self, algorithm: Algorithm) -> Option<u8> {
         match algorithm {
             Algorithm::Rsa1024 => Some(0x06),
@@ -550,8 +568,8 @@ impl DeviceProfile {
             Algorithm::EccP256 => Some(0x11),
             Algorithm::EccP384 => Some(0x14),
             _ => {
-                if let Some(config) = &self.config {
-                    return config.wire_id(algorithm);
+                if self.config.is_some() {
+                    return self.extension_wire_id(algorithm);
                 }
                 let legacy = self
                     .info
@@ -648,8 +666,14 @@ impl DeviceProfile {
                 }
                 CapabilityStatus {
                     support: match &self.config {
-                        Some(config) if config.wire_id(algorithm).is_some() => Support::Supported,
-                        Some(config) if !config.enabled() => Support::Unsupported,
+                        Some(_) if self.extension_wire_id(algorithm).is_some() => {
+                            Support::Supported
+                        }
+                        Some(config)
+                            if !config.enabled() || config.wire_id(algorithm).is_some() =>
+                        {
+                            Support::Unsupported
+                        }
                         _ => Support::Unknown,
                     },
                     evidence: Evidence::Observed,

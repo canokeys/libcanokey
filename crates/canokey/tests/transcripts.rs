@@ -257,3 +257,40 @@ fn certificate_missing_and_auth_failure_remain_errors() {
         assert!(op.result().is_err());
     }
 }
+
+#[test]
+fn reserved_extension_ids_cannot_change_private_operation_semantics() {
+    for id in [0x0a, 0xff] {
+        for (firmware, usable) in [("3.0.3", true), ("3.1.0", false)] {
+            let raw = vec![1, id, 5, 0x16, 0xe1, 0x53, 0x54, 0x55, 0x56, 0x57];
+            let mut observations = DeviceObservations::new(firmware.as_bytes().to_vec());
+            observations.algorithm_config = Some(AlgorithmConfig::parse(&raw).unwrap());
+            observations.piv_version = Some(PivApplicationVersion([5, 7, 0]));
+            let profile = canokey::DeviceProfile::from_observations(observations).unwrap();
+            assert_eq!(profile.algorithm_config().unwrap().raw(), raw);
+            assert_eq!(
+                profile.algorithm_wire_id(Algorithm::Ed25519),
+                usable.then_some(id)
+            );
+            assert_eq!(
+                profile.key_algorithm_support(Algorithm::Ed25519).support,
+                if usable {
+                    compatibility::Support::Supported
+                } else {
+                    compatibility::Support::Unsupported
+                }
+            );
+            if !usable {
+                assert!(canokey::piv::sign(
+                    &profile,
+                    canokey::piv::Slot::Signature,
+                    Algorithm::Ed25519,
+                    canokey::piv::SignInput::Message(canokey::SecretBytes::new(b"hello".to_vec())),
+                    canokey::piv::Access::None,
+                    Default::default()
+                )
+                .is_err());
+            }
+        }
+    }
+}

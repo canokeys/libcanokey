@@ -65,7 +65,9 @@ Minimal mode stops after Admin. Probe performs no credential attempts or writes.
 
 Capabilities distinguish Supported, Unsupported and Unknown; evidence distinguishes
 Observed, FirmwareMatrix and LatestKnownFallback. Firmware rules live in compat.
-Observed IDs override fallback names; guessed IDs never authorize extended private
+Observed IDs override fallback names; 3.1+ IDs colliding with AES management (0A)
+or randomized Ed25519 (FF) remain raw observations and cannot authorize extension
+operations. Guessed IDs never authorize extended private
 operations or writes. Required failures and malformed responses propagate. Only
 recognized optional unsupported statuses downgrade; authentication-required discovery
 remains unknown with a warning. Unknown firmware text stays observable.
