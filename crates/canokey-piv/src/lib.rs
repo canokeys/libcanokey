@@ -42,12 +42,15 @@
 //! ```
 //!
 //! The [`command`] module is lower-level: its builders do not SELECT or authenticate
-//! on behalf of the caller. Batch remains planned. Use [`Access::Management`] or [`Access::PinAndManagement`] to keep
+//! on behalf of the caller. Use [`Access::Management`] or [`Access::PinAndManagement`] to keep
 //! authentication and a dependent operation under one SELECT.
 //!
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 mod access;
+/// Explicit multi-request operations under one SELECT.
+pub mod batch;
+pub use batch::{batch, batch_progress, BatchItem, BatchRequest, BatchResults};
 /// Signing, decryption, derivation and signature encodings.
 pub mod private;
 pub use private::{decrypt, derive, sign, SignInput, Signature};
@@ -354,7 +357,7 @@ struct Request {
     reference: Option<SecretReference>,
 }
 type Parser<T> = Box<dyn FnOnce(ResponseData) -> Result<T, Error> + Send>;
-struct Sequence<T> {
+pub(crate) struct Sequence<T> {
     pending: VecDeque<Request>,
     current: Option<(Phase, Option<SecretReference>)>,
     parse: Option<Parser<T>>,
@@ -644,10 +647,20 @@ fn read_object_with<T: 'static>(
     options: OperationOptions,
     parse: impl FnOnce(ObjectData) -> Result<T, Error> + Send + 'static,
 ) -> Result<Operation<T>, Error> {
+    let target = prepare_read_object_with(profile, id, options, parse)?;
+    access::with_access(profile, access, target, options)
+}
+
+pub(crate) fn prepare_read_object_with<T: 'static>(
+    profile: &DeviceProfile,
+    id: ObjectId,
+    options: OperationOptions,
+    parse: impl FnOnce(ObjectData) -> Result<T, Error> + Send + 'static,
+) -> Result<Sequence<T>, Error> {
     require(profile)?;
     let legacy = profile.legacy_unwrapped_objects();
     let limit = options.limits.max_total_response_bytes;
-    access::command_with_access(profile, access, command::get_data(id), options, move |r| {
+    access::prepare(command::get_data(id), options, move |r| {
         r.ensure_success(Phase::Command)?;
         let data = r.data.as_bytes();
         if legacy

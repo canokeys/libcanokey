@@ -76,9 +76,19 @@ pub fn write_object(
     access: Access,
     options: OperationOptions,
 ) -> Result<Operation<MutationResult>, Error> {
-    require_management(&access)?;
+    write::require_management(&access)?;
+    let target = prepare_write_object(profile, id, data, options)?;
+    access::with_access(profile, access, target, options)
+}
+
+pub(crate) fn prepare_write_object(
+    profile: &DeviceProfile,
+    id: ObjectId,
+    data: ObjectData,
+    options: OperationOptions,
+) -> Result<Sequence<MutationResult>, Error> {
     let command = put_command(profile, id, data.as_bytes(), options)?;
-    access::command_with_access(profile, access, command, options, mutation)
+    access::prepare(command, options, mutation)
 }
 
 /// Store a nonempty, uncompressed certificate payload using 70/71=00/FE fields.
@@ -93,6 +103,17 @@ pub fn write_certificate(
     access: Access,
     options: OperationOptions,
 ) -> Result<Operation<MutationResult>, Error> {
+    require_management(&access)?;
+    let target = prepare_write_certificate(profile, slot, der, options)?;
+    access::with_access(profile, access, target, options)
+}
+
+pub(crate) fn prepare_write_certificate(
+    profile: &DeviceProfile,
+    slot: Slot,
+    der: SecretBytes,
+    options: OperationOptions,
+) -> Result<Sequence<MutationResult>, Error> {
     if der.is_empty() {
         return Err(Error::new(ErrorKind::InvalidArgument));
     }
@@ -103,11 +124,10 @@ pub fn write_certificate(
     writer.push(Tag::from_bytes(&[0x70])?, der.as_bytes())?;
     writer.push(Tag::from_bytes(&[0x71])?, &[0])?;
     writer.push(Tag::from_bytes(&[0xfe])?, &[])?;
-    write_object(
+    prepare_write_object(
         profile,
         ObjectId::certificate(slot),
         writer.into_bytes(),
-        access,
         options,
     )
 }
@@ -123,14 +143,23 @@ pub fn delete_certificate(
     access: Access,
     options: OperationOptions,
 ) -> Result<Operation<MutationResult>, Error> {
+    require_management(&access)?;
+    let target = prepare_delete_certificate(profile, slot, options)?;
+    access::with_access(profile, access, target, options)
+}
+
+pub(crate) fn prepare_delete_certificate(
+    profile: &DeviceProfile,
+    slot: Slot,
+    options: OperationOptions,
+) -> Result<Sequence<MutationResult>, Error> {
     profile
         .capability(Capability::CertificateDeletion)
         .require()?;
-    write_object(
+    prepare_write_object(
         profile,
         ObjectId::certificate(slot),
         SecretBytes::default(),
-        access,
         options,
     )
 }
@@ -153,11 +182,21 @@ pub fn set_management_key(
     options: OperationOptions,
 ) -> Result<Operation<MutationResult>, Error> {
     require_management(&access)?;
+    let target = prepare_set_management_key(profile, key, touch, options)?;
+    access::with_access(profile, access, target, options)
+}
+
+pub(crate) fn prepare_set_management_key(
+    profile: &DeviceProfile,
+    key: ManagementKey,
+    touch: ManagementTouchPolicy,
+    options: OperationOptions,
+) -> Result<Sequence<MutationResult>, Error> {
     require(profile)?;
     profile.management_key_support(key.algorithm()).require()?;
     if touch == ManagementTouchPolicy::Always && key.algorithm() != ManagementKeyAlgorithm::Aes192 {
         return Err(Error::new(ErrorKind::UnsupportedFeature));
     }
     let command = key.replacement_command(touch == ManagementTouchPolicy::Always);
-    access::command_with_access(profile, access, command, options, mutation)
+    access::prepare(command, options, mutation)
 }

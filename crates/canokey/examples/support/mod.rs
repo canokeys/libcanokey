@@ -30,14 +30,19 @@ impl Card {
 }
 
 pub fn execute<T>(card: &mut Card, mut op: Operation<T>) -> AppResult<T> {
+    drive(card, &mut op)?;
+    Ok(op.take_result()?)
+}
+
+pub fn drive<T>(card: &mut Card, op: &mut Operation<T>) -> AppResult<()> {
     // The application holds an exclusive connection lease for this whole call.
     let mut step = op.start()?;
     while step == Step::Exchange {
         let response = card.exchange(op.command()?.as_bytes())?;
         step = op.advance(&response)?;
     }
-    // An I/O/protocol error also drops op; no global cleanup is needed.
-    Ok(op.take_result()?)
+    // The caller may inspect a failed Batch before dropping the operation.
+    Ok(())
 }
 
 pub const PROBE: &[(&[u8], &[u8])] = &[

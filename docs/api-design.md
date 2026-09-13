@@ -114,7 +114,7 @@ Management authentication explicitly selects External or Mutual; no silent downg
 
 Certificate parsing requires exactly one nonempty 70 field, accepts absent 71 as uncompressed, accepts 71=00/01 only, and permits an optional empty FE. Duplicate, unknown, malformed fields and trailing gzip members/data fail. Input and decoded payload are independently bounded by max_total_response_bytes; gzip CRC and size must validate. Empty/malformed containers are not silently treated as empty slots. Object NotFound remains a status-derived error. Certificate deletion uses the empty 53 container on 3.1.0 without deleting a private key; older versions cannot claim deletion and are rejected. Chained writes use common APDU reassembly on 1.5.2 and applet streaming from 1.6.0; partial writes are never rolled back or replayed.
 
-SignInput distinguishes RSA encoded block (host owns hash/PKCS1/PSS), ECDSA digest (order-bit truncation and short-value padding), nonempty Ed25519 messages and SM2 digests (host computes SM3(ZA||M)). ML-DSA message/context and empty-message streaming require separate factories. Unverified contexts are rejected before sending. RSA decrypt returns the modulus-sized raw block; unpadding stays in the application. ECDH/X25519 derive validates peer encoding and returns raw shared secret; no KDF. ML-KEM decapsulation is separate with checked ciphertext/secret lengths. Algorithm names are semantic identifiers, not reconfigurable wire IDs or support promises.
+SignInput distinguishes RSA encoded block (host owns hash/PKCS1/PSS), ECDSA digest (order-bit truncation and short-value padding), nonempty Ed25519 messages and SM2 digests (host computes SM3(ZA||M)). ML-DSA message/context and empty-message streaming require separate factories. Unverified contexts are rejected before sending. RSA decrypt returns the modulus-sized raw block; unpadding stays in the application. ECDH/X25519 derive validates peer encoding and returns raw shared secret; no KDF. ML-KEM decapsulation remains planned as a separate factory with checked ciphertext/secret lengths. Algorithm names are semantic identifiers, not reconfigurable wire IDs or support promises.
 
 File I/O, private-key PEM/PKCS#8 import, CSR/X.509 policy, PKCS#11 padding/KDF and object records stay outside the library. Generic certificate DER/PEM inspection is an optional pure module, described below. Enable directories, retry configuration, move/delete key, algorithm writes and new algorithms individually by evidence.
 
@@ -147,15 +147,15 @@ no operation handle, transport, clock, or application state.
   `bin/` owns clap arguments, I/O, report adaptation and format serializers.
   Enabling `serde` alone does not enable CLI dependencies.
 
-## Planned Batch
+## Batch
 
-An owned builder creates one `Operation<BatchResults>` for explicit semantic requests under a single SELECT. Requests omit Access and exclude SELECT, probe and nested Batch; authentication is an explicit request. Bound request count and input bytes. Do not insert extra SELECT or Admin switches. PIN-always requires explicit VERIFY before each private operation.
+`batch(profile, Vec<BatchRequest>, options)` creates one `Operation<BatchResults>` for explicit semantic requests under a single SELECT. Requests omit Access and exclude SELECT, probe and nested Batch; authentication is an explicit request. A batch accepts 1..=128 requests and bounds aggregate semantic input by max_input_bytes; cumulative response and retained result payloads use max_total_response_bytes. Do not insert extra SELECT or Admin switches. PIN-always requires explicit VERIFY before each private operation.
 
-Stop at the first error with failed index/completed count, without rollback or automatic continuation. A specialized completed-results getter exposes successful preceding items during execution/failure/completion, but not after take/cancel. Ordinary operations do not expose partial success. Binding getters copy by index without introducing result handles.
+Stop at the first error with failed index/completed count, without rollback or automatic continuation. `batch_progress(&operation)` exposes successful preceding items during execution/failure/completion, but not after take/cancel. SELECT failure has no request index or progress; a request/conversation failure retains its index in BatchResults and the original Error in Operation. Ordinary operations do not expose partial success. Binding getters copy by index without introducing result handles.
 
 ## Errors and secrets
 
-Error contains kind, phase, optional raw status, secret reference and retries; Mutual cryptogram mismatch returns DeviceAuthenticationFailed without a fabricated status word. Management failures never report PIN retry counts. Batch progress remains planned. Interpret statuses in command context: 6A82 on SELECT is different from GET DATA; a historical empty-slot 6700 requires a proven narrow quirk. Preserve unknown status values, and never invent user-PIN retries for management authentication.
+Error contains kind, phase, optional raw status, secret reference and retries; Mutual cryptogram mismatch returns DeviceAuthenticationFailed without a fabricated status word. Management failures never report PIN retry counts. Batch progress is stored in BatchResults separately from the original protocol error. Interpret statuses in command context: 6A82 on SELECT is different from GET DATA; a historical empty-slot 6700 requires a proven narrow quirk. Preserve unknown status values, and never invent user-PIN retries for management authentication.
 
 Keep protocol, binding and transport failures separate. Redact PINs, keys, APDUs, temporary plaintext and sensitive results from Debug/error/log output. Zeroize working buffers, including allocations replaced during growth. Applications own transport/FFI copies; immutable Dart/Python strings cannot promise erasure. Success/failure releases execution secrets while results remain available until take/drop.
 
@@ -174,7 +174,7 @@ Only `cnk_profile_t` and `cnk_operation_t` are opaque. Other inputs are copied d
 
 The future Console FRB wrapper lives in Console and depends on the Rust facade, not C ABI. PyO3 belongs in a future canokey-python crate. Wrappers may dispatch private enums of `Operation<T>` and hold Option for idempotent close, but never duplicate command/result/error/protocol state. Expose concrete factories, start/advance, command copies, typed result DTOs, profile transfer, and close.
 
-Dart owns async transport and execution; Python callers own their synchronous loop. Close in finally/context-manager after copying/taking results; finalizers are fallback only. Structured exceptions/DTOs preserve error kind, SW, reference, retries and future Batch progress. Localization and CLI formatting stay in applications. See [Console](console-integration.md) and [PKCS#11](pkcs11-integration.md) for examples.
+Dart owns async transport and execution; Python callers own their synchronous loop. Close in finally/context-manager after copying/taking results; finalizers are fallback only. Structured exceptions/DTOs preserve error kind, SW, reference, retries and Batch progress. Localization and CLI formatting stay in applications. See [Console](console-integration.md) and [PKCS#11](pkcs11-integration.md) for examples.
 
 ## Dependency reuse
 

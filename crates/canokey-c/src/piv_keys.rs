@@ -2,7 +2,7 @@
 use super::*;
 use piv_mutation::{access, slot};
 
-fn algorithm(value: u32) -> Result<piv::Algorithm, u32> {
+pub(super) fn algorithm(value: u32) -> Result<piv::Algorithm, u32> {
     use piv::Algorithm::*;
     match value {
         1 => Ok(Rsa1024),
@@ -53,7 +53,7 @@ pub struct CnkKeyParameters {
     /// CNK_KEY_TOUCH_* policy.
     pub touch_policy: u32,
 }
-unsafe fn parameters(p: *const CnkKeyParameters) -> Result<piv::KeyParameters, u32> {
+pub(super) unsafe fn parameters(p: *const CnkKeyParameters) -> Result<piv::KeyParameters, u32> {
     let p = p.as_ref().ok_or(ARG)?;
     if p.struct_size < std::mem::size_of::<CnkKeyParameters>() as u32 {
         return Err(ARG);
@@ -85,7 +85,7 @@ pub struct CnkBytes {
     /// Byte length.
     pub len: usize,
 }
-unsafe fn material(
+pub(super) unsafe fn material(
     algorithm: piv::Algorithm,
     components: *const CnkBytes,
     count: usize,
@@ -398,64 +398,7 @@ pub unsafe extern "C" fn cnk_operation_metadata(
         let Ok(metadata) = inner.result() else {
             return STATE;
         };
-        let mut result = CnkMetadata {
-            struct_size: (*out).struct_size,
-            presence_flags: 0,
-            algorithm_id: 0,
-            pin_policy: 0,
-            touch_policy: 0,
-            origin: 0,
-            is_default: 0,
-            retries_total: 0,
-            retries_remaining: 0,
-            reserved: 0,
-        };
-        use piv::KnownOrUnknown::{Known, Unknown};
-        let fields = metadata.fields();
-        if let Some(id) = fields.algorithm_id {
-            result.presence_flags |= 1;
-            result.algorithm_id = id;
-        }
-        if let (Some(pin), Some(touch)) = (fields.pin_policy, fields.touch_policy) {
-            result.presence_flags |= 2;
-            result.pin_policy = match pin {
-                Unknown(raw) => raw,
-                Known(piv::PinPolicy::Default) => 0,
-                Known(piv::PinPolicy::Never) => 1,
-                Known(piv::PinPolicy::Once) => 2,
-                Known(piv::PinPolicy::Always) => 3,
-            };
-            result.touch_policy = match touch {
-                Unknown(raw) => raw,
-                Known(piv::TouchPolicy::Default) => 0,
-                Known(piv::TouchPolicy::Never) => 1,
-                Known(piv::TouchPolicy::Always) => 2,
-                Known(piv::TouchPolicy::Cached) => 3,
-            };
-        }
-        if let Some(origin) = fields.origin {
-            result.presence_flags |= 4;
-            result.origin = match origin {
-                Unknown(raw) => raw,
-                Known(piv::KeyOrigin::NotPresent) => 0,
-                Known(piv::KeyOrigin::Generated) => 1,
-                Known(piv::KeyOrigin::Imported) => 2,
-            };
-        }
-        if let Some(default) = fields.is_default {
-            result.presence_flags |= 8;
-            result.is_default = match default {
-                Unknown(raw) => raw,
-                Known(v) => u8::from(v),
-            };
-        }
-        if let Some((total, remaining)) = fields.retries {
-            result.presence_flags |= 16;
-            result.retries_total = total;
-            result.retries_remaining = remaining;
-        }
-        ptr::write(out, result);
-        OK
+        copy_metadata(metadata, out)
     })
 }
 unsafe fn public_key<'a>(op: *const CnkOperation) -> Result<&'a piv::PublicKey, u32> {
@@ -494,20 +437,7 @@ pub unsafe extern "C" fn cnk_operation_public_key_copy(
             Ok(key) => key,
             Err(code) => return code,
         };
-        if field == 4 {
-            return match key.to_spki_der() {
-                Ok(der) => copy(&der, buffer, len),
-                Err(_) => PROTOCOL,
-            };
-        }
-        match (field, key) {
-            (1, piv::PublicKey::Rsa { modulus, .. }) => copy(modulus, buffer, len),
-            (2, piv::PublicKey::Rsa { exponent, .. }) => copy(exponent, buffer, len),
-            (3, piv::PublicKey::Ec { point, .. }) => copy(point, buffer, len),
-            (3, piv::PublicKey::Raw { bytes, .. }) => copy(bytes, buffer, len),
-            (1..=3, _) => TYPE,
-            _ => ARG,
-        }
+        copy_public_key(key, field, buffer, len)
     })
 }
 /// Copy the semantic algorithm code for a public-key or signature result.
@@ -576,4 +506,90 @@ pub unsafe extern "C" fn cnk_operation_signature_p1363(
             Err(_) => TYPE,
         }
     })
+}
+
+pub(super) unsafe fn copy_metadata(metadata: &piv::Metadata, out: *mut CnkMetadata) -> u32 {
+    if out.is_null() || (*out).struct_size < std::mem::size_of::<CnkMetadata>() as u32 {
+        return ARG;
+    }
+    let mut result = CnkMetadata {
+        struct_size: (*out).struct_size,
+        presence_flags: 0,
+        algorithm_id: 0,
+        pin_policy: 0,
+        touch_policy: 0,
+        origin: 0,
+        is_default: 0,
+        retries_total: 0,
+        retries_remaining: 0,
+        reserved: 0,
+    };
+    use piv::KnownOrUnknown::{Known, Unknown};
+    let fields = metadata.fields();
+    if let Some(id) = fields.algorithm_id {
+        result.presence_flags |= 1;
+        result.algorithm_id = id;
+    }
+    if let (Some(pin), Some(touch)) = (fields.pin_policy, fields.touch_policy) {
+        result.presence_flags |= 2;
+        result.pin_policy = match pin {
+            Unknown(raw) => raw,
+            Known(piv::PinPolicy::Default) => 0,
+            Known(piv::PinPolicy::Never) => 1,
+            Known(piv::PinPolicy::Once) => 2,
+            Known(piv::PinPolicy::Always) => 3,
+        };
+        result.touch_policy = match touch {
+            Unknown(raw) => raw,
+            Known(piv::TouchPolicy::Default) => 0,
+            Known(piv::TouchPolicy::Never) => 1,
+            Known(piv::TouchPolicy::Always) => 2,
+            Known(piv::TouchPolicy::Cached) => 3,
+        };
+    }
+    if let Some(origin) = fields.origin {
+        result.presence_flags |= 4;
+        result.origin = match origin {
+            Unknown(raw) => raw,
+            Known(piv::KeyOrigin::NotPresent) => 0,
+            Known(piv::KeyOrigin::Generated) => 1,
+            Known(piv::KeyOrigin::Imported) => 2,
+        };
+    }
+    if let Some(default) = fields.is_default {
+        result.presence_flags |= 8;
+        result.is_default = match default {
+            Unknown(raw) => raw,
+            Known(v) => u8::from(v),
+        };
+    }
+    if let Some((total, remaining)) = fields.retries {
+        result.presence_flags |= 16;
+        result.retries_total = total;
+        result.retries_remaining = remaining;
+    }
+    ptr::write(out, result);
+    OK
+}
+
+pub(super) unsafe fn copy_public_key(
+    key: &piv::PublicKey,
+    field: u32,
+    buffer: *mut u8,
+    len: *mut usize,
+) -> u32 {
+    if field == 4 {
+        return match key.to_spki_der() {
+            Ok(der) => copy(&der, buffer, len),
+            Err(_) => PROTOCOL,
+        };
+    }
+    match (field, key) {
+        (1, piv::PublicKey::Rsa { modulus, .. }) => copy(modulus, buffer, len),
+        (2, piv::PublicKey::Rsa { exponent, .. }) => copy(exponent, buffer, len),
+        (3, piv::PublicKey::Ec { point, .. }) => copy(point, buffer, len),
+        (3, piv::PublicKey::Raw { bytes, .. }) => copy(bytes, buffer, len),
+        (1..=3, _) => TYPE,
+        _ => ARG,
+    }
 }

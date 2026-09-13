@@ -273,6 +273,15 @@ pub fn get_metadata(
     access: Access,
     options: OperationOptions,
 ) -> Result<Operation<Metadata>, Error> {
+    let target = prepare_get_metadata(profile, reference, options)?;
+    access::with_access(profile, access, target, options)
+}
+
+pub(crate) fn prepare_get_metadata(
+    profile: &DeviceProfile,
+    reference: MetadataReference,
+    options: OperationOptions,
+) -> Result<Sequence<Metadata>, Error> {
     require(profile)?;
     profile.capability(Capability::Metadata).require()?;
     if let MetadataReference::Key(slot) = reference {
@@ -280,27 +289,20 @@ pub fn get_metadata(
     }
     let snapshot = profile.clone();
     let legacy = profile.legacy_empty_key_metadata();
-    access::command_with_access(
-        profile,
-        access,
-        command::metadata(reference),
-        options,
-        move |r| {
-            if legacy && matches!(reference, MetadataReference::Key(_)) && r.status.raw() == 0x6900
-            {
-                let mut error = Error::status(r.status, Phase::Command, None);
-                error.kind = ErrorKind::NotFound;
-                return Err(error);
-            }
-            r.ensure_success(Phase::Command)?;
-            decode(
-                &snapshot,
-                reference,
-                r.data,
-                options.limits.max_total_response_bytes,
-            )
-        },
-    )
+    access::prepare(command::metadata(reference), options, move |r| {
+        if legacy && matches!(reference, MetadataReference::Key(_)) && r.status.raw() == 0x6900 {
+            let mut error = Error::status(r.status, Phase::Command, None);
+            error.kind = ErrorKind::NotFound;
+            return Err(error);
+        }
+        r.ensure_success(Phase::Command)?;
+        decode(
+            &snapshot,
+            reference,
+            r.data,
+            options.limits.max_total_response_bytes,
+        )
+    })
 }
 /// Read observed algorithm extension IDs under one SELECT, with optional explicit
 /// management access for firmware that protects this read. The returned config
@@ -312,8 +314,16 @@ pub fn read_algorithm_config(
     access: Access,
     options: OperationOptions,
 ) -> Result<Operation<AlgorithmConfig>, Error> {
+    let target = prepare_read_algorithm_config(profile, options)?;
+    access::with_access(profile, access, target, options)
+}
+
+pub(crate) fn prepare_read_algorithm_config(
+    profile: &DeviceProfile,
+    options: OperationOptions,
+) -> Result<Sequence<AlgorithmConfig>, Error> {
     profile.algorithm_config_read_support().require()?;
-    access::command_with_access(profile, access, command::algorithm_config(), options, |r| {
+    access::prepare(command::algorithm_config(), options, |r| {
         r.ensure_success(Phase::Command)?;
         AlgorithmConfig::parse(r.data.as_bytes())
     })

@@ -62,6 +62,13 @@ int main(void) {
     assert(cnk_piv_decrypt_new(profile,0x9d,CNK_ALGORITHM_RSA2048,ciphertext,sizeof(ciphertext),NULL,NULL,&decrypt,NULL)==CNK_OK);
     const uint8_t invalid_peer[65]={4};
     assert(cnk_piv_derive_new(profile,0x9d,CNK_ALGORITHM_P256,invalid_peer,sizeof(invalid_peer),NULL,NULL,&derive,NULL)==CNK_INVALID_ARGUMENT&&derive==NULL);
+    cnk_piv_batch_request_v1 requests[3]={0};
+    for(size_t i=0;i<3;++i)requests[i].struct_size=sizeof(requests[i]);
+    uint8_t batch_pin[]={'1','2','3','4','5','6'};
+    requests[0].kind=CNK_BATCH_VERIFY_PIN;requests[0].data=batch_pin;requests[0].data_len=sizeof(batch_pin);
+    requests[1].kind=CNK_BATCH_SIGN;requests[1].reference=0x9c;requests[1].algorithm=CNK_ALGORITHM_P256;requests[1].input_kind=CNK_SIGN_DIGEST;requests[1].data=digest;requests[1].data_len=sizeof(digest);
+    requests[2]=requests[0];cnk_operation_t *batch=NULL;
+    assert(cnk_piv_batch_new(profile,requests,3,NULL,&batch,NULL)==CNK_OK);memset(batch_pin,0,sizeof(batch_pin));
     cnk_profile_free(profile);memset(key,0,sizeof(key));memset(pin,0,sizeof(pin));memset(challenge,0xaa,sizeof(challenge));
     cnk_mutation_result_v1 result={sizeof(result),999};
     assert(cnk_operation_mutation_result(write,&result)==CNK_INVALID_STATE&&result.profile_effect==999);
@@ -100,5 +107,19 @@ int main(void) {
     authenticate(import);uint8_t import_cmd[39]={0,0xfe,0x11,0x9c,34,6,32};import_cmd[38]=1;expect(import,import_cmd,sizeof(import_cmd));feed(import,ok,sizeof(ok));
     assert(cnk_operation_mutation_result(import,&result)==CNK_OK);cnk_operation_free(import);
     assert(cnk_operation_cancel(decrypt)==CNK_OK);cnk_operation_free(decrypt);
+    cnk_batch_progress_v1 progress={sizeof(progress),999,0,0};
+    assert(cnk_operation_batch_progress(batch,&progress)==CNK_INVALID_STATE&&progress.completed_count==999);
+    assert(cnk_operation_start(batch,&step,NULL)==CNK_OK);feed(batch,ok,sizeof(ok));expect(batch,verify,sizeof(verify));feed(batch,ok,sizeof(ok));
+    assert(cnk_operation_batch_progress(batch,&progress)==CNK_OK&&progress.completed_count==1&&progress.has_failed_index==0);
+    feed(batch,sig,sizeof(sig));expect(batch,verify,sizeof(verify));
+    const uint8_t bad_pin[]={0x63,0xc2};assert(cnk_operation_advance(batch,bad_pin,sizeof(bad_pin),&step,&error)==CNK_PROTOCOL_ERROR&&error.retries_remaining==2);
+    assert(cnk_operation_batch_progress(batch,&progress)==CNK_OK&&progress.completed_count==2&&progress.has_failed_index==1&&progress.failed_index==2);
+    assert(cnk_operation_batch_item_kind(batch,1,&kind)==CNK_OK&&kind==CNK_RESULT_SIGNATURE);
+    assert(cnk_operation_batch_item_kind(batch,2,&kind)==CNK_INVALID_ARGUMENT);
+    length=0;assert(cnk_operation_batch_item_copy_bytes(batch,1,NULL,&length)==CNK_OK&&length==8);
+    length=0;assert(cnk_operation_batch_item_signature_p1363(batch,1,NULL,&length)==CNK_OK&&length==64);
+    assert(cnk_operation_batch_item_metadata(batch,1,&md)==CNK_RESULT_TYPE_MISMATCH);
+    uint8_t copied[8]={0xaa};length=1;assert(cnk_operation_batch_item_copy_bytes(batch,1,copied,&length)==CNK_BUFFER_TOO_SMALL&&length==8&&copied[0]==0xaa);
+    assert(cnk_operation_batch_item_copy_bytes(batch,1,copied,&length)==CNK_OK);cnk_operation_free(batch);assert(copied[0]==0x30&&copied[7]==2);
     return 0;
 }

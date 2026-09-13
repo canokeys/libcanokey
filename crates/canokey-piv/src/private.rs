@@ -166,6 +166,17 @@ pub fn sign(
     access: Access,
     options: OperationOptions,
 ) -> Result<Operation<Signature>, Error> {
+    let target = prepare_sign(profile, slot, algorithm, input, options)?;
+    access::with_access(profile, access, target, options)
+}
+
+pub(crate) fn prepare_sign(
+    profile: &DeviceProfile,
+    slot: Slot,
+    algorithm: Algorithm,
+    input: SignInput,
+    options: OperationOptions,
+) -> Result<Sequence<Signature>, Error> {
     let raw = match &input {
         SignInput::RsaEncodedBlock(b) | SignInput::Digest(b) | SignInput::Message(b) => b,
     };
@@ -181,7 +192,7 @@ pub fn sign(
         _ => return Err(Error::new(ErrorKind::InvalidArgument)),
     };
     let command = command(profile, slot, algorithm, 0x81, bytes.as_bytes(), options)?;
-    access::command_with_access(profile, access, command, options, move |r| {
+    access::prepare(command, options, move |r| {
         let bytes = reply(r, options.limits.max_total_response_bytes)?;
         if let Some(width) = curve_len(algorithm) {
             ec_signature(bytes.as_bytes(), width)?;
@@ -207,6 +218,17 @@ pub fn decrypt(
     access: Access,
     options: OperationOptions,
 ) -> Result<Operation<SecretBytes>, Error> {
+    let target = prepare_decrypt(profile, slot, algorithm, ciphertext, options)?;
+    access::with_access(profile, access, target, options)
+}
+
+pub(crate) fn prepare_decrypt(
+    profile: &DeviceProfile,
+    slot: Slot,
+    algorithm: Algorithm,
+    ciphertext: SecretBytes,
+    options: OperationOptions,
+) -> Result<Sequence<SecretBytes>, Error> {
     require_agreement_slot(slot)?;
     let width = rsa_len(algorithm).ok_or_else(|| Error::new(ErrorKind::UnsupportedAlgorithm))?;
     if ciphertext.len() != width {
@@ -220,7 +242,7 @@ pub fn decrypt(
         ciphertext.as_bytes(),
         options,
     )?;
-    access::command_with_access(profile, access, command, options, move |r| {
+    access::prepare(command, options, move |r| {
         let bytes = reply(r, options.limits.max_total_response_bytes)?;
         if bytes.len() != width {
             return Err(invalid());
@@ -251,6 +273,17 @@ pub fn derive(
     access: Access,
     options: OperationOptions,
 ) -> Result<Operation<SecretBytes>, Error> {
+    let target = prepare_derive(profile, slot, algorithm, peer, options)?;
+    access::with_access(profile, access, target, options)
+}
+
+pub(crate) fn prepare_derive(
+    profile: &DeviceProfile,
+    slot: Slot,
+    algorithm: Algorithm,
+    peer: Vec<u8>,
+    options: OperationOptions,
+) -> Result<Sequence<SecretBytes>, Error> {
     require_agreement_slot(slot)?;
     let width = match algorithm {
         Algorithm::EccP256 => {
@@ -276,7 +309,7 @@ pub fn derive(
         _ => return Err(Error::new(ErrorKind::UnsupportedAlgorithm)),
     };
     let command = command(profile, slot, algorithm, 0x85, &peer, options)?;
-    access::command_with_access(profile, access, command, options, move |r| {
+    access::prepare(command, options, move |r| {
         let bytes = reply(r, options.limits.max_total_response_bytes)?;
         if bytes.len() != width {
             return Err(invalid());

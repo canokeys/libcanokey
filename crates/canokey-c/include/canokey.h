@@ -40,7 +40,7 @@ enum { CNK_ERROR_HAS_SW=1, CNK_ERROR_HAS_RETRIES=2 };
 enum { CNK_RESULT_PROFILE=1, CNK_RESULT_UNIT=2, CNK_RESULT_PIN_STATUS=3,
        CNK_RESULT_OBJECT=4, CNK_RESULT_CERTIFICATE=5, CNK_RESULT_MUTATION=6,
        CNK_RESULT_METADATA=7, CNK_RESULT_PUBLIC_KEY=8, CNK_RESULT_SIGNATURE=9,
-       CNK_RESULT_ALGORITHM_CONFIG=10 };
+       CNK_RESULT_ALGORITHM_CONFIG=10, CNK_RESULT_BATCH=11 };
 enum { CNK_MANAGEMENT_TDES=1, CNK_MANAGEMENT_AES192=2 };
 enum { CNK_AUTH_EXTERNAL=1, CNK_AUTH_MUTUAL=2 };
 enum { CNK_MANAGEMENT_TOUCH_NEVER=0, CNK_MANAGEMENT_TOUCH_ALWAYS=1 };
@@ -113,6 +113,36 @@ cnk_status_t cnk_operation_metadata(const cnk_operation_t *,cnk_metadata_v1 *);
 cnk_status_t cnk_operation_public_key_copy(const cnk_operation_t *,uint32_t field,uint8_t *,size_t *);
 cnk_status_t cnk_operation_key_algorithm(const cnk_operation_t *,uint32_t *);
 cnk_status_t cnk_operation_signature_p1363(const cnk_operation_t *,uint8_t *,size_t *);
+enum { CNK_BATCH_VERIFY_PIN=1, CNK_BATCH_AUTHENTICATE_MANAGEMENT=2, CNK_BATCH_LOGOUT=3,
+       CNK_BATCH_READ_OBJECT=4, CNK_BATCH_READ_CERTIFICATE=5, CNK_BATCH_WRITE_OBJECT=6,
+       CNK_BATCH_WRITE_CERTIFICATE=7, CNK_BATCH_DELETE_CERTIFICATE=8, CNK_BATCH_GET_METADATA=9,
+       CNK_BATCH_READ_ALGORITHM_CONFIG=10, CNK_BATCH_GENERATE_KEY=11, CNK_BATCH_IMPORT_KEY=12,
+       CNK_BATCH_SIGN=13, CNK_BATCH_DECRYPT=14, CNK_BATCH_DERIVE=15, CNK_BATCH_SET_MANAGEMENT_KEY=16 };
+/* Only fields relevant to kind are read. Unused pointers/lengths should be NULL/0.
+ * All nested ranges are copied. No SELECT/probe/nested Batch requests exist. */
+typedef struct {
+    uint32_t struct_size,kind,reference,algorithm,input_kind;
+    const uint8_t *data;
+    size_t data_len;
+    const uint8_t *tag;
+    size_t tag_len;
+    const cnk_piv_management_v1 *management;
+    const cnk_piv_key_parameters_v1 *parameters;
+    const cnk_bytes_t *components;
+    size_t component_count;
+} cnk_piv_batch_request_v1;
+typedef struct {
+    uint32_t struct_size,completed_count,has_failed_index,failed_index;
+} cnk_batch_progress_v1;
+cnk_status_t cnk_piv_batch_new(const cnk_profile_t *,const cnk_piv_batch_request_v1 *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_operation_batch_progress(const cnk_operation_t *,cnk_batch_progress_v1 *);
+cnk_status_t cnk_operation_batch_item_kind(const cnk_operation_t *,size_t,uint32_t *);
+/* Public-key items return DER SPKI here; other byte results use their normal encoding. */
+cnk_status_t cnk_operation_batch_item_copy_bytes(const cnk_operation_t *,size_t,uint8_t *,size_t *);
+cnk_status_t cnk_operation_batch_item_mutation(const cnk_operation_t *,size_t,cnk_mutation_result_v1 *);
+cnk_status_t cnk_operation_batch_item_metadata(const cnk_operation_t *,size_t,cnk_metadata_v1 *);
+cnk_status_t cnk_operation_batch_item_public_key_copy(const cnk_operation_t *,size_t,uint32_t field,uint8_t *,size_t *);
+cnk_status_t cnk_operation_batch_item_signature_p1363(const cnk_operation_t *,size_t,uint8_t *,size_t *);
 uint32_t cnk_abi_version(void);
 void cnk_profile_free(cnk_profile_t *);
 void cnk_operation_free(cnk_operation_t *);

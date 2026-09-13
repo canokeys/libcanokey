@@ -40,7 +40,7 @@ unsafe fn algorithm(value: u32) -> Result<piv::ManagementKeyAlgorithm, u32> {
         _ => Err(ARG),
     }
 }
-unsafe fn management(
+pub(super) unsafe fn management(
     p: *const CnkManagement,
     error: *mut CnkError,
 ) -> Result<piv::ManagementAuthentication, u32> {

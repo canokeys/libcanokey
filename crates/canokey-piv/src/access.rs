@@ -40,6 +40,20 @@ impl<T> Selected<T> {
     }
 }
 impl<T> Machine<T> for Selected<T> {
+    fn progress(&self) -> Option<&T> {
+        if matches!(self.stage, Stage::Target) {
+            self.target.progress()
+        } else {
+            None
+        }
+    }
+    fn take_progress(&mut self) -> Option<T> {
+        if matches!(self.stage, Stage::Target) {
+            self.target.take_progress()
+        } else {
+            None
+        }
+    }
     fn next(&mut self, response: Option<ResponseData>) -> Result<Action<T>, Error> {
         match self.stage {
             Stage::Begin => {
@@ -104,22 +118,15 @@ pub(crate) fn with_access<T: 'static>(
     )
 }
 
-pub(crate) fn command_with_access<T: 'static>(
-    profile: &DeviceProfile,
-    access: Access,
+pub(crate) fn prepare<T: 'static>(
     command: LogicalCommand,
     options: OperationOptions,
     parse: impl FnOnce(ResponseData) -> Result<T, Error> + Send + 'static,
-) -> Result<Operation<T>, Error> {
+) -> Result<Sequence<T>, Error> {
     canokey_protocol::operation::validate_command(&command, options)?;
-    with_access(
-        profile,
-        access,
-        Sequence {
-            pending: vec![request(command, Phase::Command, None)].into(),
-            current: None,
-            parse: Some(Box::new(parse)),
-        },
-        options,
-    )
+    Ok(Sequence {
+        pending: vec![request(command, Phase::Command, None)].into(),
+        current: None,
+        parse: Some(Box::new(parse)),
+    })
 }

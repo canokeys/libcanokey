@@ -6,6 +6,8 @@
 //! library, accessed without concurrent mutation, and freed exactly once.
 //! A non-null versioned struct must contain at least its declared supported prefix.
 #![deny(missing_docs)]
+mod piv_batch;
+pub use piv_batch::*;
 mod piv_keys;
 pub use piv_keys::*;
 mod piv_mutation;
@@ -76,6 +78,7 @@ enum Inner {
     Certificate(Operation<piv::Certificate>),
     Mutation(Operation<piv::MutationResult>),
     Metadata(Operation<piv::Metadata>),
+    Batch(Operation<piv::BatchResults>),
     PublicKey(Operation<piv::PublicKey>),
     Signature(Operation<piv::Signature>),
     AlgorithmConfig(Operation<canokey::compatibility::AlgorithmConfig>),
@@ -90,6 +93,7 @@ macro_rules! dispatch {
             Inner::Certificate($op) => $body,
             Inner::Mutation($op) => $body,
             Inner::Metadata($op) => $body,
+            Inner::Batch($op) => $body,
             Inner::PublicKey($op) => $body,
             Inner::Signature($op) => $body,
             Inner::AlgorithmConfig($op) => $body,
@@ -808,6 +812,7 @@ pub unsafe extern "C" fn cnk_operation_result_kind(op: *const CnkOperation, out:
             Inner::PublicKey(_) => 8,
             Inner::Signature(_) => 9,
             Inner::AlgorithmConfig(_) => 10,
+            Inner::Batch(_) => 11,
         };
         OK
     })

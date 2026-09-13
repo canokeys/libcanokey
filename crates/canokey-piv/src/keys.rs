@@ -37,6 +37,9 @@ pub struct PrivateKeyMaterial {
     fields: SecretBytes,
 }
 impl PrivateKeyMaterial {
+    pub(crate) fn input_len(&self) -> usize {
+        self.fields.len()
+    }
     /// Copy RSA CRT p, q, dP, dQ, qInv in that order, as unsigned big-endian values.
     /// Each must be nonzero and fit half the modulus width; values are left padded
     /// to that width. The implicit public exponent is 65537; callers must supply
@@ -188,6 +191,15 @@ pub fn generate_key(
     options: OperationOptions,
 ) -> Result<Operation<PublicKey>, Error> {
     write::require_management(&access)?;
+    let target = prepare_generate_key(profile, parameters, options)?;
+    access::with_access(profile, access, target, options)
+}
+
+pub(crate) fn prepare_generate_key(
+    profile: &DeviceProfile,
+    parameters: KeyParameters,
+    options: OperationOptions,
+) -> Result<Sequence<PublicKey>, Error> {
     let id = key_id(profile, parameters.slot, parameters.algorithm)?;
     let mut fields = TlvWriter::new(options.limits.max_input_bytes);
     fields.push(Tag::from_bytes(&[0x80])?, &[id])?;
@@ -196,7 +208,7 @@ pub fn generate_key(
     data.push(Tag::from_bytes(&[0xac])?, fields.into_bytes().as_bytes())?;
     let mut command = key_command(0x47, 0, parameters.slot.reference(), data.into_bytes());
     command.allow_chaining = false;
-    access::command_with_access(profile, access, command, options, move |r| {
+    access::prepare(command, options, move |r| {
         generated(
             parameters.algorithm,
             r,
@@ -220,6 +232,16 @@ pub fn import_key(
     options: OperationOptions,
 ) -> Result<Operation<MutationResult>, Error> {
     write::require_management(&access)?;
+    let target = prepare_import_key(profile, parameters, material, options)?;
+    access::with_access(profile, access, target, options)
+}
+
+pub(crate) fn prepare_import_key(
+    profile: &DeviceProfile,
+    parameters: KeyParameters,
+    material: PrivateKeyMaterial,
+    options: OperationOptions,
+) -> Result<Sequence<MutationResult>, Error> {
     if material.algorithm != parameters.algorithm {
         return Err(Error::new(ErrorKind::InvalidArgument));
     }
@@ -237,9 +259,7 @@ pub fn import_key(
     }
     let mut fields = material.fields;
     fields.extend(policy.as_bytes());
-    access::command_with_access(
-        profile,
-        access,
+    access::prepare(
         key_command(0xfe, id, parameters.slot.reference(), fields),
         options,
         write::mutation,

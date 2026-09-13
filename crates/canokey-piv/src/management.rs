@@ -91,6 +91,12 @@ pub struct ManagementAuthentication {
     mode: Mode,
 }
 impl ManagementAuthentication {
+    pub(crate) fn input_len(&self) -> usize {
+        24 + match &self.mode {
+            Mode::External => 0,
+            Mode::Mutual(challenge) => challenge.len(),
+        }
+    }
     /// Authenticate the host to the card using the card's challenge.
     /// External authentication does not authenticate the card to the host.
     pub fn external(key: ManagementKey) -> Self {

@@ -185,6 +185,12 @@ pub mod engine {
     }
     pub trait Machine<T>: Send {
         fn next(&mut self, response: Option<ResponseData>) -> Result<Action<T>, Error>;
+        fn progress(&self) -> Option<&T> {
+            None
+        }
+        fn take_progress(&mut self) -> Option<T> {
+            None
+        }
     }
 }
 use engine::{Action, Machine};
@@ -383,6 +389,7 @@ pub struct Operation<T> {
     machine: Option<Box<dyn Machine<T>>>,
     conversation: Option<ConversationState>,
     output: Option<T>,
+    progress: Option<T>,
     error: Option<Error>,
     state: OperationState,
     options: OperationOptions,
@@ -406,6 +413,7 @@ impl<T> Operation<T> {
             machine: Some(Box::new(machine)),
             conversation: None,
             output: None,
+            progress: None,
             error: None,
             state: OperationState::Created,
             options: options.validate()?,
@@ -421,6 +429,16 @@ impl<T> Operation<T> {
     /// Invalid-state getter/drive calls do not overwrite this error.
     pub fn error(&self) -> Option<&Error> {
         self.error.as_ref()
+    }
+    /// Borrow partial results only for an operation explicitly designed to expose
+    /// progress (currently PIV Batch). Ordinary operations return None. Failed
+    /// batches retain completed items without retaining execution secrets.
+    /// Returns None after cancellation/result transfer and on completion, when
+    /// the ordinary result getter applies. Repeated calls never advance execution.
+    pub fn progress(&self) -> Option<&T> {
+        self.progress
+            .as_ref()
+            .or_else(|| self.machine.as_ref().and_then(|m| m.progress()))
     }
     /// Borrow the pending complete physical APDU. Repeated reads never resend it.
     ///
@@ -555,6 +573,7 @@ impl<T> Operation<T> {
     }
     fn record(&mut self, result: Result<Step, Error>) -> Result<Step, Error> {
         if let Err(error) = &result {
+            self.progress = self.machine.as_mut().and_then(|m| m.take_progress());
             self.machine = None;
             self.conversation = None;
             self.error = Some(error.clone());
