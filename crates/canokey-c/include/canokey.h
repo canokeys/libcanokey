@@ -35,7 +35,8 @@ enum { CNK_STATE_CREATED=0, CNK_STATE_AWAITING_RESPONSE=1,
 enum { CNK_PHASE_CONSTRUCTION=0, CNK_PHASE_SELECT=1, CNK_PHASE_COMMAND=2,
        CNK_PHASE_AUTHENTICATION=3, CNK_PHASE_PARSING=4, CNK_PHASE_CONVERSATION=5 };
 enum { CNK_REFERENCE_NONE=0, CNK_REFERENCE_PIN=1, CNK_REFERENCE_PUK=2,
-       CNK_REFERENCE_MANAGEMENT_KEY=3, CNK_REFERENCE_ADMIN_PIN=4, CNK_REFERENCE_OATH_ACCESS=5 };
+       CNK_REFERENCE_MANAGEMENT_KEY=3, CNK_REFERENCE_ADMIN_PIN=4, CNK_REFERENCE_OATH_ACCESS=5, CNK_REFERENCE_PW1_SIGN=6,
+       CNK_REFERENCE_PW1_OTHER=7, CNK_REFERENCE_PW3=8, CNK_REFERENCE_RESET_CODE=9 };
 enum { CNK_ERROR_HAS_SW=1, CNK_ERROR_HAS_RETRIES=2 };
 enum { CNK_RESULT_PROFILE=1, CNK_RESULT_UNIT=2, CNK_RESULT_PIN_STATUS=3,
        CNK_RESULT_OBJECT=4, CNK_RESULT_CERTIFICATE=5, CNK_RESULT_MUTATION=6,
@@ -302,6 +303,48 @@ uint32_t cnk_operation_oath_info(const cnk_operation_t *, size_t index, cnk_oath
  * truncation. Query/copy contracts apply. Caller must wipe copied codes. */
 uint32_t cnk_operation_oath_copy(const cnk_operation_t *, size_t index, uint32_t field,
  uint8_t *buffer, size_t *length);
+
+/* OpenPGP: PW1-sign 81, PW1-other 82, PW3 83. */
+enum { CNK_RESULT_OPENPGP=17, CNK_OPENPGP_READ_DATA=1, CNK_OPENPGP_READ_CERTIFICATE=2,
+ CNK_OPENPGP_WRITE_CERTIFICATE=3, CNK_OPENPGP_PIN_STATUS=4, CNK_OPENPGP_VERIFY=5,
+ CNK_OPENPGP_LOGOUT=6, CNK_OPENPGP_CHANGE_PASSWORD=7, CNK_OPENPGP_UNBLOCK_ADMIN=8,
+ CNK_OPENPGP_UNBLOCK_CODE=9, CNK_OPENPGP_RESET_RETRIES=10, CNK_OPENPGP_WRITE_DATA=11,
+ CNK_OPENPGP_READ_PUBLIC_KEY=12, CNK_OPENPGP_GENERATE_KEY=13, CNK_OPENPGP_IMPORT_KEY=14,
+ CNK_OPENPGP_SIGN=15, CNK_OPENPGP_AUTHENTICATE=16, CNK_OPENPGP_DECRYPT=17,
+ CNK_OPENPGP_DERIVE=18, CNK_OPENPGP_TERMINATE=19, CNK_OPENPGP_ACTIVATE=20 };
+typedef struct {
+ uint32_t struct_size, reference;
+ cnk_bytes_t password;
+} cnk_openpgp_access_v1;
+typedef struct {
+ uint32_t struct_size, kind;
+ uint32_t slot; /* 1 signature, 2 decipher, 3 authentication */
+ uint32_t reference; /* PIN_STATUS/LOGOUT/CHANGE_PASSWORD */
+ uint32_t tag; /* READ_DATA tag or WRITE_DATA subtype below */
+ uint32_t algorithm; /* CNK_ALGORITHM_* for import/private ops/algorithm write */
+ uint32_t value; /* WRITE_DATA scalar only */
+ cnk_bytes_t data, new_password;
+ const cnk_bytes_t *components; size_t component_count;
+} cnk_openpgp_request_v1;
+/* Zero unused fields. data: WRITE_CERTIFICATE bytes, CHANGE_PASSWORD old password,
+ * UNBLOCK_ADMIN new PW1, UNBLOCK_CODE reset code, RESET_RETRIES three limit bytes,
+ * SIGN/AUTHENTICATE digest/DigestInfo/message, DECRYPT ciphertext, DERIVE peer key.
+ * new_password is for CHANGE_PASSWORD/UNBLOCK_CODE only.
+ * IMPORT_KEY: six spans e(4 bytes),p,q,qInv,dP,dQ or one EC scalar/seed span.
+ * WRITE_DATA tag subtypes:
+ * 1 name(data), 2 login(data), 3 language(data), 4 sex(value), 5 URL(data),
+ * 6 reset code(data, empty clears), 7 reuse signature PIN(value 0/1),
+ * 8 touch(slot,value 0 off/1 on/2 permanent), 9 cache seconds(value),
+ * 10 algorithm(slot,algorithm), 11 fingerprint(slot,data 20 bytes),
+ * 12 CA fingerprint(slot,data 20 bytes), 13 generation time(slot,value u32).
+ * Attribute changes discard the old key; retry reset restores default passwords.
+ * Terminate does not guess passwords; Activate requires existing terminated state. */
+uint32_t cnk_openpgp_new(const cnk_profile_t *, const cnk_openpgp_request_v1 *,
+ const cnk_openpgp_access_v1 *, const cnk_operation_options_v1 *,
+ cnk_operation_t **, cnk_error_v1 *);
+/* 1 bytes, 2 unit, 3 PIN status, 4 public key, 5 signature. Existing copy/getters
+ * apply; EC signatures are raw fixed-width r||s. No automatic private-op retries. */
+uint32_t cnk_operation_openpgp_kind(const cnk_operation_t *, uint32_t *);
 
 #ifdef __cplusplus
 }

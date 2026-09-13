@@ -1,0 +1,17 @@
+[package]
+name = "canokey-key"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+description = "Shared CanoKey public key encodings and SPKI conversion"
+publish = false
+
+[dependencies]
+canokey-protocol.workspace = true
+canokey-compat.workspace = true
+der = { version = "0.7", features = ["alloc", "derive", "oid"] }
+spki = { version = "0.7", features = ["alloc"] }
+pkcs1 = { version = "0.7", features = ["alloc"] }

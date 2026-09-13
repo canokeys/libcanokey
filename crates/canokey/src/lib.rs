@@ -51,6 +51,7 @@ pub use canokey_admin as admin;
 pub use canokey_compat as compatibility;
 pub use canokey_compat::DeviceProfile;
 pub use canokey_oath as oath;
+pub use canokey_openpgp as openpgp;
 pub use canokey_piv as piv;
 pub use canokey_protocol::{apdu, tlv};
 pub use canokey_protocol::{

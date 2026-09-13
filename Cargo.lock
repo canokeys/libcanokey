@@ -93,6 +93,7 @@ dependencies = [
  "canokey-admin",
  "canokey-compat",
  "canokey-oath",
+ "canokey-openpgp",
  "canokey-piv",
  "canokey-protocol",
  "x509-info",
@@ -121,6 +122,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "canokey-key"
+version = "0.1.0"
+dependencies = [
+ "canokey-compat",
+ "canokey-protocol",
+ "der 0.7.10",
+ "pkcs1",
+ "spki 0.7.3",
+]
+
+[[package]]
 name = "canokey-oath"
 version = "0.1.0"
 dependencies = [
@@ -133,11 +145,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "canokey-openpgp"
+version = "0.1.0"
+dependencies = [
+ "canokey-compat",
+ "canokey-key",
+ "canokey-protocol",
+]
+
+[[package]]
 name = "canokey-piv"
 version = "0.1.0"
 dependencies = [
  "aes",
  "canokey-compat",
+ "canokey-key",
  "canokey-protocol",
  "der 0.7.10",
  "des",

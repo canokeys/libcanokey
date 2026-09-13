@@ -190,6 +190,37 @@ lack of progress. No OATH calculation, mutation or continuation retries 6C. Lost
 responses and later-page failures may leave HOTP/increasing-TOTP state changed;
 no result getter, retry, cancel or drop can recover or roll back that state.
 
+## OpenPGP
+
+`openpgp::operation` owns a Request and optional explicit Access. PW1-sign (81),
+PW1-other (82) and PW3 (83) remain distinct; private operations require the correct
+reference. Empty VERIFY observes credential state and can clear a PW1 mode on the
+pinned firmware. It never produces a reusable authorization object. Failed submitted
+passwords can return 6982 without retries; errors retain their credential reference.
+Change/unblock commands own old||new or reset-code||new and perform no extra VERIFY.
+
+Key operations read wrapped 6E/73 algorithm attributes before authentication under
+the same SELECT. Expected algorithms must match; generation/import do not silently
+change attributes. Explicit attribute replacement discards the old key. RSA-2048/3072/
+4096, P-256/384/521, secp256k1, Ed25519 and X25519 have independent OpenPGP evidence;
+SM2 and post-quantum PIV support do not imply OpenPGP support. Public keys share the
+`canokey-key` parser and SPKI representation, retaining the existing PIV public path.
+
+RSA signing sends caller-prepared DigestInfo and applies PKCS#1 v1.5 on card; EC sends
+short digests and returns fixed-width r||s; Ed25519 sends complete messages within
+short-APDU limits. These commands cannot chain in the pinned firmware. RSA decipher
+sends an explicit zero padding indicator and returns firmware-unpadded plaintext.
+ECDH/X25519 returns raw shared bytes; peer validation and OpenPGP KDF remain caller
+policy. Neither private operation is retried on 6C. Import uses typed RSA CRT or EC
+scalar/seed fields, 4D/7F48/5F48 and bounded command chaining, without logging keys.
+
+Certificates select their occurrence after PW3 verification and immediately before
+GET/PUT. Partial certificate/import/password/reset writes are never rolled back;
+callers invalidate affected caches even on uncertain completion. Retry reset restores
+PW1/PW3 defaults; Terminate and Activate are separate explicit operations. Fingerprints
+and timestamps are caller-supplied writes. DO parsers preserve unknown values without
+identity/trust validation. Current firmware has no KDF DO/configuration implementation.
+
 ## Batch
 
 `batch(profile, Vec<BatchRequest>, options)` executes explicit requests under one

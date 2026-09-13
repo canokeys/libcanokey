@@ -71,6 +71,14 @@ pub enum SecretReference {
     AdminPin,
     /// OATH access-code key, distinct from a PIN retry counter.
     OathAccess,
+    /// OpenPGP PW1 for signatures (reference 81).
+    Pw1Sign,
+    /// OpenPGP PW1 for decipher/authentication (reference 82).
+    Pw1Other,
+    /// OpenPGP administrative password (reference 83).
+    Pw3,
+    /// OpenPGP resetting code.
+    ResetCode,
 }
 /// Owned, cloneable protocol failure with no secret payload.
 /// Display is diagnostic English; applications own localization and transport errors.
@@ -113,7 +121,15 @@ impl Error {
     pub fn status(sw: StatusWord, phase: Phase, reference: Option<SecretReference>) -> Self {
         let pin_reference = matches!(
             reference,
-            Some(SecretReference::Pin | SecretReference::Puk | SecretReference::AdminPin)
+            Some(
+                SecretReference::Pin
+                    | SecretReference::Puk
+                    | SecretReference::AdminPin
+                    | SecretReference::Pw1Sign
+                    | SecretReference::Pw1Other
+                    | SecretReference::Pw3
+                    | SecretReference::ResetCode
+            )
         );
         let kind = match sw.raw() {
             0x6983 if pin_reference => ErrorKind::PinBlocked,

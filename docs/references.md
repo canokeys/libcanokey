@@ -134,6 +134,13 @@ No firmware is linked or built as a dependency.
   Older inspected tags and Console establish 06/A5 conversation shapes; semantic
   factories remain gated to current evidence rather than inferring old layouts.
 
+- `applets/openpgp/openpgp.c` and `src/key.c` at pinned HEAD establish independent
+  PW1 usage modes, algorithm attributes nested in 6E/73, certificate occurrence state,
+  F2 retry reset, separate E6/44 termination/activation and key import templates.
+  OpenPGP's algorithm table excludes SM2 and PQ algorithms. RSA signatures pad on
+  card and RSA decipher unpads PKCS#1 v1.5; EC signatures return r||s. Only certificate
+  PUT, import and decipher accept command chaining. No F9 KDF DO/handler exists.
+
 These sources establish encoding and version rules, not hardware interoperability.
 Newer, development and unrecognized versions remain Unknown for these mutations.
 

@@ -6,6 +6,8 @@
 //! library, accessed without concurrent mutation, and freed exactly once.
 //! A non-null versioned struct must contain at least its declared supported prefix.
 #![deny(missing_docs)]
+mod openpgp;
+pub use openpgp::*;
 mod oath;
 pub use oath::*;
 mod admin;
@@ -79,6 +81,7 @@ pub struct CnkOperation {
     poisoned: bool,
 }
 enum Inner {
+    OpenPgp(Operation<canokey::openpgp::Outcome>),
     Oath(Operation<canokey::oath::Outcome>),
     Admin(Operation<canokey::admin::Outcome>),
     Sm2Agreement(Operation<piv::Sm2Agreement>),
@@ -99,6 +102,7 @@ enum Inner {
 macro_rules! dispatch {
     ($value:expr, $op:ident => $body:expr) => {
         match $value {
+            Inner::OpenPgp($op) => $body,
             Inner::Oath($op) => $body,
             Inner::Admin($op) => $body,
             Inner::Sm2Agreement($op) => $body,
@@ -598,6 +602,14 @@ pub unsafe extern "C" fn cnk_operation_result_copy_bytes(
             return STATE;
         }
         match &op.inner {
+            Inner::OpenPgp(p) => match p.result() {
+                Ok(
+                    canokey::openpgp::Outcome::Bytes(b)
+                    | canokey::openpgp::Outcome::Signature { bytes: b, .. },
+                ) => copy(b.as_bytes(), buffer, len),
+                Ok(_) => TYPE,
+                Err(_) => STATE,
+            },
             Inner::Admin(p) => match p.result() {
                 Ok(v) => match admin::result_bytes(&v.value) {
                     Some(b) => copy(&b, buffer, len),
@@ -681,6 +693,24 @@ pub unsafe extern "C" fn cnk_operation_pin_status(
             return STATE;
         }
         match &op.inner {
+            Inner::OpenPgp(p) => match p.result() {
+                Ok(canokey::openpgp::Outcome::PinStatus(s)) => {
+                    ptr::write(
+                        out,
+                        CnkPinStatus {
+                            struct_size: (*out).struct_size,
+                            presence_flags: 1 | (u32::from(s.retries_remaining.is_some()) << 1),
+                            verified: u8::from(s.verified),
+                            remaining: s.retries_remaining.unwrap_or(0),
+                            total: 0,
+                            blocked: u8::from(s.blocked),
+                        },
+                    );
+                    OK
+                }
+                Ok(_) => TYPE,
+                Err(_) => STATE,
+            },
             Inner::PinStatus(p) => match p.result() {
                 Ok(s) => {
                     let size = (*out).struct_size;
@@ -839,6 +869,7 @@ pub unsafe extern "C" fn cnk_operation_result_kind(op: *const CnkOperation, out:
             return STATE;
         }
         *out = match &op.inner {
+            Inner::OpenPgp(_) => 17,
             Inner::Oath(_) => 16,
             Inner::Admin(_) => 15,
             Inner::Probe(_) => 1,

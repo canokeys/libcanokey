@@ -13,10 +13,12 @@ FRB adapter would call the Rust facade directly.
 | --- | --- | --- |
 | `canokey-protocol` | APDU/TLV, owned operations, continuation/chaining, limits, errors, secret buffers | None |
 | `canokey-compat` | Immutable profiles, capability evidence, firmware rules and algorithm IDs | protocol |
+| `canokey-key` | Shared public-key TLV fields and pure SPKI export | protocol, compat |
 | `canokey-admin` | Admin reads, configuration, PIN and explicit resets | protocol, compat |
-| `canokey-piv` | PIV operations and certificate container parsing | protocol, compat |
+| `canokey-piv` | PIV operations and certificate container parsing | protocol, compat, key |
 | `canokey-oath` | OATH access, credentials and full/truncated calculations | protocol, compat |
-| `canokey` | Facade and device probing | protocol, compat, admin, piv, oath |
+| `canokey-openpgp` | OpenPGP data, passwords, policies and key operations | protocol, compat, key |
+| `canokey` | Facade and device probing | protocol, compat, admin, piv, oath, openpgp |
 | `canokey-c` | Copied C descriptors and results, operation dispatch | canokey |
 
 The facade optionally re-exports the independent crates.io package
@@ -33,6 +35,9 @@ protocol state.
   and explicit applet/device resets; configuration patches retain confirmed writes on failure.
 - OATH SELECT/access-code validation, PBKDF2 password derivation, credential CRUD,
   full/truncated calculations and paged results with explicit HOTP/touch markers.
+- OpenPGP DO/certificate reads and writes, separate PW1/PW3 modes, password/reset
+  management, explicit policies/fingerprints/timestamps, key generation/import,
+  shared SPKI export, signatures, PKCS#1 v1.5 decipher and ECDH/X25519.
 - PIV selection, PIN status/verification/logout, PIN/PUK changes and unblock.
 - External/Mutual 3DES or AES-192 management authentication, explicit caller-supplied
   mutual challenges; authenticated object/certificate writes and management-key replacement.
@@ -64,6 +69,7 @@ challenges and certificate payloads are fixtures, not production inputs.
 
 | Example | Demonstrates |
 | --- | --- |
+| [openpgp](crates/canokey/examples/openpgp.rs) | Observed key attributes, explicit PW1-sign and owned signature |
 | [oath](crates/canokey/examples/oath.rs) | Caller-supplied TOTP time step and owned code bytes |
 | [admin](crates/canokey/examples/admin.rs) | Explicit PIN and configuration patch under one SELECT |
 | [probe](crates/canokey/examples/probe.rs) | Caller-owned device profile |

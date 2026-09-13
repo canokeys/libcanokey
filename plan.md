@@ -20,13 +20,13 @@ do not add factories that always return Unsupported.
 
 ## Remaining applets and compatibility
 
-- Admin/OATH factories currently require known 3.1.0 firmware. Expand older-version
+- Admin/OATH/OpenPGP factories currently require known 3.1.0 firmware. Expand older-version
   layouts only with per-command evidence; legacy OATH 06 continuation is available
   in the conversation engine, not as guessed legacy semantic factories.
 
-| Milestone | Scope and acceptance focus |
-| --- | --- |
-| OpenPGP | DOs, PW1-sign/PW1-other/PW3, KDF, keys/policies and private operations with independent firmware evidence; caller-supplied fingerprints/timestamps |
+- OpenPGP KDF: pinned firmware has no F9 KDF DO or KDF configuration handlers.
+  Passwords are currently sent in their caller-supplied encoding. Enabling KDF
+  requires firmware evidence, typed S2K parameters and budgeted derivation.
 
 FIDO/CTAP, Python bindings and consumer adoption are separate scope decisions.
 Integration should start with PKCS#11, then Console/ckman, and needs controlled
