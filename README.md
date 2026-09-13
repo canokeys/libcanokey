@@ -64,10 +64,23 @@ These examples run **offline** and compare every emitted command against a deter
 
 For real hardware, hold one exclusive connection lease across the entire operation. Send `command()` bytes and supply response data **including SW1/SW2** to `advance()`. Disable transport continuation/retries. Getters never send APDUs. An application I/O error drops/closes the operation; drain or isolate outstanding I/O before reusing the connection. See the [Console](docs/console-integration.md) and [PKCS#11](docs/pkcs11-integration.md) boundary examples.
 
+## Rust API documentation
+
+All six crates document public types, fields, methods and factories in rustdoc, including ownership, byte formats, lifecycle errors, and FFI safety. Start with the facade's quick start, then follow its `piv` and `compatibility` re-exports. The low-level operation documentation includes a complete caller-driven exchange example.
+
+```sh
+cargo doc --workspace --no-deps --locked --open
+# Or open target/doc/canokey/index.html after building without --open.
+cargo test --workspace --doc --locked
+```
+
+Each crate denies missing public documentation. CI builds rustdoc with warnings treated as errors, and the workspace test command executes the documentation examples. Dependency choices for future cryptography and key formats are recorded in [API design](docs/api-design.md#dependency-reuse); use established primitives with minimal features and caller-supplied randomness.
+
 ## Validation
 
 ```sh
 cargo fmt --all --check
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
 cargo test --workspace --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo build --workspace --locked
@@ -76,7 +89,7 @@ python3 scripts/check-dependencies.py
 bash scripts/test-c-abi.sh
 ```
 
-Local validation covers 25 Rust tests, including malformed input, resource limits, gzip corruption/expansion, ownership, and deterministic parser fuzz smoke; Linux C/C++ checks, examples, wasm, and dependency boundaries also pass. CI additionally targets macOS and Windows; local checks do not establish remote CI or hardware results.
+Local validation covers 25 Rust tests and 8 executable rustdoc examples, including malformed input, resource limits, gzip corruption/expansion, ownership, and deterministic parser fuzz smoke; Linux C/C++ checks, examples, wasm, and dependency boundaries also pass. CI additionally targets macOS and Windows; local checks do not establish remote CI or hardware results.
 
 Core external dependencies provide zeroization and pure Rust gzip decoding, with no platform transport or async runtime. Cargo.lock is tracked; `references/`, build outputs, and caches are ignored.
 

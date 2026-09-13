@@ -147,6 +147,27 @@ The future Console FRB wrapper lives in Console and depends on the Rust facade, 
 
 Dart owns async transport and execution; Python callers own their synchronous loop. Close in finally/context-manager after copying/taking results; finalizers are fallback only. Structured exceptions/DTOs preserve error kind, SW, reference, retries and future Batch progress. Localization and CLI formatting stay in applications. See [Console](console-integration.md) and [PKCS#11](pkcs11-integration.md) for examples.
 
+## Dependency reuse
+
+Use established libraries for standard cryptography and standard key formats. The core should implement CanoKey protocol orchestration and compatibility, not AES/DES rounds, curve arithmetic, constant-time equality, gzip, or general ASN.1 encoding. Keep protocol-facing public types owned and independent of dependency-specific layouts.
+
+| Need | Dependency direction | Boundary and status |
+| --- | --- | --- |
+| Secret erasure | `zeroize` / `Zeroizing` | Already used by protocol. `SecretBytes` adds redacted Debug and wipes old allocations during growth; replacing that behavior requires equivalent guarantees |
+| Certificate gzip | `flate2` with `rust_backend` and default features disabled | Already used by PIV. The applet layer still enforces input/output bounds, container rules, and trailing-data rejection |
+| Management-key block cryptography | RustCrypto [`aes`](https://docs.rs/aes), [`des`](https://docs.rs/des), and their matching [`cipher`](https://docs.rs/cipher) traits | Planned for external/mutual authentication. Use exact single-block operations without padding. 3DES is for legacy protocol interoperability; do not implement primitives locally |
+| Authentication response comparison | [`subtle`](https://docs.rs/subtle) | Planned constant-time comparison of fixed-size authentication values; reject incorrect public lengths first. Do not compare secrets with ordinary slice equality |
+| Signature/public-key encoding | RustCrypto [`der`](https://docs.rs/der), [`spki`](https://docs.rs/spki), and curve-specific signature types where appropriate | Planned DER/P1363 and SPKI conversion. Reuse canonical integer/length handling; no handwritten generic ASN.1 codec |
+| EC point validation | RustCrypto [`p256`](https://docs.rs/p256) and the matching curve crates | Planned only when key/peer validation requires it. Use checked point decoding, not just SEC1 prefix/length checks; private signing/key agreement still occurs on the card |
+
+Random bytes remain explicit caller inputs. Do not enable a dependency's OS RNG, runtime, or transport features in the core. Host hashing/padding/KDF that belongs to PKCS#11 or application policy stays in that application; introduce hash/MAC/KDF dependencies only when an implemented protocol requires them.
+
+Registry review on 2026-09-13 found concrete version/feature constraints: current `aes` 0.9.3 declares Rust 1.89, beyond this workspace's 1.85 MSRV. Current `p256` 0.14.0 enables `getrandom` through its `std` feature. Thus "latest" and default features are not automatically suitable. Select a compatible, maintained release and matching trait family, or explicitly revise the MSRV as part of implementation. Use minimal features, enable key-schedule zeroization where offered, and verify the complete resolved dependency closure on native and wasm. Registry metadata is a selection aid, not a completed integration test or an audit claim.
+
+Add these dependencies together with their first real use, rather than populating Cargo.toml with unused future crates. Check license, MSRV, maintenance/security advisories, secret handling and transitive features; track the resulting Cargo.lock. Validate library composition with known-answer vectors and protocol transcripts, including malformed inputs and authentication failure. Package reuse does not establish CanoKey firmware support.
+
+The existing BER TLV reader is a small applet framing codec with explicit bounds and duplicate preservation, distinct from X.509/DER schema handling. Reuse a BER dependency if it satisfies these semantics without losing evidence or adding platform I/O; do not replace it blindly with a DER-only parser. Certificate trust and X.509 policy remain outside the core.
+
 ## Later protocols and evidence gaps
 
 Admin will add device/config/storage/chip/core-commit reads, updates, PIN, NFC/NDEF, SM2 configuration and explicit applet reset. Patches preserve unknown bits; multi-APDU writes are not atomic. OATH needs access validation, credentials and calculations with explicit challenge/time/randomness; never automatically retry HOTP increments. OpenPGP needs independent DO, PW1-sign/PW1-other/PW3, KDF, key/policy/operation semantics and caller-supplied fingerprints/timestamps. Keep FIDO's existing CTAP/HID/WebAuthn backends pending separate evaluation.

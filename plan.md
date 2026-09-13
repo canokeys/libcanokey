@@ -21,13 +21,13 @@ Caller-owned profiles and operations are the common Rust/binding model. No trans
 | 4: OpenPGP | DOs, PIN/KDF, keys, certificates, policies, private operations | Independent references, algorithms, authentication, firmware coverage |
 | Later evaluation | Additional PIV extensions and shareable FIDO components | Evidence-based enablement; do not force CTAP into APDU operations |
 
-Next PIV work: verify management-key modes against CanoKey evidence, then implement authentication and authenticated writes; follow with metadata, key generation/import and private operations, and Batch. Extend C bindings alongside useful core increments. Do not add placeholder APIs that always return Unsupported.
+Next PIV work: verify management-key modes against CanoKey evidence, then implement authentication using established block-cipher/comparison dependencies and add authenticated writes; follow with metadata, key generation/import and private operations, and Batch. Extend C bindings alongside useful core increments. Do not add placeholder APIs that always return Unsupported.
 
 Algorithm enums do not promise firmware support. Enable metadata directories, key move/delete, retry configuration, algorithm configuration writes, and ML-KEM decapsulation individually by observed capability. Pending verification is listed in design.
 
 ## Engineering and delivery
 
-The first version need not be no_std; prioritize no platform I/O, no runtime, and wasm compatibility. Pure in-memory cryptography/compression dependencies are allowed. PCSC, USB/HID, Tokio, FRB, and PyO3 must stay out of the core dependency closure. Add future applet/binding crates only when implemented; PyO3 belongs exclusively in its binding crate.
+The first version need not be no_std; prioritize no platform I/O, no runtime, and wasm compatibility. Reuse established pure in-memory cryptography, compression, and standard key-format dependencies rather than implementing primitives. Selection criteria and candidates are maintained in [design](docs/api-design.md#dependency-reuse). PCSC, USB/HID, Tokio, FRB, and PyO3 must stay out of the core dependency closure. Add future applet/binding crates only when implemented; PyO3 belongs exclusively in its binding crate.
 
 Rust uses SemVer; C ABI major/minor is independent; a future Python public version follows the library major. Freeze the C ABI only after its complete header and implementation are validated. The current ABI is experimental 0.1. Firmware protocol variants are unrelated to package versions.
 
@@ -48,6 +48,6 @@ Reference clones are read-only evidence, not dependencies or proof of all firmwa
 | Compatibility | Version rules, historical IDs/containers/empty-slot statuses, unknown versions, evidence provenance |
 | Bindings | C ownership, buffer queries, errors and cleanup; FRB native/wasm and Python typed results when implemented |
 | Integration | Controlled usbip/hardware tests across stable, previous and next firmware, independent application transport |
-| Engineering | fmt, strict clippy, relevant tests, C/C++ linking, wasm, dependency checks, parser fuzz smoke, runnable examples |
+| Engineering | fmt, strict clippy, public rustdoc coverage and warning-free documentation builds, doctests, relevant tests, C/C++ linking, wasm, dependency checks, parser fuzz smoke, runnable examples |
 
 Phase 1 as a whole is complete only when all three consumers can reuse the same PIV implementation while retaining their own application state and connections. Current offline tests establish neither full phase 1 completion nor hardware compatibility.

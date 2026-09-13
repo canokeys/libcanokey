@@ -12,6 +12,7 @@
 - The core has no I/O, transport trait, async runtime, enumeration, threads, or mutable globals. No handle registry, global locks, credential cache, or thread-local last_error. Immutable protocol constants are allowed.
 - Callers own `DeviceProfile` and `Operation<T>`. Constructors own required configuration and inputs; never retain borrowed FFI buffers, connections, or application sessions.
 - Only start/advance drive execution. Command/result getters never advance or resend. take_result transfers ownership once. Cancel/drop never send APDUs, roll back, or reconnect.
+- Reuse maintained dependencies for standard cryptography and key formats; do not implement cryptographic primitives or constant-time comparison locally. Add dependencies with their first concrete use, choose minimal features, and check MSRV, licenses, secret handling and native/wasm dependency closure. Randomness remains caller-supplied.
 - Put protocol logic in its applet crate, firmware rules in compat, and probe orchestration in the facade. The internal machine interface is for composition, not transport callbacks.
 - Distinguish Unknown from Unsupported. PIV compatibility versions are not actual firmware versions. Generic YubiKey support is not CanoKey support evidence.
 
@@ -26,8 +27,9 @@
 
 ## Verification and commits
 
+- Document every public API in English rustdoc: purpose, ownership, byte formats, state requirements and relevant errors; unsafe FFI entries need explicit Safety contracts. Keep executable examples as doctests and retain `deny(missing_docs)` in every crate.
 - Add meaningful golden/transcript, failure-path, and lifecycle tests for protocol changes. Documentation-only changes do not need new tests.
-- Before committing Rust changes, run fmt, relevant tests, and strict workspace/all-target clippy. Verify wasm and dependency boundaries at core milestones.
+- Before committing Rust changes, run fmt, relevant tests (including doctests), strict workspace/all-target clippy, and `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked` when public documentation changes. Verify wasm and dependency boundaries at core milestones.
 - C ABI changes also require `scripts/test-c-abi.sh`: C/C++ headers, linking, buffer queries, ownership, and errors.
 - Investigate toolchain/build failures autonomously. Report unrun checks honestly; offline transcripts are not hardware verification.
 - Commit coherent stages promptly using Conventional Commits, imperative English subjects preferably within 72 characters.
