@@ -112,6 +112,11 @@ and SM2 digests (caller computes SM3(ZA||M)). SM2 returns DER on legacy supporte
 firmware and P1363 on 3.1.0; `Signature::encoding()` reports this without guessing
 from bytes. Conversion checks representation, not signature validity.
 
+`sign_streaming` explicitly chooses pure ML-DSA-65 with empty context, randomized
+Ed25519 or full-message SM2. All accept empty messages; none substitutes prehash
+semantics. SM2 accepts an optional 1..32 byte identity and always starts a chain.
+Firmware TLV lengths bound the body to 65535 bytes in addition to host budgets.
+
 RSA decrypt returns a raw modulus-sized block without unpadding. ECDH checks
 uncompressed peer points using RustCrypto; X25519 requires 32 RFC 7748 bytes and
 rejects an all-zero result. ML-KEM-768 decapsulation requires 1088 ciphertext bytes

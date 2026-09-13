@@ -85,6 +85,12 @@ No firmware is linked or built as a dependency.
 - Classic signing requires a nonempty challenge (81) and empty response (82).
   ECDH/X25519 uses 85 instead of 81. Empty Ed25519 and ML signing need separate
   streaming-mode support and are not silently mapped to the classic command.
+  `piv_ga_stream_begin` hardcodes the ML-DSA context header 00/00; nonempty
+  contexts/prehash are not exposed. Randomized Ed25519 uses fixed P1=FF. SM2
+  streaming begins with CLA=10 and optionally sends an 80 identity before 82/81.
+  The incremental parser requires the final frame to finish the TLV; therefore
+  SM2's forced prefix contains only the outer tag even for empty messages.
+  ML-DSA returns a 3309-byte signature through the standard ISO response source.
 - [SM2 protocol change](https://github.com/canokeys/canokey-core/commit/02026a9)
   makes both digest and message signatures raw r || s in the pinned 3.1.0 evidence;
   3.0.3 and earlier inspected SM2 implementations convert to DER. Compat selects

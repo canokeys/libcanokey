@@ -624,6 +624,25 @@ impl DeviceProfile {
             }
         }
     }
+    /// Whether the firmware supports the explicit streaming signing protocol.
+    /// Only ML-DSA-65 (empty context), randomized Ed25519 and SM2 are accepted.
+    /// Requires 3.1.0 and observed enabled algorithm IDs; future versions remain Unknown.
+    pub fn streaming_signing_support(&self, algorithm: Algorithm) -> CapabilityStatus {
+        if !matches!(
+            algorithm,
+            Algorithm::MlDsa65 | Algorithm::Ed25519 | Algorithm::Sm2
+        ) {
+            return CapabilityStatus {
+                support: Support::Unsupported,
+                evidence: Evidence::FirmwareMatrix,
+            };
+        }
+        let version = self.firmware_range((3, 1, 0), (3, 1, 0));
+        if version.support != Support::Supported {
+            return version;
+        }
+        self.key_algorithm_support(algorithm)
+    }
     /// Whether GET METADATA on a known empty key slot may return legacy 6900.
     pub fn legacy_empty_key_metadata(&self) -> bool {
         self.info

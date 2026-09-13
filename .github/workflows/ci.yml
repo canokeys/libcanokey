@@ -39,5 +39,6 @@ jobs:
       - run: cargo run -p canokey --example write_certificate --locked
       - run: cargo run -p canokey --example batch --locked
       - run: cargo run -p canokey --example decapsulate --locked
+      - run: cargo run -p canokey --example sign_streaming --locked
       - if: runner.os != 'Windows'
         run: bash scripts/run-c-example.sh

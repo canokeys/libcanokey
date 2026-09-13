@@ -36,13 +36,14 @@ protocol state.
 - Key generation/import and public-key SPKI export. Scalar import supports
   P-256/P-384/P-521/secp256k1/SM2; RSA CRT and Ed25519/X25519/ML seeds are typed inputs.
 - Classic RSA/ECDSA/SM2/Ed25519 signing, original signature encoding and DER/P1363
-  conversion; raw RSA decryption, P-256/P-384/P-521/secp256k1 ECDH, X25519 derivation
+  conversion; explicit ML-DSA (empty context), randomized Ed25519 and SM2 full-message
+  streaming signing, including empty messages; raw RSA decryption, P-256/P-384/P-521/secp256k1 ECDH, X25519 derivation
   and ML-KEM-768 decapsulation. Hashing, padding and KDF remain caller responsibilities.
 - Explicit Batch requests under one SELECT, with completed results retained after
   a later failure; corresponding C factories and indexed result getters.
 
 Each operation checks its firmware/slot/algorithm evidence; an algorithm name alone
-is not a support promise. Classic signing excludes ML-DSA and empty Ed25519 messages.
+is not a support promise. Use `sign_streaming` for ML-DSA and empty Ed25519 messages; the classic factory never changes modes implicitly.
 SM2 agreement uses a separate protocol and is not exposed as ECDH. See
 [plan](plan.md) for remaining PIV and applet work. No consumer has been integrated;
 compatibility is based on pinned source evidence and offline transcripts, without
@@ -60,6 +61,7 @@ challenges and certificate payloads are fixtures, not production inputs.
 | [read_certificate](crates/canokey/examples/read_certificate.rs) | Operation and result lifetimes |
 | [write_certificate](crates/canokey/examples/write_certificate.rs) | Mutual authentication followed by PUT DATA |
 | [decapsulate](crates/canokey/examples/decapsulate.rs) | Algorithm discovery, PIN, chained ML-KEM ciphertext and owned secret |
+| [sign_streaming](crates/canokey/examples/sign_streaming.rs) | Explicit randomized Ed25519 signing of an empty message |
 | [batch](crates/canokey/examples/batch.rs) | Successful preceding results after a later failure |
 | [C probe](crates/canokey-c/examples/probe.c) | Size queries, profile transfer and cleanup |
 

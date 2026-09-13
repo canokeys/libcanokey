@@ -33,6 +33,10 @@ pub struct CnkBatchRequest {
     pub components: *const CnkBytes,
     /// Number of import components.
     pub component_count: usize,
+    /// Optional SM2 streaming identity; NULL/0 selects the firmware default.
+    pub user_id: *const u8,
+    /// Identity byte length, otherwise zero.
+    pub user_id_len: usize,
 }
 /// Construct a Batch by copying all requests and nested inputs before returning.
 /// Management authentication must be an earlier explicit request for mutations.
@@ -60,7 +64,10 @@ pub unsafe extern "C" fn cnk_piv_batch_new(
             if request.struct_size < std::mem::size_of::<CnkBatchRequest>() as u32 {
                 return Err(ARG);
             }
-            total = total.checked_add(request.data_len).ok_or(ARG)?;
+            total = total
+                .checked_add(request.data_len)
+                .and_then(|n| n.checked_add(request.user_id_len))
+                .ok_or(ARG)?;
         }
         if total > options.limits.max_input_bytes {
             return Err(failure(Error::new(ErrorKind::LimitExceeded), error));
@@ -143,6 +150,18 @@ pub unsafe extern "C" fn cnk_piv_batch_new(
                 17 => piv::BatchRequest::Decapsulate {
                     slot: slot(r.reference)?,
                     ciphertext: data()?,
+                },
+                18 => piv::BatchRequest::SignStreaming {
+                    slot: slot(r.reference)?,
+                    input: piv_keys::streaming_input(
+                        r.input_kind,
+                        r.data,
+                        r.data_len,
+                        r.user_id,
+                        r.user_id_len,
+                        options,
+                        error,
+                    )?,
                 },
                 _ => return Err(ARG),
             };

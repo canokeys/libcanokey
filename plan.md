@@ -6,11 +6,10 @@ repository. Consumer integration and upstream changes require a separate task.
 
 ## Complete PIV
 
-1. ML-DSA message/context signing and randomized Ed25519 streaming, including empty
-   messages. Confirm mode selection, framing, response streaming and bounds against
-   pinned firmware; never substitute classic Ed25519 or prehash semantics implicitly.
-2. SM2 full-message signing and its distinct key-agreement protocol. Specify IDs,
-   ephemeral state, result encoding, cancellation and application key confirmation.
+1. ML-DSA nonempty-context and prehash signing: pinned firmware hardcodes empty
+   context and exposes no such modes. Requires new firmware evidence before enablement.
+2. SM2 key agreement: specify peer exchange, ephemeral state, cancellation and
+   application key confirmation within the caller-owned operation model.
 3. Metadata directory and per-slot container names; retain certificate-only entries,
    unknown fields and malformed-entry diagnostics where the protocol permits them.
 4. Key move/delete, retry configuration and algorithm-configuration writes. Confirm

@@ -27,7 +27,7 @@ pub struct Signature {
 /// Byte representation of an owned signature, independent of its algorithm.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SignatureEncoding {
-    /// Raw RSA or Ed25519 signature bytes.
+    /// Raw RSA, Ed25519 or ML-DSA signature bytes.
     Raw,
     /// DER SEQUENCE of unsigned r and s INTEGERs.
     Der,
@@ -234,19 +234,39 @@ pub(crate) fn prepare_sign(
         SignatureEncoding::Raw
     };
     access::prepare(command, options, move |r| {
-        let bytes = reply(r, options.limits.max_total_response_bytes)?;
-        if encoding == SignatureEncoding::P1363 {
-            Signature::from_p1363(algorithm, bytes.as_bytes()).map_err(|_| invalid())?;
-        } else if let Some(width) = curve_len(algorithm) {
-            ec_signature(bytes.as_bytes(), width)?;
-        } else if bytes.len() != rsa_len(algorithm).unwrap_or(64) {
-            return Err(invalid());
-        }
-        Ok(Signature {
+        parse_signature(
             algorithm,
             encoding,
-            bytes,
-        })
+            r,
+            options.limits.max_total_response_bytes,
+        )
+    })
+}
+pub(crate) fn parse_signature(
+    algorithm: Algorithm,
+    encoding: SignatureEncoding,
+    response: ResponseData,
+    limit: usize,
+) -> Result<Signature, Error> {
+    let bytes = reply(response, limit)?;
+    if encoding == SignatureEncoding::P1363 {
+        Signature::from_p1363(algorithm, bytes.as_bytes()).map_err(|_| invalid())?;
+    } else if let Some(width) = curve_len(algorithm) {
+        ec_signature(bytes.as_bytes(), width)?;
+    } else {
+        let width = if algorithm == Algorithm::MlDsa65 {
+            3309
+        } else {
+            rsa_len(algorithm).unwrap_or(64)
+        };
+        if bytes.len() != width {
+            return Err(invalid());
+        }
+    }
+    Ok(Signature {
+        algorithm,
+        encoding,
+        bytes,
     })
 }
 /// Perform an RSA private operation on a modulus-sized ciphertext block.

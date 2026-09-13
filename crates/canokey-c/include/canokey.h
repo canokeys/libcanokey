@@ -90,6 +90,7 @@ enum { CNK_ALGORITHM_RSA1024=1, CNK_ALGORITHM_RSA2048=2,
 enum { CNK_KEY_PIN_DEFAULT=0, CNK_KEY_PIN_NEVER=1, CNK_KEY_PIN_ONCE=2, CNK_KEY_PIN_ALWAYS=3 };
 enum { CNK_KEY_TOUCH_DEFAULT=0, CNK_KEY_TOUCH_NEVER=1, CNK_KEY_TOUCH_ALWAYS=2, CNK_KEY_TOUCH_CACHED=3 };
 enum { CNK_SIGN_RSA_BLOCK=1, CNK_SIGN_DIGEST=2, CNK_SIGN_MESSAGE=3 };
+enum { CNK_STREAM_MLDSA65=1, CNK_STREAM_ED25519_RANDOMIZED=2, CNK_STREAM_SM2=3 };
 enum { CNK_SIGNATURE_RAW=1, CNK_SIGNATURE_DER=2, CNK_SIGNATURE_P1363=3 };
 enum { CNK_PUBLIC_MODULUS=1, CNK_PUBLIC_EXPONENT=2, CNK_PUBLIC_POINT_OR_RAW=3, CNK_PUBLIC_SPKI=4 };
 enum { CNK_METADATA_HAS_ALGORITHM=1, CNK_METADATA_HAS_POLICY=2,
@@ -108,6 +109,9 @@ cnk_status_t cnk_piv_import_key_new(const cnk_profile_t *,const cnk_piv_key_para
 cnk_status_t cnk_piv_get_metadata_new(const cnk_profile_t *,uint32_t reference,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_read_algorithm_config_new(const cnk_profile_t *,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_sign_new(const cnk_profile_t *,uint32_t slot,uint32_t algorithm,uint32_t kind,const uint8_t *,size_t,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+/* Explicit full-message signing. ML-DSA has empty context; only SM2 accepts
+ * user_id (NULL/0 for default or 1..32 bytes). No implicit mode selection. */
+cnk_status_t cnk_piv_sign_streaming_new(const cnk_profile_t *,uint32_t slot,uint32_t mode,const uint8_t *message,size_t message_len,const uint8_t *user_id,size_t user_id_len,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_decrypt_new(const cnk_profile_t *,uint32_t slot,uint32_t algorithm,const uint8_t *,size_t,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_derive_new(const cnk_profile_t *,uint32_t slot,uint32_t algorithm,const uint8_t *,size_t,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 /* ML-KEM-768: exactly 1088 ciphertext bytes, 32 result bytes. No KDF or sender
@@ -125,7 +129,7 @@ enum { CNK_BATCH_VERIFY_PIN=1, CNK_BATCH_AUTHENTICATE_MANAGEMENT=2, CNK_BATCH_LO
        CNK_BATCH_WRITE_CERTIFICATE=7, CNK_BATCH_DELETE_CERTIFICATE=8, CNK_BATCH_GET_METADATA=9,
        CNK_BATCH_READ_ALGORITHM_CONFIG=10, CNK_BATCH_GENERATE_KEY=11, CNK_BATCH_IMPORT_KEY=12,
        CNK_BATCH_SIGN=13, CNK_BATCH_DECRYPT=14, CNK_BATCH_DERIVE=15, CNK_BATCH_SET_MANAGEMENT_KEY=16,
-       CNK_BATCH_DECAPSULATE=17 };
+       CNK_BATCH_DECAPSULATE=17, CNK_BATCH_SIGN_STREAMING=18 };
 /* Only fields relevant to kind are read. Unused pointers/lengths should be NULL/0.
  * All nested ranges are copied. No SELECT/probe/nested Batch requests exist. */
 typedef struct {
@@ -138,6 +142,8 @@ typedef struct {
     const cnk_piv_key_parameters_v1 *parameters;
     const cnk_bytes_t *components;
     size_t component_count;
+    const uint8_t *user_id;
+    size_t user_id_len;
 } cnk_piv_batch_request_v1;
 typedef struct {
     uint32_t struct_size,completed_count,has_failed_index,failed_index;

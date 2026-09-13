@@ -63,6 +63,13 @@ pub enum BatchRequest {
         /// Owned input.
         input: SignInput,
     },
+    /// Explicit full-message streaming signing with an owned mode and message.
+    SignStreaming {
+        /// Asymmetric slot.
+        slot: Slot,
+        /// Full message and explicit firmware mode.
+        input: StreamingSignInput,
+    },
     /// Raw RSA decryption without unpadding.
     Decrypt {
         /// Key-management/retired slot.
@@ -106,6 +113,7 @@ impl BatchRequest {
             Self::Decrypt { ciphertext, .. } | Self::Decapsulate { ciphertext, .. } => {
                 ciphertext.len()
             }
+            Self::SignStreaming { input, .. } => input.input_len(),
             Self::Derive { peer, .. } => peer.len(),
             _ => 0,
         }
@@ -368,6 +376,10 @@ pub fn batch(
                 input,
             } => mapped(
                 private::prepare_sign(profile, slot, algorithm, input, options)?,
+                BatchItem::Signature,
+            ),
+            BatchRequest::SignStreaming { slot, input } => mapped(
+                streaming::prepare_sign_streaming(profile, slot, input, options)?,
                 BatchItem::Signature,
             ),
             BatchRequest::Decrypt {

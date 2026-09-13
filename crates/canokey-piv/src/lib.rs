@@ -48,6 +48,9 @@
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 mod access;
+/// Explicit firmware streaming signature modes.
+pub mod streaming;
+pub use streaming::{sign_streaming, StreamingSignInput};
 /// Explicit multi-request operations under one SELECT.
 pub mod batch;
 pub use batch::{batch, batch_progress, BatchItem, BatchRequest, BatchResults};

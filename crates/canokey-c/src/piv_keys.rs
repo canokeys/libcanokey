@@ -695,3 +695,68 @@ pub(super) fn signature_encoding(signature: &piv::Signature) -> u32 {
         piv::SignatureEncoding::P1363 => 3,
     }
 }
+
+pub(super) unsafe fn streaming_input(
+    mode: u32,
+    data: *const u8,
+    len: usize,
+    user_id: *const u8,
+    user_id_len: usize,
+    options: OperationOptions,
+    error: *mut CnkError,
+) -> Result<piv::StreamingSignInput, u32> {
+    if user_id_len > 32 || (mode != 3 && (!user_id.is_null() || user_id_len != 0)) {
+        return Err(ARG);
+    }
+    let message = input(data, len, options, error)?;
+    match mode {
+        1 => Ok(piv::StreamingSignInput::MlDsa65(message)),
+        2 => Ok(piv::StreamingSignInput::Ed25519Randomized(message)),
+        3 => Ok(piv::StreamingSignInput::Sm2 {
+            message,
+            user_id: if user_id.is_null() && user_id_len == 0 {
+                None
+            } else {
+                if user_id_len == 0 {
+                    return Err(ARG);
+                }
+                Some(bytes(user_id, user_id_len)?.to_vec())
+            },
+        }),
+        _ => Err(ARG),
+    }
+}
+/// Sign a complete message using CNK_STREAM_*; empty messages are supported.
+/// ML-DSA uses only empty context; Ed25519 is explicitly randomized. Optional
+/// user_id is for SM2 only (NULL/0 means firmware default, otherwise 1..=32 bytes).
+/// # Safety
+/// Follow the crate pointer/aliasing contract. profile must be live/non-NULL;
+/// data/user_id must cover their lengths. Optional auth/opts/error and nested
+/// ranges must be valid; out must be writable/non-NULL. Inputs are copied.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_sign_streaming_new(
+    profile: *const CnkProfile,
+    reference: u32,
+    mode: u32,
+    data: *const u8,
+    len: usize,
+    user_id: *const u8,
+    user_id_len: usize,
+    auth: *const CnkPivAccess,
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        let options = options(opts)?;
+        piv::sign_streaming(
+            &profile.as_ref().ok_or(ARG)?.0,
+            slot(reference)?,
+            streaming_input(mode, data, len, user_id, user_id_len, options, error)?,
+            access(auth, error)?,
+            options,
+        )
+        .map(Inner::Signature)
+        .map_err(|e| failure(e, error))
+    })
+}
