@@ -631,6 +631,16 @@ impl DeviceProfile {
             .as_ref()
             .is_some_and(|v| v.suffix.is_none() && ((2, 0, 0)..(3, 0, 0)).contains(&v.tuple()))
     }
+    /// Whether the evidenced SM2 signature response is fixed-width r || s.
+    /// Known 3.1.0 uses this encoding; earlier supported releases use DER.
+    /// This encoding selector is not a support check: require key_algorithm_support
+    /// first, since unknown/newer firmware must not inherit a guessed encoding.
+    pub fn sm2_uses_p1363_signatures(&self) -> bool {
+        self.info
+            .firmware
+            .as_ref()
+            .is_some_and(|v| v.suffix.is_none() && v.tuple() == (3, 1, 0))
+    }
     /// Whether proven legacy firmware returns unwrapped CCC/CHUID objects.
     /// Applet code applies this narrowly to those object types; callers should prefer
     /// the semantic read-object factory over implementing their own workaround.

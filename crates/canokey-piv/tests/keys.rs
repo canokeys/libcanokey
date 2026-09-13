@@ -398,3 +398,70 @@ fn extended_ecdh_validates_points_and_retains_raw_secrets() {
     )
     .is_err());
 }
+
+#[test]
+fn sm2_signature_encoding_follows_firmware_and_preserves_original_bytes() {
+    let mut fixed = vec![0; 64];
+    fixed[31] = 1;
+    fixed[63] = 2;
+    let der = hex("3006020101020102");
+    for (version, encoding, wire) in [
+        ("3.0.3", SignatureEncoding::Der, &der),
+        ("3.1.0", SignatureEncoding::P1363, &fixed),
+    ] {
+        let mut op = sign(
+            &profile(version),
+            Slot::Signature,
+            Algorithm::Sm2,
+            SignInput::Digest(SecretBytes::new(vec![1; 32])),
+            Access::None,
+            Default::default(),
+        )
+        .unwrap();
+        selected(&mut op);
+        op.advance(&response(&tlv(&[0x7c], &tlv(&[0x82], wire))))
+            .unwrap();
+        let signature = op.take_result().unwrap();
+        assert_eq!(signature.encoding(), encoding);
+        assert_eq!(signature.as_bytes(), wire);
+        assert_eq!(signature.to_p1363().unwrap(), fixed);
+        assert_eq!(signature.to_der().unwrap(), der);
+        // Reject the wrong firmware encoding rather than guessing from bytes.
+        let wrong = if version == "3.0.3" { &fixed } else { &der };
+        let mut op = sign(
+            &profile(version),
+            Slot::Signature,
+            Algorithm::Sm2,
+            SignInput::Digest(SecretBytes::new(vec![1; 32])),
+            Access::None,
+            Default::default(),
+        )
+        .unwrap();
+        selected(&mut op);
+        assert_eq!(
+            op.advance(&response(&tlv(&[0x7c], &tlv(&[0x82], wrong))))
+                .unwrap_err()
+                .kind,
+            ErrorKind::InvalidResponse
+        );
+    }
+    let mut op = sign(
+        &profile("3.1.0"),
+        Slot::Signature,
+        Algorithm::Sm2,
+        SignInput::Digest(SecretBytes::new(vec![1; 32])),
+        Access::None,
+        Default::default(),
+    )
+    .unwrap();
+    selected(&mut op);
+    assert!(op
+        .advance(&response(&tlv(&[0x7c], &tlv(&[0x82], &[0; 64]))))
+        .is_err());
+    assert_eq!(
+        Signature::from_p1363(Algorithm::Sm2, &fixed)
+            .unwrap()
+            .encoding(),
+        SignatureEncoding::Der
+    );
+}

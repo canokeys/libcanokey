@@ -542,6 +542,37 @@ pub unsafe extern "C" fn cnk_operation_signature_p1363(
     })
 }
 
+/// Copy an EC signature as DER; the byte getter preserves the original encoding.
+/// # Safety
+/// Follow the crate pointer/aliasing contract. op must be live without concurrent
+/// mutation/free; len must be writable/initialized/non-NULL; a non-NULL buffer
+/// must cover the incoming *len bytes and not alias len or the operation.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_operation_signature_der(
+    op: *const CnkOperation,
+    buffer: *mut u8,
+    len: *mut usize,
+) -> u32 {
+    guard(|| {
+        let Some(op) = op.as_ref() else {
+            return ARG;
+        };
+        if op.poisoned {
+            return STATE;
+        }
+        let Inner::Signature(inner) = &op.inner else {
+            return TYPE;
+        };
+        let Ok(signature) = inner.result() else {
+            return STATE;
+        };
+        match signature.to_der() {
+            Ok(bytes) => copy(&bytes, buffer, len),
+            Err(_) => TYPE,
+        }
+    })
+}
+
 pub(super) unsafe fn copy_metadata(metadata: &piv::Metadata, out: *mut CnkMetadata) -> u32 {
     if out.is_null() || (*out).struct_size < std::mem::size_of::<CnkMetadata>() as u32 {
         return ARG;
@@ -625,5 +656,42 @@ pub(super) unsafe fn copy_public_key(
         (3, piv::PublicKey::Raw { bytes, .. }) => copy(bytes, buffer, len),
         (1..=3, _) => TYPE,
         _ => ARG,
+    }
+}
+
+/// Copy the CNK_SIGNATURE_* encoding of a completed signature's original bytes.
+/// # Safety
+/// Follow the crate pointer/aliasing contract. op must be live without concurrent
+/// mutation/free; out must be writable/non-NULL and not alias the operation.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_operation_signature_encoding(
+    op: *const CnkOperation,
+    out: *mut u32,
+) -> u32 {
+    guard(|| {
+        if out.is_null() {
+            return ARG;
+        }
+        let Some(op) = op.as_ref() else {
+            return ARG;
+        };
+        if op.poisoned {
+            return STATE;
+        }
+        let Inner::Signature(inner) = &op.inner else {
+            return TYPE;
+        };
+        let Ok(signature) = inner.result() else {
+            return STATE;
+        };
+        *out = signature_encoding(signature);
+        OK
+    })
+}
+pub(super) fn signature_encoding(signature: &piv::Signature) -> u32 {
+    match signature.encoding() {
+        piv::SignatureEncoding::Raw => 1,
+        piv::SignatureEncoding::Der => 2,
+        piv::SignatureEncoding::P1363 => 3,
     }
 }

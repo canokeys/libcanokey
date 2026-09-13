@@ -90,6 +90,7 @@ enum { CNK_ALGORITHM_RSA1024=1, CNK_ALGORITHM_RSA2048=2,
 enum { CNK_KEY_PIN_DEFAULT=0, CNK_KEY_PIN_NEVER=1, CNK_KEY_PIN_ONCE=2, CNK_KEY_PIN_ALWAYS=3 };
 enum { CNK_KEY_TOUCH_DEFAULT=0, CNK_KEY_TOUCH_NEVER=1, CNK_KEY_TOUCH_ALWAYS=2, CNK_KEY_TOUCH_CACHED=3 };
 enum { CNK_SIGN_RSA_BLOCK=1, CNK_SIGN_DIGEST=2, CNK_SIGN_MESSAGE=3 };
+enum { CNK_SIGNATURE_RAW=1, CNK_SIGNATURE_DER=2, CNK_SIGNATURE_P1363=3 };
 enum { CNK_PUBLIC_MODULUS=1, CNK_PUBLIC_EXPONENT=2, CNK_PUBLIC_POINT_OR_RAW=3, CNK_PUBLIC_SPKI=4 };
 enum { CNK_METADATA_HAS_ALGORITHM=1, CNK_METADATA_HAS_POLICY=2,
        CNK_METADATA_HAS_ORIGIN=4, CNK_METADATA_HAS_DEFAULT=8, CNK_METADATA_HAS_RETRIES=16 };
@@ -115,6 +116,9 @@ cnk_status_t cnk_piv_decapsulate_new(const cnk_profile_t *,uint32_t slot,const u
 cnk_status_t cnk_operation_metadata(const cnk_operation_t *,cnk_metadata_v1 *);
 cnk_status_t cnk_operation_public_key_copy(const cnk_operation_t *,uint32_t field,uint8_t *,size_t *);
 cnk_status_t cnk_operation_key_algorithm(const cnk_operation_t *,uint32_t *);
+/* Result bytes preserve card encoding. EC conversions never execute the operation. */
+cnk_status_t cnk_operation_signature_encoding(const cnk_operation_t *,uint32_t *);
+cnk_status_t cnk_operation_signature_der(const cnk_operation_t *,uint8_t *,size_t *);
 cnk_status_t cnk_operation_signature_p1363(const cnk_operation_t *,uint8_t *,size_t *);
 enum { CNK_BATCH_VERIFY_PIN=1, CNK_BATCH_AUTHENTICATE_MANAGEMENT=2, CNK_BATCH_LOGOUT=3,
        CNK_BATCH_READ_OBJECT=4, CNK_BATCH_READ_CERTIFICATE=5, CNK_BATCH_WRITE_OBJECT=6,
@@ -146,6 +150,8 @@ cnk_status_t cnk_operation_batch_item_copy_bytes(const cnk_operation_t *,size_t,
 cnk_status_t cnk_operation_batch_item_mutation(const cnk_operation_t *,size_t,cnk_mutation_result_v1 *);
 cnk_status_t cnk_operation_batch_item_metadata(const cnk_operation_t *,size_t,cnk_metadata_v1 *);
 cnk_status_t cnk_operation_batch_item_public_key_copy(const cnk_operation_t *,size_t,uint32_t field,uint8_t *,size_t *);
+cnk_status_t cnk_operation_batch_item_signature_encoding(const cnk_operation_t *,size_t,uint32_t *);
+cnk_status_t cnk_operation_batch_item_signature_der(const cnk_operation_t *,size_t,uint8_t *,size_t *);
 cnk_status_t cnk_operation_batch_item_signature_p1363(const cnk_operation_t *,size_t,uint8_t *,size_t *);
 uint32_t cnk_abi_version(void);
 void cnk_profile_free(cnk_profile_t *);

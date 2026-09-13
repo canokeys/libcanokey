@@ -53,7 +53,7 @@ pub mod batch;
 pub use batch::{batch, batch_progress, BatchItem, BatchRequest, BatchResults};
 /// Signing, decryption, derivation and signature encodings.
 pub mod private;
-pub use private::{decapsulate, decrypt, derive, sign, SignInput, Signature};
+pub use private::{decapsulate, decrypt, derive, sign, SignInput, Signature, SignatureEncoding};
 /// Key generation, import material and policies.
 pub mod keys;
 pub use keys::{generate_key, import_key, KeyParameters, PrivateKeyMaterial};

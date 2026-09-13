@@ -382,3 +382,60 @@ pub unsafe extern "C" fn cnk_operation_batch_item_signature_p1363(
         }
     })
 }
+
+/// Copy an EC Batch signature as DER without changing its original byte representation.
+/// # Safety
+/// Follow the crate pointer/aliasing contract. op must be live without concurrent
+/// mutation/free; len must be initialized/writable/non-NULL. Non-NULL buffer must
+/// cover the incoming *len writable bytes and not overlap len or the operation.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_operation_batch_item_signature_der(
+    op: *const CnkOperation,
+    index: usize,
+    buffer: *mut u8,
+    len: *mut usize,
+) -> u32 {
+    guard(|| {
+        let r = match results(op) {
+            Ok(r) => r,
+            Err(c) => return c,
+        };
+        match r.items().get(index) {
+            Some(piv::BatchItem::Signature(s)) => match s.to_der() {
+                Ok(bytes) => copy(&bytes, buffer, len),
+                Err(_) => TYPE,
+            },
+            Some(_) => TYPE,
+            None => ARG,
+        }
+    })
+}
+
+/// Copy the CNK_SIGNATURE_* encoding of a successful Batch signature item.
+/// # Safety
+/// Follow the crate pointer/aliasing contract. op must be live without concurrent
+/// mutation/free; out must be writable/non-NULL and not alias the operation.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_operation_batch_item_signature_encoding(
+    op: *const CnkOperation,
+    index: usize,
+    out: *mut u32,
+) -> u32 {
+    guard(|| {
+        if out.is_null() {
+            return ARG;
+        }
+        let r = match results(op) {
+            Ok(r) => r,
+            Err(c) => return c,
+        };
+        match r.items().get(index) {
+            Some(piv::BatchItem::Signature(s)) => {
+                *out = piv_keys::signature_encoding(s);
+                OK
+            }
+            Some(_) => TYPE,
+            None => ARG,
+        }
+    })
+}

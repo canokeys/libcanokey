@@ -27,7 +27,9 @@ Relevant implementations, regression tests, and conventions:
 - [test/helper/utils/oath_card_test.dart](https://github.com/canokeys/canokey-console/blob/63863ef66ff0766754ee8f5bee28b9e977889f75/test/helper/utils/oath_card_test.dart)
 - [test/controller/applets/piv/piv_firmware_compatibility_test.dart](https://github.com/canokeys/canokey-console/blob/63863ef66ff0766754ee8f5bee28b9e977889f75/test/controller/applets/piv/piv_firmware_compatibility_test.dart)
 
-The reusable certificate inspection in `rust/src/api/crypto.rs` (`X509CertData`, `gen_x590_meta`, and the DER/PEM entry points) is adapted in the independent [x509-info repository](https://github.com/canokeys/x509-info). See the [pinned Rust source](https://github.com/canokeys/canokey-console/blob/63863ef66ff0766754ee8f5bee28b9e977889f75/rust/src/api/crypto.rs) and [PIV application helpers](https://github.com/canokeys/canokey-console/blob/63863ef66ff0766754ee8f5bee28b9e977889f75/rust/src/api/piv_crypto.rs). The copyright owner relicensed the extracted certificate library under Apache-2.0. Adaptations add owned typed errors/fields, input bounds, strict PEM consumption, explicit timestamps and optional serialization; unknown algorithm sizes remain unknown. Tests use a newly generated synthetic certificate, not an upstream/user fixture. No upstream files were modified.
+Certificate inspection is maintained in the independent
+[x509-info repository](https://github.com/canokeys/x509-info); it is a crates.io
+dependency, not copied protocol code in this workspace.
 
 ## canokey-manager
 
@@ -83,6 +85,10 @@ No firmware is linked or built as a dependency.
 - Classic signing requires a nonempty challenge (81) and empty response (82).
   ECDH/X25519 uses 85 instead of 81. Empty Ed25519 and ML signing need separate
   streaming-mode support and are not silently mapped to the classic command.
+- [SM2 protocol change](https://github.com/canokeys/canokey-core/commit/02026a9)
+  makes both digest and message signatures raw r || s in the pinned 3.1.0 evidence;
+  3.0.3 and earlier inspected SM2 implementations convert to DER. Compat selects
+  the encoding; operations preserve original bytes and expose DER/P1363 conversions.
 
 - ML-KEM dispatch and `test_piv_mlkem768_generate_metadata_decaps_and_lifecycle`
   in the pinned HEAD use `7C { 82 empty, 81 ciphertext }`: 1088 input bytes,
@@ -109,4 +115,4 @@ Newer, development and unrecognized versions remain Unknown for these mutations.
 | pkcs11 pcsc.c | PCSC and PIV encoding are mixed; RSA uses short command chaining; application owns authentication/mechanism state |
 | Console smartcard.dart / FRB configuration | Dart owns transport; process includes identity APDUs, raw paths log complete APDUs, bridge calls default to synchronous Dart methods |
 
-These are host implementation observations, not complete firmware support guarantees. Generic YubiKey APIs in manager are not proof of CanoKey support. No upstream application tests or hardware sessions were run. Any future code copying requires a per-file license and attribution review.
+Host observations supplement the firmware evidence above; neither establishes hardware interoperability. Generic YubiKey APIs in manager are not proof of CanoKey support. No upstream application tests or hardware sessions were run. Any future code copying requires a per-file license and attribution review.

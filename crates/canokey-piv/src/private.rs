@@ -21,7 +21,18 @@ pub enum SignInput {
 #[derive(Debug)]
 pub struct Signature {
     algorithm: Algorithm,
+    encoding: SignatureEncoding,
     bytes: SecretBytes,
+}
+/// Byte representation of an owned signature, independent of its algorithm.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SignatureEncoding {
+    /// Raw RSA or Ed25519 signature bytes.
+    Raw,
+    /// DER SEQUENCE of unsigned r and s INTEGERs.
+    Der,
+    /// Fixed-width IEEE P1363 r || s (SM2 on newer firmware).
+    P1363,
 }
 #[derive(der::Sequence)]
 struct EcSignature {
@@ -33,8 +44,13 @@ impl Signature {
     pub fn algorithm(&self) -> Algorithm {
         self.algorithm
     }
-    /// Original card encoding: DER for ECDSA/SM2, raw modulus bytes for RSA,
-    /// or the 64-byte Ed25519 signature.
+    /// Encoding of as_bytes. Operation results retain the original card encoding;
+    /// from_p1363 constructs a DER representation.
+    pub fn encoding(&self) -> SignatureEncoding {
+        self.encoding
+    }
+    /// Original card encoding: DER for ECDSA/legacy SM2, P1363 for SM2 on 3.1.0,
+    /// raw modulus bytes for RSA, or the 64-byte Ed25519 signature.
     pub fn as_bytes(&self) -> &[u8] {
         self.bytes.as_bytes()
     }
@@ -43,6 +59,9 @@ impl Signature {
     pub fn to_p1363(&self) -> Result<Vec<u8>, Error> {
         let width =
             curve_len(self.algorithm).ok_or_else(|| Error::new(ErrorKind::UnsupportedAlgorithm))?;
+        if self.encoding == SignatureEncoding::P1363 {
+            return Ok(self.bytes.as_bytes().to_vec());
+        }
         let parts = ec_signature(self.bytes.as_bytes(), width)?;
         let mut out = vec![0; 2 * width];
         for (target, value) in out
@@ -52,6 +71,20 @@ impl Signature {
             target[width - value.len()..].copy_from_slice(value);
         }
         Ok(out)
+    }
+    /// Copy an ECDSA/SM2 signature as DER without device access or verification.
+    /// Non-EC algorithms return UnsupportedAlgorithm. The original bytes remain
+    /// available through as_bytes, even when firmware returns P1363.
+    pub fn to_der(&self) -> Result<Vec<u8>, Error> {
+        curve_len(self.algorithm).ok_or_else(|| Error::new(ErrorKind::UnsupportedAlgorithm))?;
+        if self.encoding == SignatureEncoding::P1363 {
+            Ok(Self::from_p1363(self.algorithm, self.bytes.as_bytes())?
+                .bytes
+                .as_bytes()
+                .to_vec())
+        } else {
+            Ok(self.bytes.as_bytes().to_vec())
+        }
     }
     /// Create an owned ECDSA/SM2 DER signature from fixed-width P1363 r || s.
     /// Requires nonzero components fitting the algorithm's scalar width. This is
@@ -74,6 +107,7 @@ impl Signature {
         .map_err(|_| invalid())?;
         Ok(Self {
             algorithm,
+            encoding: SignatureEncoding::Der,
             bytes: SecretBytes::new(encoded),
         })
     }
@@ -151,7 +185,7 @@ fn reply(response: ResponseData, limit: usize) -> Result<SecretBytes, Error> {
 }
 /// Select, optionally authenticate, and sign one explicitly encoded input.
 /// PIN access places VERIFY next to GENERAL AUTHENTICATE. RSA returns raw signature
-/// bytes; ECDSA/SM2 DER is structurally checked and can convert to P1363. Ed25519
+/// bytes; ECDSA/SM2 encodings are structurally checked and can convert to DER or P1363. Ed25519
 /// uses the message directly. No hashing/padding or automatic retry occurs.
 ///
 /// # Errors
@@ -192,14 +226,27 @@ pub(crate) fn prepare_sign(
         _ => return Err(Error::new(ErrorKind::InvalidArgument)),
     };
     let command = command(profile, slot, algorithm, 0x81, bytes.as_bytes(), options)?;
+    let encoding = if algorithm == Algorithm::Sm2 && profile.sm2_uses_p1363_signatures() {
+        SignatureEncoding::P1363
+    } else if curve_len(algorithm).is_some() {
+        SignatureEncoding::Der
+    } else {
+        SignatureEncoding::Raw
+    };
     access::prepare(command, options, move |r| {
         let bytes = reply(r, options.limits.max_total_response_bytes)?;
-        if let Some(width) = curve_len(algorithm) {
+        if encoding == SignatureEncoding::P1363 {
+            Signature::from_p1363(algorithm, bytes.as_bytes()).map_err(|_| invalid())?;
+        } else if let Some(width) = curve_len(algorithm) {
             ec_signature(bytes.as_bytes(), width)?;
         } else if bytes.len() != rsa_len(algorithm).unwrap_or(64) {
             return Err(invalid());
         }
-        Ok(Signature { algorithm, bytes })
+        Ok(Signature {
+            algorithm,
+            encoding,
+            bytes,
+        })
     })
 }
 /// Perform an RSA private operation on a modulus-sized ciphertext block.
