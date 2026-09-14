@@ -1,5 +1,7 @@
 # libcanokey
 
+[![CI](https://github.com/canokeys/libcanokey/actions/workflows/ci.yml/badge.svg)](https://github.com/canokeys/libcanokey/actions/workflows/ci.yml)
+
 A Rust host protocol library for CanoKey. It produces APDUs and consumes complete
 responses; callers own transport, connections and application state. The C ABI is
 experimental. There is no runtime, credential cache or mutable global state.
@@ -21,8 +23,35 @@ FRB adapter would call the Rust facade directly.
 | `canokey` | Facade and device probing | protocol, compat, admin, piv, oath, openpgp |
 | `canokey-c` | Copied C descriptors and results, operation dispatch | canokey |
 
+Arrows point from each crate to its dependencies; the dashed edge is optional.
+
+```mermaid
+flowchart TD
+    C[canokey-c] --> F[canokey]
+    F --> A[canokey-admin]
+    F --> P[canokey-piv]
+    F --> O[canokey-oath]
+    F --> G[canokey-openpgp]
+    F --> K[canokey-compat]
+    F --> R[canokey-protocol]
+    F -. x509 feature .-> X[x509-info]
+    P --> Q[canokey-key]
+    G --> Q
+    A --> K
+    P --> K
+    O --> K
+    G --> K
+    Q --> K
+    A --> R
+    P --> R
+    O --> R
+    G --> R
+    Q --> R
+    K --> R
+```
+
 The facade optionally re-exports the independent crates.io package
-[`x509-info`](https://github.com/canokeys/x509-info) 0.1.0. PIV unwraps a certificate
+[`x509-info`](https://github.com/canokeys/x509-info) 0.1.1. PIV unwraps a certificate
 container; X.509 inspection is a separate pure call. Probe orchestration belongs in
 the facade so compat never depends on applet crates. Bindings do not duplicate
 protocol state.

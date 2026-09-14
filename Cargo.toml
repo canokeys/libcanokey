@@ -31,4 +31,4 @@ canokey-key = { path = "crates/canokey-key" }
 canokey-openpgp = { path = "crates/canokey-openpgp" }
 canokey-piv = { path = "crates/canokey-piv" }
 canokey = { path = "crates/canokey" }
-x509-info = "0.1.0"
+x509-info = "0.1.1"
