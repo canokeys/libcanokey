@@ -117,3 +117,26 @@ fn bootstrap_selection_needs_no_fabricated_profile() {
     assert_eq!(error.phase, canokey_protocol::Phase::Select);
     assert!(operation.command().is_err());
 }
+
+#[test]
+fn occupied_unknown_keys_never_become_empty_slots() {
+    let context = PivAccessContext::selected(&profile("3.1.0")).unwrap();
+    for (response, expected) in [
+        (hex("6a88"), None),
+        (hex("6a82"), None),
+        (hex("0101ff9000"), Some(ErrorKind::ConditionsNotSatisfied)),
+        (hex("9000"), Some(ErrorKind::ConditionsNotSatisfied)),
+        (hex("016a88"), Some(ErrorKind::InvalidResponse)),
+        (hex("6d00"), Some(ErrorKind::UnsupportedFeature)),
+    ] {
+        let mut operation =
+            require_empty_key_slot_in_context(&context, Slot::Signature, Default::default())
+                .unwrap();
+        operation.start().unwrap();
+        assert_eq!(operation.command().unwrap().as_bytes(), hex("00f7009c00"));
+        match expected {
+            None => assert_eq!(operation.advance(&response).unwrap(), Step::Done),
+            Some(kind) => assert_eq!(operation.advance(&response).unwrap_err().kind, kind),
+        }
+    }
+}

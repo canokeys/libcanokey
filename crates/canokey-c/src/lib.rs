@@ -788,6 +788,79 @@ pub unsafe extern "C" fn cnk_profile_firmware_text(
         None => ARG,
     })
 }
+/// Copy parsed firmware major/minor/patch into three u32 values. Unrecognized
+/// firmware returns CNK_RESULT_TYPE_MISMATCH and leaves output untouched.
+/// # Safety
+/// profile is live without mutation/free; version covers three aligned writable
+/// u32 values and does not alias the profile. No pointer is retained.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_profile_firmware_version(
+    profile: *const CnkProfile,
+    version: *mut u32,
+) -> u32 {
+    guard(|| {
+        if version.is_null() {
+            return ARG;
+        }
+        let Some(profile) = profile.as_ref() else {
+            return ARG;
+        };
+        let Some(firmware) = profile.0.info().firmware() else {
+            return TYPE;
+        };
+        let (major, minor, patch) = (firmware.major, firmware.minor, firmware.patch);
+        *version = major as u32;
+        *version.add(1) = minor as u32;
+        *version.add(2) = patch as u32;
+        OK
+    })
+}
+/// Copy model UTF-8 without a NUL terminator, with normal size-query semantics.
+/// An absent model returns CNK_RESULT_TYPE_MISMATCH, distinct from empty text.
+/// # Safety
+/// profile is live without mutation/free; len is initialized/writable and a
+/// non-NULL buffer covers its capacity. Outputs do not alias input or each other.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_profile_model_copy(
+    profile: *const CnkProfile,
+    buffer: *mut u8,
+    len: *mut usize,
+) -> u32 {
+    guard(|| {
+        let Some(profile) = profile.as_ref() else {
+            return ARG;
+        };
+        let Some(model) = profile.0.info().model() else {
+            return TYPE;
+        };
+        copy(model.as_bytes(), buffer, len)
+    })
+}
+/// Decode the observed four-byte big-endian serial into a u32. Missing serial
+/// returns CNK_RESULT_TYPE_MISMATCH and never invents an identifier.
+/// # Safety
+/// profile is live without mutation/free; out is aligned/writable/non-NULL and
+/// does not alias the profile. Output is unchanged on failure.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_profile_serial_u32(profile: *const CnkProfile, out: *mut u32) -> u32 {
+    guard(|| {
+        if out.is_null() {
+            return ARG;
+        }
+        let Some(profile) = profile.as_ref() else {
+            return ARG;
+        };
+        let Some(serial) = profile.0.info().serial() else {
+            return TYPE;
+        };
+        let Ok(bytes) = <[u8; 4]>::try_from(serial) else {
+            return TYPE;
+        };
+        *out = u32::from_be_bytes(bytes);
+        OK
+    })
+}
+
 /// Write CNK_SUPPORT_UNKNOWN/SUPPORTED/UNSUPPORTED for observed PIV availability.
 /// This is a local snapshot query, not a card probe.
 ///

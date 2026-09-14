@@ -53,6 +53,9 @@ pub use protection::{protected_management_key_from_object, ManagementProtection}
 /// Explicit credential commands inside a caller-selected PIV transaction.
 pub mod credentials;
 pub use credentials::{credential_in_context, CredentialAction};
+/// Explicit version/configuration/RNG operations in an already selected applet.
+pub mod discovery;
+pub use discovery::{random_selected, read_configuration_selected, read_version_selected};
 mod access;
 mod context;
 pub use context::{
@@ -60,9 +63,10 @@ pub use context::{
     delete_certificate_in_context, derive_in_context, generate_key_in_context,
     get_metadata_in_context, import_key_in_context, read_certificate_in_context,
     read_container_name_in_context, read_metadata_directory_in_context,
-    read_object_container_in_context, read_object_in_context, set_container_name_in_context,
-    sign_in_context, sign_streaming_in_context, write_certificate_in_context,
-    write_object_container_in_context, write_object_in_context, PivAccessContext, PivAccessState,
+    read_object_container_in_context, read_object_in_context, require_empty_key_slot_in_context,
+    set_container_name_in_context, sign_in_context, sign_streaming_in_context,
+    write_certificate_in_context, write_object_container_in_context, write_object_in_context,
+    PivAccessContext, PivAccessState,
 };
 /// SM2 agreement with explicitly pre-exchanged peer keys.
 pub mod sm2_agreement;
@@ -508,21 +512,12 @@ fn selected(command: LogicalCommand) -> Vec<Request> {
 /// Invalid options/command budgets fail before I/O. Missing applets and other
 /// card status failures retain Select phase; transport/response limits are terminal.
 pub fn select_application(options: OperationOptions) -> Result<Operation<SecretBytes>, Error> {
-    let options = options.validate()?;
     let mut command = command::select();
     command.le = canokey_protocol::ExpectedLength::Exact(256);
-    canokey_protocol::operation::validate_command(&command, options)?;
-    Operation::from_machine(
-        Sequence {
-            pending: vec![request(command, Phase::Select, None)].into(),
-            current: None,
-            parse: Some(Box::new(|response| {
-                response.ensure_success(Phase::Select)?;
-                Ok(response.data)
-            })),
-        },
-        options,
-    )
+    discovery::single(command, Phase::Select, options, |response| {
+        response.ensure_success(Phase::Select)?;
+        Ok(response.data)
+    })
 }
 
 /// Construct a standalone SELECT PIV operation returning raw selection data.

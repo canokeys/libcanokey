@@ -119,6 +119,46 @@ impl PivAccessContext {
     }
 }
 
+/// Require fresh, explicit absence before a managed key write.
+/// This reads metadata without parsing an occupied key's algorithm or public key:
+/// any successful status means occupied, including unknown/malformed key data.
+/// The caller holds this transaction and management reservation through the write.
+/// # Errors
+/// Only an empty 6A82/6A88 response succeeds. Occupied slots return
+/// ConditionsNotSatisfied; unsupported commands, malformed absence and other
+/// failures block the write. No SELECT, authentication or mutation is performed.
+pub fn require_empty_key_slot_in_context(
+    context: &PivAccessContext,
+    slot: Slot,
+    options: OperationOptions,
+) -> Result<Operation<()>, Error> {
+    context.require_selected()?;
+    context
+        .profile()
+        .piv_slot_support(slot.reference())
+        .require()?;
+    let sequence = super::access::prepare(
+        super::command::metadata(MetadataReference::Key(slot)),
+        options,
+        |response| {
+            if response.status.is_success() {
+                return Err(Error::new(ErrorKind::ConditionsNotSatisfied)
+                    .at(canokey_protocol::Phase::Command));
+            }
+            if matches!(response.status.raw(), 0x6a82 | 0x6a88) && response.data.is_empty() {
+                return Ok(());
+            }
+            if matches!(response.status.raw(), 0x6a82 | 0x6a88) {
+                return Err(
+                    Error::new(ErrorKind::InvalidResponse).at(canokey_protocol::Phase::Parsing)
+                );
+            }
+            response.ensure_success(canokey_protocol::Phase::Command)
+        },
+    )?;
+    super::operation_from_sequence(context.profile(), sequence, options)
+}
+
 /// Read key, PIN, PUK, or management metadata without SELECT or authentication.
 ///
 /// # Errors

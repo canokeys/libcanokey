@@ -26,6 +26,14 @@ static cnk_profile_t *profile(void) {
 }
 int main(void) {
   cnk_profile_t *p = profile();
+  uint32_t version[3] = {99, 99, 99}, serial = 99;
+  assert(cnk_profile_firmware_version(p, version) == CNK_OK &&
+         version[0] == 3 && version[1] == 1 && version[2] == 0);
+  assert(cnk_profile_serial_u32(p, &serial) == CNK_RESULT_TYPE_MISMATCH &&
+         serial == 99);
+  size_t model_size = 0;
+  assert(cnk_profile_model_copy(p, NULL, &model_size) ==
+         CNK_RESULT_TYPE_MISMATCH);
   uint32_t semantic = 999;
   assert(cnk_profile_piv_algorithm_from_wire(p, 0xd1, &semantic) == CNK_OK &&
          semantic == CNK_ALGORITHM_RSA3072);
@@ -82,6 +90,9 @@ int main(void) {
              context, CNK_PIV_CREDENTIAL_VERIFY_PIN, short_pin, 1, NULL, 0,
              NULL, &credential, &error) == CNK_OK);
   short_pin[0] = 0;
+  cnk_operation_t *empty_slot = NULL;
+  assert(cnk_piv_require_empty_key_slot_in_context_new(
+             context, 0x9c, NULL, &empty_slot, &error) == CNK_OK);
   // All borrowed inputs and the context can disappear before execution.
   memset(value, 0, sizeof(value));
   memset(tag, 0, sizeof(tag));
@@ -165,6 +176,12 @@ int main(void) {
              CNK_OK &&
          step == CNK_STEP_DONE);
   cnk_operation_free(selection);
+  assert(cnk_operation_start(empty_slot, &step, &error) == CNK_OK);
+  const uint8_t absent_slot[] = {0x6a, 0x88};
+  assert(cnk_operation_advance(empty_slot, absent_slot, sizeof(absent_slot),
+                               &step, &error) == CNK_OK &&
+         step == CNK_STEP_DONE);
+  cnk_operation_free(empty_slot);
   cnk_piv_context_free(NULL);
   return 0;
 }

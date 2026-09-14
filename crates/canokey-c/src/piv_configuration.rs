@@ -441,3 +441,101 @@ pub unsafe extern "C" fn cnk_operation_batch_item_directory_entry(
         Err(code) => code,
     })
 }
+
+/// Probe the selected PIV version, with no SELECT or retained caller pointer.
+/// # Safety
+/// out is non-NULL/writable; optional options/error have valid initialized
+/// prefixes and do not alias output. Caller owns the selected transaction.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_read_version_selected_new(
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        piv::read_version_selected(options(opts)?)
+            .map(Inner::Object)
+            .map_err(|e| failure(e, error))
+    })
+}
+/// Probe selected PIV algorithm configuration without selecting/authenticating.
+/// Caller must establish that attempting this public probe is appropriate.
+/// # Safety
+/// out is non-NULL/writable; optional options/error have valid initialized
+/// prefixes and do not alias output. Caller owns the selected transaction.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_read_configuration_selected_new(
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        piv::read_configuration_selected(options(opts)?)
+            .map(Inner::AlgorithmConfig)
+            .map_err(|e| failure(e, error))
+    })
+}
+/// Read selected PIV RNG after an explicit live version gate, without SELECT.
+/// Output and exchange budgets apply before allocation; output is owned/zeroized.
+/// # Safety
+/// out is non-NULL/writable; optional options/error have valid initialized
+/// prefixes and do not alias output. Caller owns the selected transaction.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_random_selected_new(
+    length: usize,
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        piv::random_selected(length, options(opts)?)
+            .map(Inner::Object)
+            .map_err(|e| failure(e, error))
+    })
+}
+/// Copy a ten-byte configuration projection: enabled, Ed25519, RSA3072,
+/// RSA4096, X25519, secp256k1, P521, SM2, MLDSA65, MLKEM768. Zero means absent
+/// or disabled; the raw byte getter retains the original observed format.
+/// # Safety
+/// op is live without concurrent mutation/free. len is initialized/writable;
+/// a non-NULL buffer covers its capacity. Output ranges do not alias handles.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_operation_piv_configuration_copy(
+    op: *const CnkOperation,
+    buffer: *mut u8,
+    len: *mut usize,
+) -> u32 {
+    guard(|| {
+        let Some(op) = op.as_ref() else {
+            return ARG;
+        };
+        if op.poisoned {
+            return STATE;
+        }
+        let Inner::AlgorithmConfig(config) = &op.inner else {
+            return TYPE;
+        };
+        let Ok(config) = config.result() else {
+            return STATE;
+        };
+        let mut data = [0; 10];
+        data[0] = u8::from(config.enabled());
+        for (index, algorithm) in [
+            piv::Algorithm::Ed25519,
+            piv::Algorithm::Rsa3072,
+            piv::Algorithm::Rsa4096,
+            piv::Algorithm::X25519,
+            piv::Algorithm::Secp256k1,
+            piv::Algorithm::EccP521,
+            piv::Algorithm::Sm2,
+            piv::Algorithm::MlDsa65,
+            piv::Algorithm::MlKem768,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            data[index + 1] = config.wire_id(algorithm).unwrap_or(0);
+        }
+        copy(&data, buffer, len)
+    })
+}

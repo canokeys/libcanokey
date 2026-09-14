@@ -706,3 +706,24 @@ pub unsafe extern "C" fn cnk_piv_write_object_container_in_context_new(
         .map_err(|e| failure(e, error))
     })
 }
+
+/// Require a fresh explicit empty-slot response without parsing occupied key data.
+/// No SELECT or mutation occurs; retain the transaction until the dependent write.
+/// # Safety
+/// context is live without concurrent mutation/free. out is non-NULL/writable;
+/// optional options/error have valid initialized prefixes and do not alias output.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_require_empty_key_slot_in_context_new(
+    context: *const CnkPivContext,
+    reference: u32,
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        let context = context_ref(context)?;
+        piv::require_empty_key_slot_in_context(&context.0, slot(reference)?, options(opts)?)
+            .map(Inner::Unit)
+            .map_err(|e| failure(e, error))
+    })
+}

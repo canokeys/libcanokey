@@ -126,6 +126,7 @@ cnk_status_t cnk_piv_credential_in_context_new(const cnk_piv_context_t *,uint32_
 cnk_status_t cnk_piv_select_application_new(const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_context_new(const cnk_profile_t *,uint32_t state,cnk_piv_context_t **,cnk_error_v1 *);
 void cnk_piv_context_free(cnk_piv_context_t *);
+cnk_status_t cnk_piv_require_empty_key_slot_in_context_new(const cnk_piv_context_t *,uint32_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_get_metadata_in_context_new(const cnk_piv_context_t *,uint32_t reference,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_read_certificate_in_context_new(const cnk_piv_context_t *,uint32_t slot,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_sign_in_context_new(const cnk_piv_context_t *,uint32_t slot,uint32_t algorithm,uint32_t kind,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
@@ -142,6 +143,10 @@ cnk_status_t cnk_piv_read_container_name_in_context_new(const cnk_piv_context_t 
 /* Pure, bounded protection-object parsing; flags are claims, not authorization. */
 cnk_status_t cnk_piv_admin_data_flags(const uint8_t *,size_t,uint32_t *,cnk_error_v1 *);
 cnk_status_t cnk_piv_printed_management_key_copy(const uint8_t *,size_t,uint8_t *,size_t *,cnk_error_v1 *);
+cnk_status_t cnk_piv_read_version_selected_new(const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_piv_read_configuration_selected_new(const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_piv_random_selected_new(size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_operation_piv_configuration_copy(const cnk_operation_t *,uint8_t *,size_t *);
 cnk_status_t cnk_piv_container_name_validate(const uint8_t *,size_t,cnk_error_v1 *);
 cnk_status_t cnk_piv_set_container_name_in_context_new(const cnk_piv_context_t *,uint32_t,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_write_object_in_context_new(const cnk_piv_context_t *,const uint8_t *,size_t,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
@@ -260,6 +265,9 @@ cnk_status_t cnk_operation_command(const cnk_operation_t *,uint8_t *,size_t *);
 cnk_status_t cnk_operation_take_profile(cnk_operation_t *,cnk_profile_t **);
 cnk_status_t cnk_operation_result_copy_bytes(const cnk_operation_t *,uint8_t *,size_t *);
 cnk_status_t cnk_operation_pin_status(const cnk_operation_t *,cnk_pin_status_v1 *);
+cnk_status_t cnk_profile_firmware_version(const cnk_profile_t *,uint32_t version[3]);
+cnk_status_t cnk_profile_model_copy(const cnk_profile_t *,uint8_t *,size_t *);
+cnk_status_t cnk_profile_serial_u32(const cnk_profile_t *,uint32_t *);
 cnk_status_t cnk_profile_firmware_text(const cnk_profile_t *,uint8_t *,size_t *);
 /* Copy a 2.x snapshot after a confirmed Admin 40/07 write on the same device.
  * enabled=0/1; never infer from lost responses. Caller owns the new *out. */

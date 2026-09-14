@@ -351,6 +351,13 @@ these boundaries. Package reuse does not establish device support.
 
 ## Bindings
 
+Selected version/configuration probes do not invent a profile or authenticate.
+RNG checks the live PIV version before bounded generation and owns zeroizing
+output. Configuration projections use zero for disabled/unobserved IDs while raw
+observations remain available. Firmware/model/serial accessors read immutable
+probe results. Empty-slot checks accept only explicit absence and never decode
+an occupied key into permission to replace it.
+
 Bootstrap PIV selection is available before a profile exists; it uses a fixed
 AID and explicit Le without fabricating capability evidence.
 Selected credential actions verify, log out, replace PIN/PUK, or unblock PIN

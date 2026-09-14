@@ -26,6 +26,11 @@ int main(void) {
     const uint8_t piv[]={5,7,0,0x90,0};feed(op,piv,sizeof(piv),&step);
     assert(step==CNK_STEP_DONE);
     assert(cnk_operation_take_profile(op,&profile)==CNK_OK);
+    uint32_t firmware_version[3], numeric_serial = 0;
+    assert(cnk_profile_firmware_version(profile,firmware_version)==CNK_OK && firmware_version[0]==9);
+    assert(cnk_profile_serial_u32(profile,&numeric_serial)==CNK_OK && numeric_serial==0x01020304);
+    uint8_t model_copy[2];size_t model_len=sizeof(model_copy);
+    assert(cnk_profile_model_copy(profile,model_copy,&model_len)==CNK_OK && model_len==2 && !memcmp(model_copy,"CK",2));
     cnk_piv_context_t *piv_context=NULL;
     assert(cnk_piv_context_new(profile,CNK_PIV_CONTEXT_SELECTED,&piv_context,&err)==CNK_OK);
     cnk_piv_context_free(piv_context);
