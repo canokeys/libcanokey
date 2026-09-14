@@ -150,7 +150,7 @@ fn streaming_rejects_incorrect_prefix_ack_bounds_and_capabilities() {
         )
         .is_err());
     }
-    for version in ["3.0.3", "3.1.1", "3.1.0-dev"] {
+    for version in ["3.0.3", "3.1.1", "3.2.0-dev"] {
         assert!(sign_streaming(
             &profile(version),
             Slot::Signature,

@@ -220,7 +220,7 @@ fn capability_and_input_checks_precede_select() {
         ("3.1.0", tdes, ErrorKind::UnsupportedFeature),
         ("3.0.3", aes, ErrorKind::UnsupportedFeature),
         ("9.0.0", aes, ErrorKind::CapabilityUnknown),
-        ("3.1.0-dev", aes, ErrorKind::CapabilityUnknown),
+        ("3.2.0-dev", aes, ErrorKind::CapabilityUnknown),
     ] {
         assert_eq!(
             authenticate_management_key(&profile(version), auth(v, true), Default::default())

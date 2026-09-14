@@ -87,7 +87,8 @@ protocol state.
 
 Firmware compatibility covers audited 1.3–3.1.0 layouts with per-operation gates.
 Legacy OATH commands, OpenPGP DO framing and Admin configuration fields are selected
-from actual Admin firmware; unknown/development versions do not enable mutations.
+from actual Admin firmware; unknown base versions do not enable mutations; development builds follow their
+declared numeric base version while preserving the original version text.
 See [compatibility contracts](docs/api-design.md#profiles-and-probing) for the model
 and each applet's historical restrictions. Every factory checks required evidence. PIV `sign_streaming`
 handles ML-DSA and empty Ed25519 messages explicitly; SM2 initiators require PIN

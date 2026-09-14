@@ -146,7 +146,8 @@ No firmware is linked or built as a dependency.
   PUT, import and decipher accept command chaining. No F9 KDF DO/handler exists.
 
 These sources establish encoding and version rules, not hardware interoperability.
-Newer, development and unrecognized versions remain Unknown for these mutations.
+Newer base versions and unrecognized versions remain Unknown for these mutations.
+Development builds use the declared numeric base version while retaining their suffix.
 
 ## Observations informing the design
 
