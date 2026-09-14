@@ -79,6 +79,16 @@ impl PivAccessContext {
             Err(Error::new(ErrorKind::SecurityStatusNotSatisfied))
         }
     }
+    fn require_management(&self) -> Result<(), Error> {
+        if matches!(
+            self.state,
+            PivAccessState::ManagementAuthorized | PivAccessState::PinAndManagementAuthorized
+        ) {
+            Ok(())
+        } else {
+            Err(Error::new(ErrorKind::SecurityStatusNotSatisfied))
+        }
+    }
 }
 
 /// Read key, PIN, PUK, or management metadata without SELECT or authentication.
@@ -138,6 +148,47 @@ pub fn read_container_name_in_context(
 ) -> Result<Operation<super::ContainerName>, Error> {
     context.require_selected()?;
     let sequence = super::configuration::prepare_read_name(&context.profile, slot, options)?;
+    super::operation_from_sequence(&context.profile, sequence, options)
+}
+
+/// Write a PIV data object after management authorization in the current transaction.
+pub fn write_object_in_context(
+    context: &PivAccessContext,
+    id: ObjectId,
+    data: Vec<u8>,
+    options: OperationOptions,
+) -> Result<Operation<super::MutationResult>, Error> {
+    context.require_management()?;
+    let sequence =
+        super::write::prepare_write_object(&context.profile, id, SecretBytes::new(data), options)?;
+    super::operation_from_sequence(&context.profile, sequence, options)
+}
+
+/// Write an uncompressed DER certificate after management authorization.
+pub fn write_certificate_in_context(
+    context: &PivAccessContext,
+    slot: Slot,
+    der: Vec<u8>,
+    options: OperationOptions,
+) -> Result<Operation<super::MutationResult>, Error> {
+    context.require_management()?;
+    let sequence = super::write::prepare_write_certificate(
+        &context.profile,
+        slot,
+        SecretBytes::new(der),
+        options,
+    )?;
+    super::operation_from_sequence(&context.profile, sequence, options)
+}
+
+/// Delete a certificate after management authorization.
+pub fn delete_certificate_in_context(
+    context: &PivAccessContext,
+    slot: Slot,
+    options: OperationOptions,
+) -> Result<Operation<super::MutationResult>, Error> {
+    context.require_management()?;
+    let sequence = super::write::prepare_delete_certificate(&context.profile, slot, options)?;
     super::operation_from_sequence(&context.profile, sequence, options)
 }
 

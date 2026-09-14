@@ -304,3 +304,66 @@ pub unsafe extern "C" fn cnk_piv_read_container_name_in_context_new(
             .map_err(|e| failure(e, error))
     })
 }
+
+/// Construct a management-authorized PIV object write in the current transaction.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_write_object_in_context_new(
+    context: *const CnkPivContext,
+    tag: *const u8,
+    tag_len: usize,
+    data: *const u8,
+    data_len: usize,
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        let context = context_ref(context)?;
+        let options = options(opts)?;
+        let id = piv::ObjectId::from_bytes(bytes(tag, tag_len)?).map_err(|e| failure(e, error))?;
+        piv::write_object_in_context(&context.0, id, bytes(data, data_len)?.to_vec(), options)
+            .map(Inner::Mutation)
+            .map_err(|e| failure(e, error))
+    })
+}
+
+/// Construct a management-authorized certificate write in the current transaction.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_write_certificate_in_context_new(
+    context: *const CnkPivContext,
+    slot_reference: u32,
+    der: *const u8,
+    der_len: usize,
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        let context = context_ref(context)?;
+        piv::write_certificate_in_context(
+            &context.0,
+            slot(slot_reference)?,
+            bytes(der, der_len)?.to_vec(),
+            options(opts)?,
+        )
+        .map(Inner::Mutation)
+        .map_err(|e| failure(e, error))
+    })
+}
+
+/// Construct a management-authorized certificate deletion in the current transaction.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_delete_certificate_in_context_new(
+    context: *const CnkPivContext,
+    slot_reference: u32,
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        let context = context_ref(context);
+        piv::delete_certificate_in_context(&context?.0, slot(slot_reference)?, options(opts)?)
+            .map(Inner::Mutation)
+            .map_err(|e| failure(e, error))
+    })
+}

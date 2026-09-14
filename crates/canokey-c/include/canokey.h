@@ -132,6 +132,9 @@ cnk_status_t cnk_piv_decapsulate_in_context_new(const cnk_piv_context_t *,uint32
 cnk_status_t cnk_piv_read_object_in_context_new(const cnk_piv_context_t *,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_read_metadata_directory_in_context_new(const cnk_piv_context_t *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_read_container_name_in_context_new(const cnk_piv_context_t *,uint32_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_piv_write_object_in_context_new(const cnk_piv_context_t *,const uint8_t *,size_t,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_piv_write_certificate_in_context_new(const cnk_piv_context_t *,uint32_t,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_piv_delete_certificate_in_context_new(const cnk_piv_context_t *,uint32_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_read_algorithm_config_new(const cnk_profile_t *,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_sign_new(const cnk_profile_t *,uint32_t slot,uint32_t algorithm,uint32_t kind,const uint8_t *,size_t,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 /* Explicit full-message signing. ML-DSA has empty context; only SM2 accepts
