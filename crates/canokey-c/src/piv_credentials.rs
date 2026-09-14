@@ -152,3 +152,23 @@ pub unsafe extern "C" fn cnk_piv_credential_in_context_new(
             .map_err(|e| failure(e, error))
     })
 }
+
+/// Select PIV before profile discovery, without assuming capabilities or credentials.
+/// Returns raw selection bytes. The caller owns the transaction and must treat
+/// selection as a possible authentication reset. No retry follows card failure.
+/// # Safety
+/// out must be non-NULL/aligned/writable. Optional opts is readable; optional
+/// error is writable with initialized struct_size. Output storage is disjoint
+/// from options/error. Free the returned operation once.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_select_application_new(
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        piv::select_application(options(opts)?)
+            .map(Inner::Object)
+            .map_err(|e| failure(e, error))
+    })
+}

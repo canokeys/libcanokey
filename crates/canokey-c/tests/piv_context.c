@@ -153,6 +153,18 @@ int main(void) {
   assert(error.kind == CNK_ERROR_AUTHENTICATION_FAILED &&
          error.reference == CNK_REFERENCE_PIN && error.retries_remaining == 2);
   cnk_operation_free(credential);
+  cnk_operation_t *selection = NULL;
+  assert(cnk_piv_select_application_new(NULL, &selection, &error) == CNK_OK);
+  assert(cnk_operation_start(selection, &step, &error) == CNK_OK);
+  const uint8_t select_command[] = {0, 0xa4, 4, 0, 5, 0xa0, 0, 0, 3, 8, 0};
+  n = sizeof(command);
+  assert(cnk_operation_command(selection, command, &n) == CNK_OK &&
+         n == sizeof(select_command));
+  assert(!memcmp(command, select_command, n));
+  assert(cnk_operation_advance(selection, ok, sizeof(ok), &step, &error) ==
+             CNK_OK &&
+         step == CNK_STEP_DONE);
+  cnk_operation_free(selection);
   cnk_piv_context_free(NULL);
   return 0;
 }

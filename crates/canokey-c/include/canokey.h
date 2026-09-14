@@ -123,6 +123,7 @@ cnk_status_t cnk_piv_get_metadata_new(const cnk_profile_t *,uint32_t reference,c
 enum { CNK_PIV_CREDENTIAL_VERIFY_PIN=1, CNK_PIV_CREDENTIAL_LOGOUT=2,
        CNK_PIV_CREDENTIAL_CHANGE_PIN=3, CNK_PIV_CREDENTIAL_CHANGE_PUK=4, CNK_PIV_CREDENTIAL_UNBLOCK_PIN=5 };
 cnk_status_t cnk_piv_credential_in_context_new(const cnk_piv_context_t *,uint32_t,const uint8_t *,size_t,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_piv_select_application_new(const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_context_new(const cnk_profile_t *,uint32_t state,cnk_piv_context_t **,cnk_error_v1 *);
 void cnk_piv_context_free(cnk_piv_context_t *);
 cnk_status_t cnk_piv_get_metadata_in_context_new(const cnk_piv_context_t *,uint32_t reference,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);

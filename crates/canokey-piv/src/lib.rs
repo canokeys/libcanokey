@@ -500,6 +500,31 @@ fn selected(command: LogicalCommand) -> Vec<Request> {
         request(command, Phase::Command, None),
     ]
 }
+/// Select PIV before a device profile exists, returning owned raw selection data.
+/// Uses the standard five-byte PIV AID with explicit Le=256, which also covers
+/// legacy readers. Callers own the transaction; SELECT may clear authentication.
+/// This does not infer firmware capabilities or authorize subsequent operations.
+/// # Errors
+/// Invalid options/command budgets fail before I/O. Missing applets and other
+/// card status failures retain Select phase; transport/response limits are terminal.
+pub fn select_application(options: OperationOptions) -> Result<Operation<SecretBytes>, Error> {
+    let options = options.validate()?;
+    let mut command = command::select();
+    command.le = canokey_protocol::ExpectedLength::Exact(256);
+    canokey_protocol::operation::validate_command(&command, options)?;
+    Operation::from_machine(
+        Sequence {
+            pending: vec![request(command, Phase::Select, None)].into(),
+            current: None,
+            parse: Some(Box::new(|response| {
+                response.ensure_success(Phase::Select)?;
+                Ok(response.data)
+            })),
+        },
+        options,
+    )
+}
+
 /// Construct a standalone SELECT PIV operation returning raw selection data.
 ///
 /// # Errors

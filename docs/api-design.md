@@ -351,6 +351,8 @@ these boundaries. Package reuse does not establish device support.
 
 ## Bindings
 
+Bootstrap PIV selection is available before a profile exists; it uses a fixed
+AID and explicit Le without fabricating capability evidence.
 Selected credential actions verify, log out, replace PIN/PUK, or unblock PIN
 without another SELECT. Their owned inputs and encoded copies are zeroized;
 callers retain transaction, credential-cache and uncertain-mutation responsibility.

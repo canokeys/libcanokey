@@ -103,3 +103,17 @@ fn credential_acknowledgements_are_empty_and_terminal() {
     assert_eq!(error.kind, ErrorKind::InvalidResponse);
     assert!(operation.result().is_err() && operation.command().is_err());
 }
+
+#[test]
+fn bootstrap_selection_needs_no_fabricated_profile() {
+    let mut operation = select_application(Default::default()).unwrap();
+    operation.start().unwrap();
+    assert_eq!(
+        operation.command().unwrap().as_bytes(),
+        hex("00a4040005a00000030800")
+    );
+    let error = operation.advance(&hex("6a82")).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::UnsupportedDevice);
+    assert_eq!(error.phase, canokey_protocol::Phase::Select);
+    assert!(operation.command().is_err());
+}
