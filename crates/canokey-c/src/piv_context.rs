@@ -271,3 +271,36 @@ pub unsafe extern "C" fn cnk_piv_read_object_in_context_new(
             .map_err(|e| failure(e, error))
     })
 }
+
+/// Construct a metadata-directory read without SELECT or implicit authentication.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_read_metadata_directory_in_context_new(
+    context: *const CnkPivContext,
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        let context = context_ref(context)?;
+        piv::read_metadata_directory_in_context(&context.0, options(opts)?)
+            .map(Inner::Directory)
+            .map_err(|e| failure(e, error))
+    })
+}
+
+/// Construct a persisted container-name read without SELECT or implicit authentication.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_read_container_name_in_context_new(
+    context: *const CnkPivContext,
+    slot_reference: u32,
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        let context = context_ref(context)?;
+        piv::read_container_name_in_context(&context.0, slot(slot_reference)?, options(opts)?)
+            .map(Inner::ContainerName)
+            .map_err(|e| failure(e, error))
+    })
+}

@@ -120,6 +120,27 @@ pub fn read_object_in_context(
     super::operation_from_sequence(&context.profile, sequence, options)
 }
 
+/// Read the PIV metadata directory in the caller's selected transaction.
+pub fn read_metadata_directory_in_context(
+    context: &PivAccessContext,
+    options: OperationOptions,
+) -> Result<Operation<super::MetadataDirectory>, Error> {
+    context.require_selected()?;
+    let sequence = super::directory::prepare_directory(&context.profile, options)?;
+    super::operation_from_sequence(&context.profile, sequence, options)
+}
+
+/// Read a persisted container name in the caller's selected transaction.
+pub fn read_container_name_in_context(
+    context: &PivAccessContext,
+    slot: Slot,
+    options: OperationOptions,
+) -> Result<Operation<super::ContainerName>, Error> {
+    context.require_selected()?;
+    let sequence = super::configuration::prepare_read_name(&context.profile, slot, options)?;
+    super::operation_from_sequence(&context.profile, sequence, options)
+}
+
 /// Sign using the caller's existing PIV selection and authorization boundary.
 /// PIN policy is intentionally enforced by the caller after metadata discovery;
 /// this operation never performs an implicit VERIFY or management login.

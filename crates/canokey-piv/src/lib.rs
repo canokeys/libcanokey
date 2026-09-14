@@ -51,7 +51,8 @@ mod access;
 mod context;
 pub use context::{
     decapsulate_in_context, decrypt_in_context, derive_in_context, get_metadata_in_context,
-    read_certificate_in_context, read_object_in_context, sign_in_context,
+    read_certificate_in_context, read_container_name_in_context,
+    read_metadata_directory_in_context, read_object_in_context, sign_in_context,
     sign_streaming_in_context, PivAccessContext, PivAccessState,
 };
 /// SM2 agreement with explicitly pre-exchanged peer keys.
