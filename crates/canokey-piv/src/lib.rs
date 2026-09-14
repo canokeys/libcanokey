@@ -54,9 +54,9 @@ pub use context::{
     delete_certificate_in_context, derive_in_context, generate_key_in_context,
     get_metadata_in_context, import_key_in_context, read_certificate_in_context,
     read_container_name_in_context, read_metadata_directory_in_context,
-    read_object_container_in_context, read_object_in_context, sign_in_context,
-    sign_streaming_in_context, write_certificate_in_context, write_object_container_in_context,
-    write_object_in_context, PivAccessContext, PivAccessState,
+    read_object_container_in_context, read_object_in_context, set_container_name_in_context,
+    sign_in_context, sign_streaming_in_context, write_certificate_in_context,
+    write_object_container_in_context, write_object_in_context, PivAccessContext, PivAccessState,
 };
 /// SM2 agreement with explicitly pre-exchanged peer keys.
 pub mod sm2_agreement;
@@ -68,7 +68,7 @@ pub use directory::{read_metadata_directory, DirectoryEntry, DirectoryIssue, Met
 pub mod configuration;
 pub use configuration::{
     attest, delete_key, move_key, read_container_name, reset_pin_puk_retries, reset_piv,
-    set_algorithm_config, set_container_name, ContainerName,
+    set_algorithm_config, set_container_name, ContainerName, ContainerNameReference,
 };
 /// Explicit firmware streaming signature modes.
 pub mod streaming;

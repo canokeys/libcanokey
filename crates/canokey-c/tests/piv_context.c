@@ -51,6 +51,19 @@ int main(void) {
              &framed, &error) == CNK_OK);
   assert(cnk_piv_read_object_container_in_context_new(
              context, tag, sizeof(tag), NULL, &read, &error) == CNK_OK);
+  cnk_operation_t *name_write = NULL, *name_read = NULL;
+  uint8_t name[] = {'K', 0};
+  assert(cnk_piv_container_name_validate(name, 1, &error) ==
+         CNK_INVALID_ARGUMENT);
+  assert(error.kind == CNK_ERROR_INVALID_ARGUMENT);
+  assert(cnk_piv_container_name_validate(NULL, 0, &error) == CNK_OK &&
+         error.kind == 0);
+  assert(cnk_piv_set_container_name_in_context_new(
+             context, 0xf9, name, sizeof(name), NULL, &name_write, &error) ==
+         CNK_OK);
+  assert(cnk_piv_read_container_name_in_context_new(
+             context, 0xf9, NULL, &name_read, &error) == CNK_OK);
+  memset(name, 0, sizeof(name));
   // All borrowed inputs and the context can disappear before execution.
   memset(value, 0, sizeof(value));
   memset(tag, 0, sizeof(tag));
@@ -83,6 +96,22 @@ int main(void) {
          n == sizeof(container));
   assert(memcmp(command, container, n) == 0);
   cnk_operation_free(read);
+  assert(cnk_operation_start(name_write, &step, &error) == CNK_OK);
+  const uint8_t expected_name[] = {0, 0xf5, 1, 0xf9, 2, 'K', 0};
+  n = sizeof(command);
+  assert(cnk_operation_command(name_write, command, &n) == CNK_OK &&
+         n == sizeof(expected_name));
+  assert(memcmp(command, expected_name, n) == 0);
+  assert(cnk_operation_advance(name_write, ok, sizeof(ok), &step, &error) ==
+             CNK_OK &&
+         step == CNK_STEP_DONE);
+  cnk_operation_free(name_write);
+  assert(cnk_operation_start(name_read, &step, &error) == CNK_OK);
+  const uint8_t absent_name[] = {0x6a, 0x88};
+  assert(cnk_operation_advance(name_read, absent_name, sizeof(absent_name),
+                               &step, &error) == CNK_PROTOCOL_ERROR);
+  assert(error.kind == CNK_ERROR_NOT_FOUND && error.status_word == 0x6a88);
+  cnk_operation_free(name_read);
   cnk_piv_context_free(NULL);
   return 0;
 }

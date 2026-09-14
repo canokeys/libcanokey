@@ -133,6 +133,10 @@ cnk_status_t cnk_piv_read_object_in_context_new(const cnk_piv_context_t *,const 
 cnk_status_t cnk_piv_read_object_container_in_context_new(const cnk_piv_context_t *,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_read_metadata_directory_in_context_new(const cnk_piv_context_t *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_read_container_name_in_context_new(const cnk_piv_context_t *,uint32_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+/* Container-name references include ordinary key slots and F9. Validation is
+ * pure and retains no input. Context writes require existing management auth. */
+cnk_status_t cnk_piv_container_name_validate(const uint8_t *,size_t,cnk_error_v1 *);
+cnk_status_t cnk_piv_set_container_name_in_context_new(const cnk_piv_context_t *,uint32_t,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_write_object_in_context_new(const cnk_piv_context_t *,const uint8_t *,size_t,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_write_object_container_in_context_new(const cnk_piv_context_t *,const uint8_t *,size_t,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_write_certificate_in_context_new(const cnk_piv_context_t *,uint32_t,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);

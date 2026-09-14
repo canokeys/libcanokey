@@ -1,5 +1,6 @@
 //! C ABI for caller-owned selected PIV transaction contexts.
 use super::*;
+use crate::piv_configuration::name_reference;
 use crate::piv_keys::{algorithm, material, parameters, piv_input, streaming_input};
 use crate::piv_mutation::{management, slot};
 
@@ -394,9 +395,53 @@ pub unsafe extern "C" fn cnk_piv_read_container_name_in_context_new(
 ) -> u32 {
     create(out, error, || {
         let context = context_ref(context)?;
-        piv::read_container_name_in_context(&context.0, slot(slot_reference)?, options(opts)?)
-            .map(Inner::ContainerName)
-            .map_err(|e| failure(e, error))
+        piv::read_container_name_in_context(
+            &context.0,
+            name_reference(slot_reference)?,
+            options(opts)?,
+        )
+        .map(Inner::ContainerName)
+        .map_err(|e| failure(e, error))
+    })
+}
+
+/// Set or clear an ordinary/F9 container name without SELECT or authentication.
+/// The context must assert management authorization in the caller's transaction.
+/// Input is copied before return. Firmware enforces uniqueness and key existence;
+/// no automatic retry or rollback occurs after a write is sent.
+///
+/// # Safety
+/// context must be a live, unmodified handle from cnk_piv_context_new. out must
+/// be non-NULL/aligned/writable. data must cover len readable bytes (NULL requires
+/// zero length). Optional opts must be readable; optional error must be writable
+/// with initialized struct_size. Versioned structs cover their declared prefix.
+/// Output storage must not alias inputs or handles. Free the returned operation
+/// once; the context and name may be released immediately after construction.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_set_container_name_in_context_new(
+    context: *const CnkPivContext,
+    slot_reference: u32,
+    data: *const u8,
+    len: usize,
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        let context = context_ref(context)?;
+        if len > 78 {
+            return Err(ARG);
+        }
+        let name =
+            piv::ContainerName::from_utf16le(bytes(data, len)?).map_err(|e| failure(e, error))?;
+        piv::set_container_name_in_context(
+            &context.0,
+            name_reference(slot_reference)?,
+            name,
+            options(opts)?,
+        )
+        .map(Inner::Mutation)
+        .map_err(|e| failure(e, error))
     })
 }
 

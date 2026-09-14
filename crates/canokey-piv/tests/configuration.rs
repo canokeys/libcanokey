@@ -136,7 +136,7 @@ fn names_preserve_utf16_and_mutations_do_not_touch_certificates() {
                 Default::default(),
             )
             .unwrap(),
-            hex("00f5019c"),
+            hex("00f5019c00"),
         ),
     ] {
         authenticate(&mut op);
@@ -269,4 +269,61 @@ fn batch_authentication_and_profile_invalidation_are_explicit() {
         Default::default()
     )
     .is_err());
+}
+
+#[test]
+fn selected_names_include_attestation_and_never_replay_writes() {
+    let p = profile("3.1.0");
+    let selected = PivAccessContext::selected(&p).unwrap();
+    assert_eq!(
+        set_container_name_in_context(
+            &selected,
+            Slot::Signature,
+            ContainerName::from_text("key").unwrap(),
+            Default::default()
+        )
+        .unwrap_err()
+        .kind,
+        ErrorKind::SecurityStatusNotSatisfied
+    );
+    let management = PivAccessContext::management_authorized(&p).unwrap();
+    let mut write = set_container_name_in_context(
+        &management,
+        ContainerNameReference::Attestation,
+        ContainerName::from_text("K").unwrap(),
+        Default::default(),
+    )
+    .unwrap();
+    let mut clear = set_container_name_in_context(
+        &management,
+        Slot::Signature,
+        ContainerName::from_text("").unwrap(),
+        Default::default(),
+    )
+    .unwrap();
+    let mut read = read_container_name_in_context(
+        &selected,
+        ContainerNameReference::Attestation,
+        Default::default(),
+    )
+    .unwrap();
+    drop(p);
+    drop(selected);
+    drop(management);
+    assert_eq!(write.start().unwrap(), Step::Exchange);
+    assert_eq!(write.command().unwrap().as_bytes(), hex("00f501f9024b00"));
+    assert_eq!(
+        write.advance(&hex("019000")).unwrap_err().kind,
+        ErrorKind::InvalidResponse
+    );
+    assert!(write.command().is_err());
+    assert_eq!(clear.start().unwrap(), Step::Exchange);
+    assert_eq!(clear.command().unwrap().as_bytes(), hex("00f5019c00"));
+    assert!(clear.advance(&hex("6c10")).is_err());
+    assert!(clear.command().is_err());
+    assert_eq!(read.start().unwrap(), Step::Exchange);
+    assert_eq!(read.command().unwrap().as_bytes(), hex("00f500f900"));
+    let error = read.advance(&hex("6a88")).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::NotFound);
+    assert!(read.result().is_err());
 }

@@ -3,6 +3,40 @@ use crate::*;
 use canokey_compat::AlgorithmConfig;
 use canokey_protocol::{ApduHeader, ExpectedLength};
 
+/// Physical reference accepted by the container-name command. Attestation naming
+/// does not make F9 an ordinary key-generation, signing or enumeration slot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContainerNameReference {
+    /// An ordinary PIV key slot.
+    Key(Slot),
+    /// The attestation key, physical reference F9.
+    Attestation,
+}
+impl From<Slot> for ContainerNameReference {
+    fn from(slot: Slot) -> Self {
+        Self::Key(slot)
+    }
+}
+impl ContainerNameReference {
+    /// Return the physical PIV reference for F5.
+    pub fn reference(self) -> u8 {
+        match self {
+            Self::Key(slot) => slot.reference(),
+            Self::Attestation => 0xf9,
+        }
+    }
+    fn check(self, profile: &DeviceProfile) -> Result<(), Error> {
+        checked(
+            profile,
+            Capability::ContainerNames,
+            match self {
+                Self::Key(slot) => Some(slot),
+                Self::Attestation => None,
+            },
+        )
+    }
+}
+
 /// Validated container name: at most 78 UTF-16LE bytes, no NUL/unpaired surrogate.
 /// Empty names clear the per-slot attribute; absent keys remain status errors.
 #[derive(Debug)]
@@ -73,11 +107,11 @@ fn command(ins: u8, p1: u8, p2: u8, data: SecretBytes, read: bool) -> LogicalCom
     c.correct_le = read;
     c
 }
-/// Read an ordinary key slot's container name. A zero-byte reply means no name;
+/// Read an ordinary or attestation key's container name. A zero-byte reply means no name;
 /// missing keys remain NotFound. Malformed UTF-16 or oversized responses fail.
 pub fn read_container_name(
     profile: &DeviceProfile,
-    slot: Slot,
+    slot: impl Into<ContainerNameReference>,
     access: Access,
     options: OperationOptions,
 ) -> Result<Operation<ContainerName>, Error> {
@@ -86,10 +120,11 @@ pub fn read_container_name(
 }
 pub(crate) fn prepare_read_name(
     profile: &DeviceProfile,
-    slot: Slot,
+    slot: impl Into<ContainerNameReference>,
     options: OperationOptions,
 ) -> Result<Sequence<ContainerName>, Error> {
-    checked(profile, Capability::ContainerNames, Some(slot))?;
+    let slot = slot.into();
+    slot.check(profile)?;
     access::prepare(
         command(0xf5, 0, slot.reference(), SecretBytes::default(), true),
         options,
@@ -104,7 +139,7 @@ pub(crate) fn prepare_read_name(
 /// cross-slot uniqueness and existing-key requirements; no local cache is changed.
 pub fn set_container_name(
     profile: &DeviceProfile,
-    slot: Slot,
+    slot: impl Into<ContainerNameReference>,
     name: ContainerName,
     access: Access,
     options: OperationOptions,
@@ -115,16 +150,19 @@ pub fn set_container_name(
 }
 pub(crate) fn prepare_set_name(
     profile: &DeviceProfile,
-    slot: Slot,
+    slot: impl Into<ContainerNameReference>,
     name: ContainerName,
     options: OperationOptions,
 ) -> Result<Sequence<MutationResult>, Error> {
-    checked(profile, Capability::ContainerNames, Some(slot))?;
-    access::prepare(
-        command(0xf5, 1, slot.reference(), name.0, false),
-        options,
-        write::mutation,
-    )
+    let slot = slot.into();
+    slot.check(profile)?;
+    let mut target = command(0xf5, 1, slot.reference(), name.0, false);
+    if target.data.is_empty() {
+        // Keep the five-byte F5 clear form. It is still a mutation: a 6C
+        // response must not authorize Le correction or replay.
+        target.le = ExpectedLength::Exact(256);
+    }
+    access::prepare(target, options, write::mutation)
 }
 /// Move an ordinary key (including its name) to an empty slot. Certificates stay
 /// in place. Requires explicit management access; invalidate both key caches even

@@ -351,6 +351,13 @@ these boundaries. Package reuse does not establish device support.
 
 ## Bindings
 
+Container names use `ContainerNameReference`: ordinary key slots or attestation
+reference F9. This does not widen ordinary key-operation slots. Name reads and
+writes have selected-context factories; writes require existing management
+authorization and never SELECT or retry. Name clearing uses the five-byte F5
+form without enabling 6C replay. The pure C name validator supports caller-side
+preflight before card access; UTF-16 validation remains in the applet crate.
+
 The C ABI exposes `cnk_profile_t`, `cnk_piv_context_t`, and `cnk_operation_t`
 opaque handles. Inputs are copied versioned descriptors; errors are caller-owned
 POD; results use query-size/copy. A selected PIV context copies its profile and

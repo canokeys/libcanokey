@@ -1,6 +1,42 @@
 //! C factories for PIV configuration, names, directory and key lifecycle.
 use super::*;
 use piv_mutation::{access, slot};
+pub(super) fn name_reference(value: u32) -> Result<piv::ContainerNameReference, u32> {
+    if value == 0xf9 {
+        Ok(piv::ContainerNameReference::Attestation)
+    } else {
+        slot(value).map(piv::ContainerNameReference::Key)
+    }
+}
+/// Validate copied UTF-16LE name bytes without a profile, credential or card call.
+/// Empty input clears a name; lengths over 78, odd lengths, NUL and unpaired
+/// surrogates are rejected. No handle or input pointer survives the call.
+/// # Safety
+/// data must cover len readable bytes; NULL requires zero length. Optional error
+/// must be aligned/writable with initialized struct_size and must not alias data.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_container_name_validate(
+    data: *const u8,
+    len: usize,
+    error: *mut CnkError,
+) -> u32 {
+    guard(|| {
+        if let Err(code) = clear_error(error) {
+            return code;
+        }
+        if len > 78 {
+            return ARG;
+        }
+        let input = match bytes(data, len) {
+            Ok(input) => input,
+            Err(code) => return code,
+        };
+        match piv::ContainerName::from_utf16le(input) {
+            Ok(_) => OK,
+            Err(e) => failure(e, error),
+        }
+    })
+}
 /// Read the compact directory; original bytes and typed indexed entries are available.
 /// # Safety
 /// Follow the crate pointer/aliasing contract. profile must be live/non-NULL;
@@ -41,7 +77,7 @@ pub unsafe extern "C" fn cnk_piv_read_container_name_new(
     create(out, error, || {
         piv::read_container_name(
             &profile.as_ref().ok_or(ARG)?.0,
-            slot(reference)?,
+            name_reference(reference)?,
             access(auth, error)?,
             options(opts)?,
         )
@@ -71,7 +107,7 @@ pub unsafe extern "C" fn cnk_piv_set_container_name_new(
         }
         piv::set_container_name(
             &profile.as_ref().ok_or(ARG)?.0,
-            slot(reference)?,
+            name_reference(reference)?,
             piv::ContainerName::from_utf16le(bytes(data, len)?).map_err(|e| failure(e, error))?,
             access(auth, error)?,
             options(opts)?,

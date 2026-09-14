@@ -176,6 +176,26 @@ pub fn read_object_in_context(
     super::operation_from_sequence(&context.profile, sequence, options)
 }
 
+/// Set or clear a container name in the already authenticated transaction.
+/// The caller retains the transaction and management reservation until completion;
+/// this operation never SELECTs, authenticates, retries or updates a host cache.
+///
+/// # Errors
+/// SecurityStatusNotSatisfied rejects a context without management authorization.
+/// Profile/feature/slot or command-limit failures occur before I/O. During execution,
+/// NotFound means an absent key; firmware uniqueness/status failures are terminal.
+/// A lost response may follow a committed write and requires cache invalidation.
+pub fn set_container_name_in_context(
+    context: &PivAccessContext,
+    slot: impl Into<super::ContainerNameReference>,
+    name: super::ContainerName,
+    options: OperationOptions,
+) -> Result<Operation<super::MutationResult>, Error> {
+    context.require_management()?;
+    let sequence = super::configuration::prepare_set_name(&context.profile, slot, name, options)?;
+    super::operation_from_sequence(&context.profile, sequence, options)
+}
+
 /// Read the PIV metadata directory in the caller's selected transaction.
 ///
 /// # Errors
@@ -201,7 +221,7 @@ pub fn read_metadata_directory_in_context(
 /// conversation-limit errors remain terminal.
 pub fn read_container_name_in_context(
     context: &PivAccessContext,
-    slot: Slot,
+    slot: impl Into<super::ContainerNameReference>,
     options: OperationOptions,
 ) -> Result<Operation<super::ContainerName>, Error> {
     context.require_selected()?;
