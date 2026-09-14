@@ -1,7 +1,8 @@
 //! Caller-owned PIV transaction contexts.
 use crate::{
-    Algorithm, Certificate, DeviceProfile, Error, ErrorKind, Metadata, MetadataReference, ObjectId,
-    Operation, OperationOptions, SecretBytes, SignInput, Signature, Slot, StreamingSignInput,
+    Algorithm, Certificate, DeviceProfile, Error, ErrorKind, KeyParameters, Metadata,
+    MetadataReference, ObjectId, Operation, OperationOptions, PrivateKeyMaterial, SecretBytes,
+    SignInput, Signature, Slot, StreamingSignInput,
 };
 use canokey_compat::Capability;
 
@@ -189,6 +190,30 @@ pub fn delete_certificate_in_context(
 ) -> Result<Operation<super::MutationResult>, Error> {
     context.require_management()?;
     let sequence = super::write::prepare_delete_certificate(&context.profile, slot, options)?;
+    super::operation_from_sequence(&context.profile, sequence, options)
+}
+
+/// Generate a PIV key after management authorization in the current transaction.
+pub fn generate_key_in_context(
+    context: &PivAccessContext,
+    parameters: KeyParameters,
+    options: OperationOptions,
+) -> Result<Operation<super::PublicKey>, Error> {
+    context.require_management()?;
+    let sequence = super::keys::prepare_generate_key(&context.profile, parameters, options)?;
+    super::operation_from_sequence(&context.profile, sequence, options)
+}
+
+/// Import PIV private material after management authorization in the current transaction.
+pub fn import_key_in_context(
+    context: &PivAccessContext,
+    parameters: KeyParameters,
+    material: PrivateKeyMaterial,
+    options: OperationOptions,
+) -> Result<Operation<super::MutationResult>, Error> {
+    context.require_management()?;
+    let sequence =
+        super::keys::prepare_import_key(&context.profile, parameters, material, options)?;
     super::operation_from_sequence(&context.profile, sequence, options)
 }
 

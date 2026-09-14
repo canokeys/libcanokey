@@ -1,6 +1,6 @@
 //! C ABI for caller-owned selected PIV transaction contexts.
 use super::*;
-use crate::piv_keys::{algorithm, piv_input};
+use crate::piv_keys::{algorithm, material, parameters, piv_input};
 use crate::piv_mutation::slot;
 
 /// Opaque context copied from a caller-owned profile and authorization state.
@@ -365,5 +365,47 @@ pub unsafe extern "C" fn cnk_piv_delete_certificate_in_context_new(
         piv::delete_certificate_in_context(&context?.0, slot(slot_reference)?, options(opts)?)
             .map(Inner::Mutation)
             .map_err(|e| failure(e, error))
+    })
+}
+
+/// Construct management-authorized key generation in the current transaction.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_generate_key_in_context_new(
+    context: *const CnkPivContext,
+    params: *const CnkKeyParameters,
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        let context = context_ref(context)?;
+        piv::generate_key_in_context(&context.0, parameters(params)?, options(opts)?)
+            .map(Inner::PublicKey)
+            .map_err(|e| failure(e, error))
+    })
+}
+
+/// Construct management-authorized key import in the current transaction.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_import_key_in_context_new(
+    context: *const CnkPivContext,
+    params: *const CnkKeyParameters,
+    components: *const CnkBytes,
+    count: usize,
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        let context = context_ref(context)?;
+        let params = parameters(params)?;
+        piv::import_key_in_context(
+            &context.0,
+            params,
+            material(params.algorithm, components, count, error)?,
+            options(opts)?,
+        )
+        .map(Inner::Mutation)
+        .map_err(|e| failure(e, error))
     })
 }
