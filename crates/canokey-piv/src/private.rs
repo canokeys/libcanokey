@@ -165,7 +165,9 @@ fn command(
 }
 fn reply(response: ResponseData, limit: usize) -> Result<SecretBytes, Error> {
     response.ensure_success(Phase::Command)?;
-    let mut reader = TlvReader::new(
+    // PIV GA uses definite BER; firmware may encode sub-256 lengths as 82 00 xx.
+    // The EC signature inside this container is still validated as strict DER.
+    let mut reader = TlvReader::new_ber(
         response.data.as_bytes(),
         TlvLimits {
             max_value_bytes: limit,

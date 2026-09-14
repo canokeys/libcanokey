@@ -575,3 +575,48 @@ fn raw_object_compatibility_preserves_read_and_writes_one_wrapper() {
         .is_err());
     }
 }
+
+#[test]
+fn p521_general_authenticate_accepts_definite_ber_containers() {
+    let context = PivAccessContext::pin_verified(&profile("3.1.0")).unwrap();
+    let mut raw = vec![0x42; 132];
+    raw[0] = 1;
+    raw[66] = 1;
+    let der = Signature::from_p1363(Algorithm::EccP521, &raw)
+        .unwrap()
+        .to_der()
+        .unwrap();
+    let mut response = vec![
+        0x7c,
+        0x82,
+        0,
+        (der.len() + 4) as u8,
+        0x82,
+        0x82,
+        0,
+        der.len() as u8,
+    ];
+    response.extend(der);
+    response.extend([0x90, 0]);
+    let mut op = sign_in_context(
+        &context,
+        Slot::Signature,
+        Algorithm::EccP521,
+        SignInput::Digest(SecretBytes::new(vec![0x42; 32])),
+        Default::default(),
+    )
+    .unwrap();
+    op.start().unwrap();
+    op.advance(&response).unwrap();
+    assert_eq!(op.take_result().unwrap().to_p1363().unwrap(), raw);
+    let mut op = sign_in_context(
+        &context,
+        Slot::Signature,
+        Algorithm::EccP521,
+        SignInput::Digest(SecretBytes::new(vec![0x42; 32])),
+        Default::default(),
+    )
+    .unwrap();
+    op.start().unwrap();
+    assert!(op.advance(&hex("7c8082010100009000")).is_err());
+}
