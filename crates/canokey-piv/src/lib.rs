@@ -433,9 +433,20 @@ fn make<T: 'static>(
     )
 }
 pub(crate) fn operation_from_sequence<T: 'static>(
-    sequence: Sequence<T>,
+    profile: &DeviceProfile,
+    mut sequence: Sequence<T>,
     options: OperationOptions,
 ) -> Result<Operation<T>, Error> {
+    if profile.legacy_explicit_le() {
+        for request in &mut sequence.pending {
+            if request.command.le == canokey_protocol::ExpectedLength::Absent {
+                request.command.le = canokey_protocol::ExpectedLength::Exact(256);
+            }
+        }
+    }
+    for request in &sequence.pending {
+        canokey_protocol::operation::validate_command(&request.command, options)?;
+    }
     Operation::from_machine(sequence, options)
 }
 fn request(command: LogicalCommand, phase: Phase, reference: Option<SecretReference>) -> Request {

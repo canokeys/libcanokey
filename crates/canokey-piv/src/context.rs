@@ -89,7 +89,7 @@ pub fn get_metadata_in_context(
 ) -> Result<Operation<Metadata>, Error> {
     context.require_selected()?;
     let sequence = super::metadata::prepare_get_metadata(&context.profile, reference, options)?;
-    super::operation_from_sequence(sequence, options)
+    super::operation_from_sequence(&context.profile, sequence, options)
 }
 
 /// Read and decode a certificate without SELECT or authentication.
@@ -106,7 +106,7 @@ pub fn read_certificate_in_context(
         options,
         move |data| Certificate::from_object(data.as_bytes(), limit),
     )?;
-    super::operation_from_sequence(sequence, options)
+    super::operation_from_sequence(&context.profile, sequence, options)
 }
 
 /// Sign using the caller's existing PIV selection and authorization boundary.
@@ -121,5 +121,5 @@ pub fn sign_in_context(
 ) -> Result<Operation<Signature>, Error> {
     context.require_selected()?;
     let sequence = super::private::prepare_sign(&context.profile, slot, algorithm, input, options)?;
-    super::operation_from_sequence(sequence, options)
+    super::operation_from_sequence(&context.profile, sequence, options)
 }

@@ -20,6 +20,9 @@ pub unsafe extern "C" fn cnk_piv_context_new(
             return ARG;
         }
         *out = ptr::null_mut();
+        if let Err(code) = clear_error(error) {
+            return code;
+        }
         let state = match state {
             1 => piv::PivAccessState::Selected,
             2 => piv::PivAccessState::PinVerified,
