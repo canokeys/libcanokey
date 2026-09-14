@@ -109,6 +109,17 @@ pub fn read_certificate_in_context(
     super::operation_from_sequence(&context.profile, sequence, options)
 }
 
+/// Read a PIV data object in the caller's selected transaction.
+pub fn read_object_in_context(
+    context: &PivAccessContext,
+    id: ObjectId,
+    options: OperationOptions,
+) -> Result<Operation<SecretBytes>, Error> {
+    context.require_selected()?;
+    let sequence = super::prepare_read_object_with(&context.profile, id, options, Ok)?;
+    super::operation_from_sequence(&context.profile, sequence, options)
+}
+
 /// Sign using the caller's existing PIV selection and authorization boundary.
 /// PIN policy is intentionally enforced by the caller after metadata discovery;
 /// this operation never performs an implicit VERIFY or management login.

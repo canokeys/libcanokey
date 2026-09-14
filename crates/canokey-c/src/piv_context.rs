@@ -251,3 +251,23 @@ pub unsafe extern "C" fn cnk_piv_decapsulate_in_context_new(
         .map_err(|e| failure(e, error))
     })
 }
+
+/// Construct a PIV data-object read without SELECT or implicit authentication.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_read_object_in_context_new(
+    context: *const CnkPivContext,
+    tag: *const u8,
+    tag_len: usize,
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        let context = context_ref(context)?;
+        let options = options(opts)?;
+        let id = piv::ObjectId::from_bytes(bytes(tag, tag_len)?).map_err(|e| failure(e, error))?;
+        piv::read_object_in_context(&context.0, id, options)
+            .map(Inner::Object)
+            .map_err(|e| failure(e, error))
+    })
+}

@@ -129,6 +129,7 @@ cnk_status_t cnk_piv_sign_streaming_in_context_new(const cnk_piv_context_t *,uin
 cnk_status_t cnk_piv_decrypt_in_context_new(const cnk_piv_context_t *,uint32_t slot,uint32_t algorithm,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_derive_in_context_new(const cnk_piv_context_t *,uint32_t slot,uint32_t algorithm,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_decapsulate_in_context_new(const cnk_piv_context_t *,uint32_t slot,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_piv_read_object_in_context_new(const cnk_piv_context_t *,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_read_algorithm_config_new(const cnk_profile_t *,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_sign_new(const cnk_profile_t *,uint32_t slot,uint32_t algorithm,uint32_t kind,const uint8_t *,size_t,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 /* Explicit full-message signing. ML-DSA has empty context; only SM2 accepts
