@@ -1,7 +1,7 @@
 //! C ABI for caller-owned selected PIV transaction contexts.
 use super::*;
 use crate::piv_keys::{algorithm, material, parameters, piv_input};
-use crate::piv_mutation::slot;
+use crate::piv_mutation::{management, slot};
 
 /// Opaque context copied from a caller-owned profile and authorization state.
 pub struct CnkPivContext(pub piv::PivAccessContext);
@@ -406,6 +406,27 @@ pub unsafe extern "C" fn cnk_piv_import_key_in_context_new(
             options(opts)?,
         )
         .map(Inner::Mutation)
+        .map_err(|e| failure(e, error))
+    })
+}
+
+/// Construct management-key authentication in an already selected transaction.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_authenticate_management_in_context_new(
+    context: *const CnkPivContext,
+    auth: *const CnkManagement,
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        let context = context_ref(context)?;
+        piv::authenticate_management_in_context(
+            &context.0,
+            management(auth, error)?,
+            options(opts)?,
+        )
+        .map(Inner::Unit)
         .map_err(|e| failure(e, error))
     })
 }

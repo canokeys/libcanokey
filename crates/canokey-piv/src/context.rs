@@ -1,4 +1,5 @@
 //! Caller-owned PIV transaction contexts.
+use super::management::{ManagementAuthentication, ManagementMachine};
 use crate::{
     Algorithm, Certificate, DeviceProfile, Error, ErrorKind, KeyParameters, Metadata,
     MetadataReference, ObjectId, Operation, OperationOptions, PrivateKeyMaterial, SecretBytes,
@@ -215,6 +216,17 @@ pub fn import_key_in_context(
     let sequence =
         super::keys::prepare_import_key(&context.profile, parameters, material, options)?;
     super::operation_from_sequence(&context.profile, sequence, options)
+}
+
+/// Authenticate the management key in the caller's selected transaction.
+pub fn authenticate_management_in_context(
+    context: &PivAccessContext,
+    auth: ManagementAuthentication,
+    options: OperationOptions,
+) -> Result<Operation<()>, Error> {
+    context.require_selected()?;
+    auth.validate(&context.profile, options)?;
+    super::operation_from_machine(ManagementMachine::new(auth), options)
 }
 
 /// Sign using the caller's existing PIV selection and authorization boundary.
