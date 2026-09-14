@@ -53,8 +53,9 @@ pub use context::{
     authenticate_management_in_context, decapsulate_in_context, decrypt_in_context,
     delete_certificate_in_context, derive_in_context, generate_key_in_context,
     get_metadata_in_context, import_key_in_context, read_certificate_in_context,
-    read_container_name_in_context, read_metadata_directory_in_context, read_object_in_context,
-    sign_in_context, sign_streaming_in_context, write_certificate_in_context,
+    read_container_name_in_context, read_metadata_directory_in_context,
+    read_object_container_in_context, read_object_in_context, sign_in_context,
+    sign_streaming_in_context, write_certificate_in_context, write_object_container_in_context,
     write_object_in_context, PivAccessContext, PivAccessState,
 };
 /// SM2 agreement with explicitly pre-exchanged peer keys.
@@ -707,6 +708,16 @@ pub(crate) fn prepare_read_object_with<T: 'static>(
     options: OperationOptions,
     parse: impl FnOnce(ObjectData) -> Result<T, Error> + Send + 'static,
 ) -> Result<Sequence<T>, Error> {
+    prepare_read_object_format(profile, id, options, false, parse)
+}
+
+pub(crate) fn prepare_read_object_format<T: 'static>(
+    profile: &DeviceProfile,
+    id: ObjectId,
+    options: OperationOptions,
+    preserve_container: bool,
+    parse: impl FnOnce(ObjectData) -> Result<T, Error> + Send + 'static,
+) -> Result<Sequence<T>, Error> {
     require(profile)?;
     let legacy = profile.legacy_unwrapped_objects();
     let limit = options.limits.max_total_response_bytes;
@@ -734,6 +745,10 @@ pub(crate) fn prepare_read_object_with<T: 'static>(
         {
             return Err(Error::new(ErrorKind::InvalidResponse));
         }
-        parse(SecretBytes::new(tlv.value.to_vec()))
+        if preserve_container {
+            parse(r.data)
+        } else {
+            parse(SecretBytes::new(tlv.value.to_vec()))
+        }
     })
 }

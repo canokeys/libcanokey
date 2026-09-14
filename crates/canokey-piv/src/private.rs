@@ -275,7 +275,7 @@ pub(crate) fn parse_signature(
 /// or retry is implemented by this library.
 ///
 /// # Errors
-/// Requires an RSA algorithm and key-management/retired slot. Wrong input/result
+/// Requires an RSA algorithm and an evidenced ordinary asymmetric slot. Wrong input/result
 /// lengths, unavailable capabilities and card failures return typed errors.
 pub fn decrypt(
     profile: &DeviceProfile,
@@ -296,7 +296,6 @@ pub(crate) fn prepare_decrypt(
     ciphertext: SecretBytes,
     options: OperationOptions,
 ) -> Result<Sequence<SecretBytes>, Error> {
-    require_agreement_slot(slot)?;
     let width = rsa_len(algorithm).ok_or_else(|| Error::new(ErrorKind::UnsupportedAlgorithm))?;
     if ciphertext.len() != width {
         return Err(Error::new(ErrorKind::InvalidArgument));
@@ -317,20 +316,14 @@ pub(crate) fn prepare_decrypt(
         Ok(bytes)
     })
 }
-fn require_agreement_slot(slot: Slot) -> Result<(), Error> {
-    if matches!(slot, Slot::KeyManagement | Slot::Retired(_)) {
-        Ok(())
-    } else {
-        Err(Error::new(ErrorKind::InvalidArgument))
-    }
-}
+
 /// Derive a raw ECDH/X25519 shared secret; no KDF is applied.
 /// P-256/P-384/P-521/secp256k1 peers must be uncompressed SEC1 points on the named
 /// curve, checked with RustCrypto. X25519 takes exactly 32 RFC 7748 bytes. The owned result is
 /// wiped on drop; an all-zero X25519 shared secret is rejected.
 ///
 /// # Errors
-/// Requires a key-management/retired slot, evidenced algorithm and a valid peer.
+/// Requires an evidenced ordinary asymmetric slot, algorithm and a valid peer.
 /// Wrong result lengths/encodings and card statuses fail without replay.
 /// SM2 uses a separate agreement protocol and is not accepted by this factory.
 pub fn derive(
@@ -352,7 +345,6 @@ pub(crate) fn prepare_derive(
     peer: Vec<u8>,
     options: OperationOptions,
 ) -> Result<Sequence<SecretBytes>, Error> {
-    require_agreement_slot(slot)?;
     if peer.len() > options.limits.max_input_bytes {
         return Err(Error::new(ErrorKind::LimitExceeded));
     }
@@ -420,7 +412,7 @@ pub(crate) fn prepare_derive(
 /// an invalid ciphertext; successful completion does not authenticate its sender.
 ///
 /// # Errors
-/// Requires a key-management/retired slot and an observed, enabled ML-KEM-768 ID
+/// Requires an ordinary asymmetric slot and an observed, enabled ML-KEM-768 ID
 /// on evidenced firmware. Wrong lengths, unavailable capabilities, input/response
 /// budgets and card errors fail explicitly. Chaining never repeats authentication
 /// or retries a failed private operation.
@@ -441,7 +433,6 @@ pub(crate) fn prepare_decapsulate(
     ciphertext: SecretBytes,
     options: OperationOptions,
 ) -> Result<Sequence<SecretBytes>, Error> {
-    require_agreement_slot(slot)?;
     if ciphertext.len() != 1088 {
         return Err(Error::new(ErrorKind::InvalidArgument));
     }

@@ -141,7 +141,7 @@ fn decapsulation_enforces_evidence_and_budgets_before_io() {
         Access::None,
         Default::default()
     )
-    .is_err());
+    .is_ok());
     let mut options = OperationOptions::default();
     options.limits.max_input_bytes = 1097; // Ciphertext fits, complete template does not.
     assert_eq!(

@@ -499,3 +499,79 @@ fn sm2_signature_encoding_follows_firmware_and_preserves_original_bytes() {
         SignatureEncoding::Der
     );
 }
+
+#[test]
+fn agreement_and_rsa_private_operations_accept_all_evidenced_key_slots() {
+    let p = profile("3.1.0");
+    for slot in [
+        Slot::Authentication,
+        Slot::Signature,
+        Slot::KeyManagement,
+        Slot::CardAuthentication,
+    ] {
+        let context = PivAccessContext::pin_verified(&p).unwrap();
+        let mut agreement = derive_in_context(
+            &context,
+            slot,
+            Algorithm::EccP256,
+            hex(P256_POINT),
+            Default::default(),
+        )
+        .unwrap();
+        agreement.start().unwrap();
+        assert_eq!(
+            &agreement.command().unwrap().as_bytes()[..4],
+            &[0, 0x87, 0x11, slot.reference()]
+        );
+        let secret = [0x42; 32];
+        agreement
+            .advance(&response(&tlv(&[0x7c], &tlv(&[0x82], &secret))))
+            .unwrap();
+        assert_eq!(agreement.take_result().unwrap().as_bytes(), secret);
+        let mut decrypt = decrypt_in_context(
+            &context,
+            slot,
+            Algorithm::Rsa2048,
+            SecretBytes::new(vec![1; 256]),
+            Default::default(),
+        )
+        .unwrap();
+        decrypt.start().unwrap();
+        assert_eq!(
+            &decrypt.command().unwrap().as_bytes()[..4],
+            &[0x10, 0x87, 7, slot.reference()]
+        );
+    }
+}
+
+#[test]
+fn raw_object_compatibility_preserves_read_and_writes_one_wrapper() {
+    let context = PivAccessContext::management_authorized(&profile("3.1.0")).unwrap();
+    let id = ObjectId::from_bytes(&[0x5f, 0xc1, 9]).unwrap();
+    let bytes = hex("5306800401010102");
+    let mut read = read_object_container_in_context(&context, id, Default::default()).unwrap();
+    read.start().unwrap();
+    read.advance(&response(&bytes)).unwrap();
+    assert_eq!(read.take_result().unwrap().as_bytes(), bytes);
+    let mut write = write_object_container_in_context(
+        &context,
+        id,
+        SecretBytes::new(bytes.clone()),
+        Default::default(),
+    )
+    .unwrap();
+    write.start().unwrap();
+    assert_eq!(
+        write.command().unwrap().as_bytes(),
+        hex("00db3fff0d5c035fc1095306800401010102")
+    );
+    for malformed in [hex("5301005300"), hex("7000"), hex("538201"), vec![]] {
+        assert!(write_object_container_in_context(
+            &context,
+            id,
+            SecretBytes::new(malformed),
+            Default::default()
+        )
+        .is_err());
+    }
+}

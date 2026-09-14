@@ -425,3 +425,62 @@ pub fn decapsulate_in_context(
         super::private::prepare_decapsulate(&context.profile, slot, ciphertext, options)?;
     super::operation_from_sequence(&context.profile, sequence, options)
 }
+
+/// Read a validated PIV object while retaining its complete 53/7E container.
+/// This compatibility form preserves device bytes for existing raw-object APIs;
+/// new value consumers should use [`read_object_in_context`]. The result owns and
+/// zeroizes its bytes and no SELECT or authentication is inserted.
+///
+/// # Errors
+/// Profile, options, status, framing and response-limit errors are the same as
+/// [`read_object_in_context`]. Malformed containers never become successful reads.
+pub fn read_object_container_in_context(
+    context: &PivAccessContext,
+    id: ObjectId,
+    options: OperationOptions,
+) -> Result<Operation<SecretBytes>, Error> {
+    context.require_selected()?;
+    let sequence = super::prepare_read_object_format(&context.profile, id, options, true, Ok)?;
+    super::operation_from_sequence(&context.profile, sequence, options)
+}
+
+/// Write one complete 53 object container in a management-authorized transaction.
+/// Owns and validates the container, then emits exactly one 53 wrapper on PUT DATA.
+/// This compatibility form is for existing APIs passing framed PIV data, including
+/// certificates. Value consumers should use [`write_object_in_context`].
+///
+/// # Errors
+/// SecurityStatusNotSatisfied rejects missing management authorization. Invalid
+/// framing, a wrong outer tag, trailing fields, and input limits reject construction.
+/// Profile/options/card errors and uncertain-write behavior match [`write_object_in_context`].
+pub fn write_object_container_in_context(
+    context: &PivAccessContext,
+    id: ObjectId,
+    container: SecretBytes,
+    options: OperationOptions,
+) -> Result<Operation<super::MutationResult>, Error> {
+    context.require_management()?;
+    if container.len() > options.limits.max_input_bytes {
+        return Err(Error::new(ErrorKind::LimitExceeded));
+    }
+    let mut reader = canokey_protocol::tlv::TlvReader::new(
+        container.as_bytes(),
+        canokey_protocol::tlv::TlvLimits {
+            max_value_bytes: options.limits.max_input_bytes,
+            ..Default::default()
+        },
+    );
+    let value = reader
+        .next()?
+        .ok_or_else(|| Error::new(ErrorKind::InvalidArgument))?;
+    if value.tag.value() != 0x53 || reader.next()?.is_some() {
+        return Err(Error::new(ErrorKind::InvalidArgument));
+    }
+    let sequence = super::write::prepare_write_object(
+        &context.profile,
+        id,
+        SecretBytes::new(value.value.to_vec()),
+        options,
+    )?;
+    super::operation_from_sequence(&context.profile, sequence, options)
+}

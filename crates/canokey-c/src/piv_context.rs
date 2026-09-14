@@ -591,3 +591,73 @@ pub unsafe extern "C" fn cnk_piv_authenticate_management_in_context_new(
         .map_err(|e| failure(e, error))
     })
 }
+
+/// Construct a raw PIV object read retaining the validated 53/7E wrapper.
+/// No SELECT or implicit authentication is inserted.
+///
+/// # Safety
+/// `context` must be a live handle from `cnk_piv_context_new`, with no concurrent
+/// mutation or free. `out` must be non-NULL, aligned and writable. Optional
+/// `opts` must be readable; optional `error` must be writable with initialized
+/// `struct_size`. Versioned structs must cover their declared supported prefix.
+/// Output storage must not overlap inputs or handles. Inputs are borrowed only
+/// for this call and copied into the returned operation; free that handle once.
+/// `tag` must cover `tag_len` readable bytes; NULL requires zero length.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_read_object_container_in_context_new(
+    context: *const CnkPivContext,
+    tag: *const u8,
+    tag_len: usize,
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        let context = context_ref(context)?;
+        let options = options(opts)?;
+        let id = piv::ObjectId::from_bytes(bytes(tag, tag_len)?).map_err(|e| failure(e, error))?;
+        piv::read_object_container_in_context(&context.0, id, options)
+            .map(Inner::Object)
+            .map_err(|e| failure(e, error))
+    })
+}
+
+/// Construct a management-authorized write of an already framed 53 object.
+///
+/// # Safety
+/// `context` must be a live handle from `cnk_piv_context_new`, with no concurrent
+/// mutation or free. `out` must be non-NULL, aligned and writable. Optional
+/// `opts` must be readable; optional `error` must be writable with initialized
+/// `struct_size`. Versioned structs must cover their declared supported prefix.
+/// Output storage must not overlap inputs or handles. Inputs are borrowed only
+/// for this call and copied into the returned operation; free that handle once.
+/// `tag` and `data` must cover their declared readable byte ranges; each NULL
+/// pointer requires zero length. The data includes exactly one complete outer 53 container.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_write_object_container_in_context_new(
+    context: *const CnkPivContext,
+    tag: *const u8,
+    tag_len: usize,
+    data: *const u8,
+    data_len: usize,
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        let context = context_ref(context)?;
+        let options = options(opts)?;
+        if data_len > options.limits.max_input_bytes {
+            return Err(failure(Error::new(ErrorKind::LimitExceeded), error));
+        }
+        let id = piv::ObjectId::from_bytes(bytes(tag, tag_len)?).map_err(|e| failure(e, error))?;
+        piv::write_object_container_in_context(
+            &context.0,
+            id,
+            piv_input(data, data_len, options, error)?,
+            options,
+        )
+        .map(Inner::Mutation)
+        .map_err(|e| failure(e, error))
+    })
+}

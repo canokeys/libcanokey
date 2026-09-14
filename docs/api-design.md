@@ -380,3 +380,16 @@ hold a private enum of concrete Operation types and Option for idempotent close,
 but must not duplicate protocol state. Dart owns async execution; Python bindings
 would follow the same model with a caller-owned synchronous loop. Binding examples:
 [Console](console-integration.md), [PKCS#11](pkcs11-integration.md).
+
+CanoKey private RSA, ECDH/X25519 and ML-KEM operations may use every ordinary
+asymmetric slot evidenced by the profile. PIV slot names do not impose host
+key-usage policy; consumers such as PKCS#11/cardmod retain their own mapping and
+operation admission rules. Algorithm/peer/ciphertext validation and card PIN
+policy continue to apply, including on authentication and signature slots.
+
+For raw PIV-object compatibility APIs, selected-context container factories
+validate and preserve the complete 53/7E read response and accept one complete
+53 container for writes. Normalized value factories remain unchanged. This
+keeps ADMIN DATA/PRINTED and certificate write framing consistent without
+reintroducing TLV parsing into consumers; malformed/trailing containers fail
+before a write operation is exposed.

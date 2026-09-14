@@ -44,6 +44,13 @@ int main(void) {
   assert(cnk_piv_write_object_in_context_new(context, tag, sizeof(tag), value,
                                              sizeof(value), NULL, &op,
                                              &error) == CNK_OK);
+  cnk_operation_t *framed = NULL, *read = NULL;
+  const uint8_t container[] = {0x53, 1, 0xA5};
+  assert(cnk_piv_write_object_container_in_context_new(
+             context, tag, sizeof(tag), container, sizeof(container), NULL,
+             &framed, &error) == CNK_OK);
+  assert(cnk_piv_read_object_container_in_context_new(
+             context, tag, sizeof(tag), NULL, &read, &error) == CNK_OK);
   // All borrowed inputs and the context can disappear before execution.
   memset(value, 0, sizeof(value));
   memset(tag, 0, sizeof(tag));
@@ -61,6 +68,21 @@ int main(void) {
   assert(cnk_operation_advance(op, ok, sizeof(ok), &step, &error) == CNK_OK &&
          step == CNK_STEP_DONE);
   cnk_operation_free(op);
+  assert(cnk_operation_start(framed, &step, &error) == CNK_OK);
+  n = sizeof(command);
+  assert(cnk_operation_command(framed, command, &n) == CNK_OK &&
+         n == sizeof(expected));
+  assert(memcmp(command, expected, n) == 0);
+  cnk_operation_free(framed);
+  assert(cnk_operation_start(read, &step, &error) == CNK_OK);
+  const uint8_t object_reply[] = {0x53, 1, 0xA5, 0x90, 0};
+  assert(cnk_operation_advance(read, object_reply, sizeof(object_reply), &step,
+                               &error) == CNK_OK);
+  n = sizeof(command);
+  assert(cnk_operation_result_copy_bytes(read, command, &n) == CNK_OK &&
+         n == sizeof(container));
+  assert(memcmp(command, container, n) == 0);
+  cnk_operation_free(read);
   cnk_piv_context_free(NULL);
   return 0;
 }
