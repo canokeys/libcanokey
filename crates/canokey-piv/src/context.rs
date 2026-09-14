@@ -1,4 +1,10 @@
 //! Caller-owned PIV transaction contexts.
+//!
+//! Factories copy required profile configuration and own their inputs. They do
+//! not perform I/O during construction and their operations never SELECT or
+//! authenticate implicitly. The caller holds the selected card transaction until
+//! completion or failure. All operations retain terminal errors; dropping a
+//! context or operation performs no card cleanup and cannot roll back mutations.
 use super::management::{ManagementAuthentication, ManagementMachine};
 use crate::{
     Algorithm, Certificate, DeviceProfile, Error, ErrorKind, KeyParameters, Metadata,
@@ -35,18 +41,34 @@ pub struct PivAccessContext {
 
 impl PivAccessContext {
     /// Describe a transaction in which PIV has already been selected.
+    ///
+    /// # Errors
+    /// UnsupportedFeature or CapabilityUnknown reports a profile without known
+    /// PIV support. The declared authorization is not checked against a live card.
     pub fn selected(profile: &DeviceProfile) -> Result<Self, Error> {
         Self::from_state(profile, PivAccessState::Selected)
     }
     /// Describe a transaction after user PIN verification.
+    ///
+    /// # Errors
+    /// UnsupportedFeature or CapabilityUnknown reports a profile without known
+    /// PIV support. The declared authorization is not checked against a live card.
     pub fn pin_verified(profile: &DeviceProfile) -> Result<Self, Error> {
         Self::from_state(profile, PivAccessState::PinVerified)
     }
     /// Describe a transaction after management-key authorization.
+    ///
+    /// # Errors
+    /// UnsupportedFeature or CapabilityUnknown reports a profile without known
+    /// PIV support. The declared authorization is not checked against a live card.
     pub fn management_authorized(profile: &DeviceProfile) -> Result<Self, Error> {
         Self::from_state(profile, PivAccessState::ManagementAuthorized)
     }
     /// Describe a transaction after both required authorizations.
+    ///
+    /// # Errors
+    /// UnsupportedFeature or CapabilityUnknown reports a profile without known
+    /// PIV support. The declared authorization is not checked against a live card.
     pub fn pin_and_management_authorized(profile: &DeviceProfile) -> Result<Self, Error> {
         Self::from_state(profile, PivAccessState::PinAndManagementAuthorized)
     }
@@ -61,6 +83,10 @@ impl PivAccessContext {
     /// Construct a context from an explicit caller-declared state.
     ///
     /// This does not inspect or change the card's live authorization state.
+    ///
+    /// # Errors
+    /// UnsupportedFeature or CapabilityUnknown reports a profile without known
+    /// PIV support. The declared authorization is not checked against a live card.
     pub fn from_state(profile: &DeviceProfile, state: PivAccessState) -> Result<Self, Error> {
         profile.capability(Capability::Piv).require()?;
         Ok(Self {
@@ -94,6 +120,12 @@ impl PivAccessContext {
 }
 
 /// Read key, PIN, PUK, or management metadata without SELECT or authentication.
+///
+/// # Errors
+/// Profile/metadata capability failures preserve UnsupportedFeature versus
+/// CapabilityUnknown. Invalid options or command budgets fail at construction.
+/// During execution, absent metadata returns NotFound; malformed fields return
+/// InvalidResponse or ProtocolViolation. Card errors retain their status word.
 pub fn get_metadata_in_context(
     context: &PivAccessContext,
     reference: MetadataReference,
@@ -105,6 +137,12 @@ pub fn get_metadata_in_context(
 }
 
 /// Read and decode a certificate without SELECT or authentication.
+///
+/// # Errors
+/// UnsupportedFeature or CapabilityUnknown reports unavailable PIV support;
+/// invalid options and command limits fail at construction. During execution,
+/// NotFound denotes an absent certificate; malformed framing/gzip and unsupported
+/// certificate flags remain errors. LimitExceeded bounds decompression and responses.
 pub fn read_certificate_in_context(
     context: &PivAccessContext,
     slot: Slot,
@@ -122,6 +160,12 @@ pub fn read_certificate_in_context(
 }
 
 /// Read a PIV data object in the caller's selected transaction.
+/// Returns the normalized outer 53 value (7E for discovery), owned as secret bytes.
+///
+/// # Errors
+/// PIV profile, option validation and command encoding errors fail at construction.
+/// During execution, NotFound and SecurityStatusNotSatisfied retain card status;
+/// malformed object framing and exhausted response budgets are terminal errors.
 pub fn read_object_in_context(
     context: &PivAccessContext,
     id: ObjectId,
@@ -133,6 +177,12 @@ pub fn read_object_in_context(
 }
 
 /// Read the PIV metadata directory in the caller's selected transaction.
+///
+/// # Errors
+/// UnsupportedFeature or CapabilityUnknown reports unavailable directory support.
+/// Invalid options or command limits fail at construction. Malformed responses
+/// and exhausted response budgets fail during execution; unknown directory versions
+/// are retained without inventing decoded entries.
 pub fn read_metadata_directory_in_context(
     context: &PivAccessContext,
     options: OperationOptions,
@@ -143,6 +193,12 @@ pub fn read_metadata_directory_in_context(
 }
 
 /// Read a persisted container name in the caller's selected transaction.
+///
+/// # Errors
+/// Profile, slot and container-name capability errors, invalid options, or command
+/// limits fail at construction. NotFound denotes an absent key during execution;
+/// malformed UTF-16 and oversized names return InvalidResponse. Card status and
+/// conversation-limit errors remain terminal.
 pub fn read_container_name_in_context(
     context: &PivAccessContext,
     slot: Slot,
@@ -154,6 +210,13 @@ pub fn read_container_name_in_context(
 }
 
 /// Write a PIV data object after management authorization in the current transaction.
+/// Takes ownership of the normalized object value and adds 5C/53 framing.
+///
+/// # Errors
+/// SecurityStatusNotSatisfied means the context lacks management authorization.
+/// Profile/write capability, invalid options, and encoded-input limits are checked
+/// before execution. Card status and malformed acknowledgments fail during
+/// execution; an attempted write may persist despite failure or cancellation.
 pub fn write_object_in_context(
     context: &PivAccessContext,
     id: ObjectId,
@@ -167,6 +230,13 @@ pub fn write_object_in_context(
 }
 
 /// Write an uncompressed DER certificate after management authorization.
+/// Owns the payload and adds PIV framing without validating X.509 syntax or trust.
+///
+/// # Errors
+/// SecurityStatusNotSatisfied means management authorization is absent.
+/// InvalidArgument rejects an empty payload. UnsupportedFeature, CapabilityUnknown,
+/// invalid options and input/command limits reject construction. Execution errors
+/// may follow a committed write; dropping the operation does not roll it back.
 pub fn write_certificate_in_context(
     context: &PivAccessContext,
     slot: Slot,
@@ -184,6 +254,12 @@ pub fn write_certificate_in_context(
 }
 
 /// Delete a certificate after management authorization.
+///
+/// # Errors
+/// SecurityStatusNotSatisfied means management authorization is absent.
+/// UnsupportedFeature or CapabilityUnknown rejects unevidenced deletion support.
+/// Invalid options and command limits fail at construction; execution errors may
+/// follow a committed deletion. The associated private key is not deleted.
 pub fn delete_certificate_in_context(
     context: &PivAccessContext,
     slot: Slot,
@@ -195,6 +271,13 @@ pub fn delete_certificate_in_context(
 }
 
 /// Generate a PIV key after management authorization in the current transaction.
+///
+/// # Errors
+/// SecurityStatusNotSatisfied means management authorization is absent.
+/// UnsupportedFeature, CapabilityUnknown or UnsupportedAlgorithm rejects unsupported
+/// profile/slot/algorithm combinations. Invalid parameters, policies, options and
+/// command limits fail at construction. Card or public-key parsing errors can follow
+/// irreversible generation; no automatic rollback or retry occurs.
 pub fn generate_key_in_context(
     context: &PivAccessContext,
     parameters: KeyParameters,
@@ -206,6 +289,13 @@ pub fn generate_key_in_context(
 }
 
 /// Import PIV private material after management authorization in the current transaction.
+///
+/// # Errors
+/// SecurityStatusNotSatisfied means management authorization is absent.
+/// InvalidArgument rejects mismatched material/algorithm or invalid parameters.
+/// Profile, slot, policy and algorithm support, options and command limits are
+/// validated before execution. Card errors may follow a partial or committed import;
+/// owned secret material is dropped on every exit and no rollback is attempted.
 pub fn import_key_in_context(
     context: &PivAccessContext,
     parameters: KeyParameters,
@@ -219,6 +309,13 @@ pub fn import_key_in_context(
 }
 
 /// Authenticate the management key in the caller's selected transaction.
+///
+/// # Errors
+/// UnsupportedFeature or CapabilityUnknown reports unsupported management-key
+/// algorithms for the observed firmware. Invalid options or command budgets fail
+/// at construction. During execution, AuthenticationFailed, malformed challenges,
+/// and DeviceAuthenticationFailed (mutual mode) remain distinct errors with the
+/// management-key reference. This does not update the caller's context state.
 pub fn authenticate_management_in_context(
     context: &PivAccessContext,
     auth: ManagementAuthentication,
@@ -232,6 +329,13 @@ pub fn authenticate_management_in_context(
 /// Sign using the caller's existing PIV selection and authorization boundary.
 /// PIN policy is intentionally enforced by the caller after metadata discovery;
 /// this operation never performs an implicit VERIFY or management login.
+///
+/// # Errors
+/// Profile/slot/algorithm support, input format, options and command limits are
+/// validated at construction; incompatible inputs return InvalidArgument or
+/// UnsupportedAlgorithm. Card authorization failures and malformed signatures fail
+/// during execution. No PIN verification, implicit retry, or result publication
+/// occurs after an execution error.
 pub fn sign_in_context(
     context: &PivAccessContext,
     slot: Slot,
@@ -246,6 +350,12 @@ pub fn sign_in_context(
 
 /// Sign a complete ML-DSA, Ed25519, or SM2 message using the caller's selected
 /// transaction. This operation never performs implicit authentication.
+///
+/// # Errors
+/// Profile/slot/streaming-algorithm support, input format and options are validated
+/// at construction. InvalidArgument rejects invalid SM2 user IDs; LimitExceeded
+/// bounds the complete message and encoded command. Card authorization, malformed
+/// signature and conversation-limit errors fail during execution without replay.
 pub fn sign_streaming_in_context(
     context: &PivAccessContext,
     slot: Slot,
@@ -258,6 +368,12 @@ pub fn sign_streaming_in_context(
 }
 
 /// Perform a raw RSA private operation in the caller's selected transaction.
+///
+/// # Errors
+/// UnsupportedAlgorithm rejects non-RSA algorithms; InvalidArgument rejects a
+/// ciphertext with the wrong modulus width. Profile/slot support, options and
+/// command limits are checked before execution. Card authorization errors and
+/// malformed results fail during execution without returning partial plaintext.
 pub fn decrypt_in_context(
     context: &PivAccessContext,
     slot: Slot,
@@ -272,6 +388,12 @@ pub fn decrypt_in_context(
 }
 
 /// Derive an unprocessed ECDH/X25519 secret in the caller's selected transaction.
+///
+/// # Errors
+/// UnsupportedAlgorithm rejects algorithms without this agreement operation;
+/// InvalidArgument rejects malformed peer encodings. Profile/slot support, options
+/// and command limits are validated before execution. Card authorization failures
+/// and malformed secrets are terminal, with no partial secret publication.
 pub fn derive_in_context(
     context: &PivAccessContext,
     slot: Slot,
@@ -286,6 +408,12 @@ pub fn derive_in_context(
 }
 
 /// Decapsulate an ML-KEM-768 ciphertext in the caller's selected transaction.
+///
+/// # Errors
+/// InvalidArgument rejects ciphertexts whose size is not ML-KEM-768's expected
+/// 1088 bytes. Profile/slot/algorithm support, options and command limits fail at
+/// construction. Card authorization, malformed secrets and exhausted conversation
+/// budgets fail during execution without publishing a partial secret.
 pub fn decapsulate_in_context(
     context: &PivAccessContext,
     slot: Slot,

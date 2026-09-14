@@ -1,6 +1,6 @@
 //! C ABI for caller-owned selected PIV transaction contexts.
 use super::*;
-use crate::piv_keys::{algorithm, material, parameters, piv_input};
+use crate::piv_keys::{algorithm, material, parameters, piv_input, streaming_input};
 use crate::piv_mutation::{management, slot};
 
 /// Opaque context copied from a caller-owned profile and authorization state.
@@ -8,6 +8,13 @@ pub struct CnkPivContext(pub piv::PivAccessContext);
 
 /// Create a context without connecting, selecting, or authenticating.
 /// State values are `CNK_PIV_CONTEXT_*` from the public header.
+///
+/// # Safety
+/// `profile` must be a live handle from this library with no concurrent mutation
+/// or free. `out` must be non-NULL, aligned and writable. Optional `error` must
+/// be aligned and writable with initialized `struct_size`, covering its declared
+/// supported prefix. Outputs must not alias each other or the profile. The
+/// profile is copied during this call; free the returned context exactly once.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_piv_context_new(
     profile: *const CnkProfile,
@@ -41,6 +48,11 @@ pub unsafe extern "C" fn cnk_piv_context_new(
 }
 
 /// Free a context created by `cnk_piv_context_new`.
+///
+/// # Safety
+/// `context` must be NULL or a live handle returned by `cnk_piv_context_new`.
+/// Free it exactly once, without concurrent access. This does not end the card
+/// transaction and does not free operations already constructed from the context.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_piv_context_free(context: *mut CnkPivContext) {
     if !context.is_null() {
@@ -53,6 +65,14 @@ unsafe fn context_ref<'a>(ptr: *const CnkPivContext) -> Result<&'a CnkPivContext
 }
 
 /// Construct metadata access without SELECT or authentication.
+///
+/// # Safety
+/// `context` must be a live handle from `cnk_piv_context_new`, with no concurrent
+/// mutation or free. `out` must be non-NULL, aligned and writable. Optional
+/// `opts` must be readable; optional `error` must be writable with initialized
+/// `struct_size`. Versioned structs must cover their declared supported prefix.
+/// Output storage must not overlap inputs or handles. Inputs are borrowed only
+/// for this call and copied into the returned operation; free that handle once.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_piv_get_metadata_in_context_new(
     context: *const CnkPivContext,
@@ -77,6 +97,14 @@ pub unsafe extern "C" fn cnk_piv_get_metadata_in_context_new(
 }
 
 /// Construct certificate access without SELECT or authentication.
+///
+/// # Safety
+/// `context` must be a live handle from `cnk_piv_context_new`, with no concurrent
+/// mutation or free. `out` must be non-NULL, aligned and writable. Optional
+/// `opts` must be readable; optional `error` must be writable with initialized
+/// `struct_size`. Versioned structs must cover their declared supported prefix.
+/// Output storage must not overlap inputs or handles. Inputs are borrowed only
+/// for this call and copied into the returned operation; free that handle once.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_piv_read_certificate_in_context_new(
     context: *const CnkPivContext,
@@ -95,6 +123,15 @@ pub unsafe extern "C" fn cnk_piv_read_certificate_in_context_new(
 }
 
 /// Construct signing access without SELECT, VERIFY, or management login.
+///
+/// # Safety
+/// `context` must be a live handle from `cnk_piv_context_new`, with no concurrent
+/// mutation or free. `out` must be non-NULL, aligned and writable. Optional
+/// `opts` must be readable; optional `error` must be writable with initialized
+/// `struct_size`. Versioned structs must cover their declared supported prefix.
+/// Output storage must not overlap inputs or handles. Inputs are borrowed only
+/// for this call and copied into the returned operation; free that handle once.
+/// `data` must cover `len` readable bytes; NULL is allowed only for zero length.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_piv_sign_in_context_new(
     context: *const CnkPivContext,
@@ -131,6 +168,17 @@ pub unsafe extern "C" fn cnk_piv_sign_in_context_new(
 
 /// Construct an explicitly selected streaming sign operation without SELECT
 /// or implicit authentication. Modes are CNK_STREAM_* constants.
+///
+/// # Safety
+/// `context` must be a live handle from `cnk_piv_context_new`, with no concurrent
+/// mutation or free. `out` must be non-NULL, aligned and writable. Optional
+/// `opts` must be readable; optional `error` must be writable with initialized
+/// `struct_size`. Versioned structs must cover their declared supported prefix.
+/// Output storage must not overlap inputs or handles. Inputs are borrowed only
+/// for this call and copied into the returned operation; free that handle once.
+/// `message` and `user_id` must cover their declared readable byte ranges.
+/// NULL is allowed only for zero length. A user ID is SM2-only: NULL/0 selects
+/// the firmware default; an explicit ID has 1..=32 bytes.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_piv_sign_streaming_in_context_new(
     context: *const CnkPivContext,
@@ -147,20 +195,15 @@ pub unsafe extern "C" fn cnk_piv_sign_streaming_in_context_new(
     create(out, error, || {
         let context = context_ref(context)?;
         let options = options(opts)?;
-        let message = piv_input(message, message_len, options, error)?;
-        let input = match mode {
-            1 => piv::StreamingSignInput::MlDsa65(message),
-            2 => piv::StreamingSignInput::Ed25519Randomized(message),
-            3 => piv::StreamingSignInput::Sm2 {
-                message,
-                user_id: if user_id_len == 0 {
-                    None
-                } else {
-                    Some(bytes(user_id, user_id_len)?.to_vec())
-                },
-            },
-            _ => return Err(ARG),
-        };
+        let input = streaming_input(
+            mode,
+            message,
+            message_len,
+            user_id,
+            user_id_len,
+            options,
+            error,
+        )?;
         piv::sign_streaming_in_context(&context.0, slot(slot_reference)?, input, options)
             .map(Inner::Signature)
             .map_err(|e| failure(e, error))
@@ -168,6 +211,15 @@ pub unsafe extern "C" fn cnk_piv_sign_streaming_in_context_new(
 }
 
 /// Construct a raw RSA private operation without SELECT or implicit authentication.
+///
+/// # Safety
+/// `context` must be a live handle from `cnk_piv_context_new`, with no concurrent
+/// mutation or free. `out` must be non-NULL, aligned and writable. Optional
+/// `opts` must be readable; optional `error` must be writable with initialized
+/// `struct_size`. Versioned structs must cover their declared supported prefix.
+/// Output storage must not overlap inputs or handles. Inputs are borrowed only
+/// for this call and copied into the returned operation; free that handle once.
+/// `ciphertext` must cover `ciphertext_len` readable bytes; NULL requires zero length.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_piv_decrypt_in_context_new(
     context: *const CnkPivContext,
@@ -195,6 +247,15 @@ pub unsafe extern "C" fn cnk_piv_decrypt_in_context_new(
 }
 
 /// Construct an ECDH/X25519 derivation without SELECT or implicit authentication.
+///
+/// # Safety
+/// `context` must be a live handle from `cnk_piv_context_new`, with no concurrent
+/// mutation or free. `out` must be non-NULL, aligned and writable. Optional
+/// `opts` must be readable; optional `error` must be writable with initialized
+/// `struct_size`. Versioned structs must cover their declared supported prefix.
+/// Output storage must not overlap inputs or handles. Inputs are borrowed only
+/// for this call and copied into the returned operation; free that handle once.
+/// `peer` must cover `peer_len` readable bytes; NULL requires zero length.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_piv_derive_in_context_new(
     context: *const CnkPivContext,
@@ -228,6 +289,15 @@ pub unsafe extern "C" fn cnk_piv_derive_in_context_new(
 }
 
 /// Construct an ML-KEM-768 decapsulation without SELECT or implicit authentication.
+///
+/// # Safety
+/// `context` must be a live handle from `cnk_piv_context_new`, with no concurrent
+/// mutation or free. `out` must be non-NULL, aligned and writable. Optional
+/// `opts` must be readable; optional `error` must be writable with initialized
+/// `struct_size`. Versioned structs must cover their declared supported prefix.
+/// Output storage must not overlap inputs or handles. Inputs are borrowed only
+/// for this call and copied into the returned operation; free that handle once.
+/// `ciphertext` must cover `ciphertext_len` readable bytes; NULL requires zero length.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_piv_decapsulate_in_context_new(
     context: *const CnkPivContext,
@@ -253,6 +323,15 @@ pub unsafe extern "C" fn cnk_piv_decapsulate_in_context_new(
 }
 
 /// Construct a PIV data-object read without SELECT or implicit authentication.
+///
+/// # Safety
+/// `context` must be a live handle from `cnk_piv_context_new`, with no concurrent
+/// mutation or free. `out` must be non-NULL, aligned and writable. Optional
+/// `opts` must be readable; optional `error` must be writable with initialized
+/// `struct_size`. Versioned structs must cover their declared supported prefix.
+/// Output storage must not overlap inputs or handles. Inputs are borrowed only
+/// for this call and copied into the returned operation; free that handle once.
+/// `tag` must cover `tag_len` readable bytes; NULL requires zero length.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_piv_read_object_in_context_new(
     context: *const CnkPivContext,
@@ -273,6 +352,14 @@ pub unsafe extern "C" fn cnk_piv_read_object_in_context_new(
 }
 
 /// Construct a metadata-directory read without SELECT or implicit authentication.
+///
+/// # Safety
+/// `context` must be a live handle from `cnk_piv_context_new`, with no concurrent
+/// mutation or free. `out` must be non-NULL, aligned and writable. Optional
+/// `opts` must be readable; optional `error` must be writable with initialized
+/// `struct_size`. Versioned structs must cover their declared supported prefix.
+/// Output storage must not overlap inputs or handles. Inputs are borrowed only
+/// for this call and copied into the returned operation; free that handle once.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_piv_read_metadata_directory_in_context_new(
     context: *const CnkPivContext,
@@ -289,6 +376,14 @@ pub unsafe extern "C" fn cnk_piv_read_metadata_directory_in_context_new(
 }
 
 /// Construct a persisted container-name read without SELECT or implicit authentication.
+///
+/// # Safety
+/// `context` must be a live handle from `cnk_piv_context_new`, with no concurrent
+/// mutation or free. `out` must be non-NULL, aligned and writable. Optional
+/// `opts` must be readable; optional `error` must be writable with initialized
+/// `struct_size`. Versioned structs must cover their declared supported prefix.
+/// Output storage must not overlap inputs or handles. Inputs are borrowed only
+/// for this call and copied into the returned operation; free that handle once.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_piv_read_container_name_in_context_new(
     context: *const CnkPivContext,
@@ -306,6 +401,16 @@ pub unsafe extern "C" fn cnk_piv_read_container_name_in_context_new(
 }
 
 /// Construct a management-authorized PIV object write in the current transaction.
+///
+/// # Safety
+/// `context` must be a live handle from `cnk_piv_context_new`, with no concurrent
+/// mutation or free. `out` must be non-NULL, aligned and writable. Optional
+/// `opts` must be readable; optional `error` must be writable with initialized
+/// `struct_size`. Versioned structs must cover their declared supported prefix.
+/// Output storage must not overlap inputs or handles. Inputs are borrowed only
+/// for this call and copied into the returned operation; free that handle once.
+/// `tag` and `data` must cover their declared readable byte ranges; each NULL
+/// pointer requires zero length. The data is the object value without outer 53 framing.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_piv_write_object_in_context_new(
     context: *const CnkPivContext,
@@ -320,6 +425,9 @@ pub unsafe extern "C" fn cnk_piv_write_object_in_context_new(
     create(out, error, || {
         let context = context_ref(context)?;
         let options = options(opts)?;
+        if data_len > options.limits.max_input_bytes {
+            return Err(failure(Error::new(ErrorKind::LimitExceeded), error));
+        }
         let id = piv::ObjectId::from_bytes(bytes(tag, tag_len)?).map_err(|e| failure(e, error))?;
         piv::write_object_in_context(&context.0, id, bytes(data, data_len)?.to_vec(), options)
             .map(Inner::Mutation)
@@ -328,6 +436,16 @@ pub unsafe extern "C" fn cnk_piv_write_object_in_context_new(
 }
 
 /// Construct a management-authorized certificate write in the current transaction.
+///
+/// # Safety
+/// `context` must be a live handle from `cnk_piv_context_new`, with no concurrent
+/// mutation or free. `out` must be non-NULL, aligned and writable. Optional
+/// `opts` must be readable; optional `error` must be writable with initialized
+/// `struct_size`. Versioned structs must cover their declared supported prefix.
+/// Output storage must not overlap inputs or handles. Inputs are borrowed only
+/// for this call and copied into the returned operation; free that handle once.
+/// `der` must cover `der_len` readable bytes; NULL requires zero length.
+/// The bytes are an uncompressed certificate payload, without PIV framing.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_piv_write_certificate_in_context_new(
     context: *const CnkPivContext,
@@ -340,11 +458,15 @@ pub unsafe extern "C" fn cnk_piv_write_certificate_in_context_new(
 ) -> u32 {
     create(out, error, || {
         let context = context_ref(context)?;
+        let options = options(opts)?;
+        if der_len > options.limits.max_input_bytes {
+            return Err(failure(Error::new(ErrorKind::LimitExceeded), error));
+        }
         piv::write_certificate_in_context(
             &context.0,
             slot(slot_reference)?,
             bytes(der, der_len)?.to_vec(),
-            options(opts)?,
+            options,
         )
         .map(Inner::Mutation)
         .map_err(|e| failure(e, error))
@@ -352,6 +474,14 @@ pub unsafe extern "C" fn cnk_piv_write_certificate_in_context_new(
 }
 
 /// Construct a management-authorized certificate deletion in the current transaction.
+///
+/// # Safety
+/// `context` must be a live handle from `cnk_piv_context_new`, with no concurrent
+/// mutation or free. `out` must be non-NULL, aligned and writable. Optional
+/// `opts` must be readable; optional `error` must be writable with initialized
+/// `struct_size`. Versioned structs must cover their declared supported prefix.
+/// Output storage must not overlap inputs or handles. Inputs are borrowed only
+/// for this call and copied into the returned operation; free that handle once.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_piv_delete_certificate_in_context_new(
     context: *const CnkPivContext,
@@ -369,6 +499,15 @@ pub unsafe extern "C" fn cnk_piv_delete_certificate_in_context_new(
 }
 
 /// Construct management-authorized key generation in the current transaction.
+///
+/// # Safety
+/// `context` must be a live handle from `cnk_piv_context_new`, with no concurrent
+/// mutation or free. `out` must be non-NULL, aligned and writable. Optional
+/// `opts` must be readable; optional `error` must be writable with initialized
+/// `struct_size`. Versioned structs must cover their declared supported prefix.
+/// Output storage must not overlap inputs or handles. Inputs are borrowed only
+/// for this call and copied into the returned operation; free that handle once.
+/// `params` must be non-NULL and readable with an initialized `struct_size`.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_piv_generate_key_in_context_new(
     context: *const CnkPivContext,
@@ -386,6 +525,17 @@ pub unsafe extern "C" fn cnk_piv_generate_key_in_context_new(
 }
 
 /// Construct management-authorized key import in the current transaction.
+///
+/// # Safety
+/// `context` must be a live handle from `cnk_piv_context_new`, with no concurrent
+/// mutation or free. `out` must be non-NULL, aligned and writable. Optional
+/// `opts` must be readable; optional `error` must be writable with initialized
+/// `struct_size`. Versioned structs must cover their declared supported prefix.
+/// Output storage must not overlap inputs or handles. Inputs are borrowed only
+/// for this call and copied into the returned operation; free that handle once.
+/// `params` must be non-NULL and readable with initialized `struct_size`.
+/// `components` must cover `count` initialized, aligned `CnkBytes` descriptors;
+/// each nested data pointer must cover its length (NULL only for zero length).
 #[no_mangle]
 pub unsafe extern "C" fn cnk_piv_import_key_in_context_new(
     context: *const CnkPivContext,
@@ -411,6 +561,17 @@ pub unsafe extern "C" fn cnk_piv_import_key_in_context_new(
 }
 
 /// Construct management-key authentication in an already selected transaction.
+///
+/// # Safety
+/// `context` must be a live handle from `cnk_piv_context_new`, with no concurrent
+/// mutation or free. `out` must be non-NULL, aligned and writable. Optional
+/// `opts` must be readable; optional `error` must be writable with initialized
+/// `struct_size`. Versioned structs must cover their declared supported prefix.
+/// Output storage must not overlap inputs or handles. Inputs are borrowed only
+/// for this call and copied into the returned operation; free that handle once.
+/// `auth` must be non-NULL and readable with initialized `struct_size`.
+/// Its key and challenge pointers must cover their declared readable byte ranges;
+/// each NULL pointer requires zero length.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_piv_authenticate_management_in_context_new(
     context: *const CnkPivContext,

@@ -350,14 +350,22 @@ these boundaries. Package reuse does not establish device support.
 
 ## Bindings
 
-The C ABI has only `cnk_profile_t` and `cnk_operation_t` opaque handles. Inputs are
-copied versioned descriptors; errors are caller-owned POD; results use query-size/copy.
+The C ABI exposes `cnk_profile_t`, `cnk_piv_context_t`, and `cnk_operation_t`
+opaque handles. Inputs are copied versioned descriptors; errors are caller-owned
+POD; results use query-size/copy. A selected PIV context copies its profile and
+caller-declared authorization state without performing I/O. The caller keeps
+the selected card transaction alive while driving dependent operations; freeing
+a context neither releases that transaction nor invalidates existing operations.
 There is no init/finalize, result/error/key handle, borrowed internal pointer or
 thread-local last_error. Semantic integer enums are distinct from wire IDs.
 
 - POD begins with struct_size; reject unknown input enums/flags. NULL options means
   defaults; explicit zero budgets are invalid. ABI stability is not frozen yet.
 - Constructors initialize output handles to NULL and leave no partial handle on failure.
+- Context mutation factories check the input-byte budget before copying object or
+  certificate payloads. Selected and standalone streaming signing share the same
+  input validation: SM2 user IDs are absent (NULL/0) or 1..=32 bytes; other modes
+  reject a supplied user ID. Invalid inputs expose no operation and perform no I/O.
 - NULL copy buffers query size. Short buffers update length without partial copying.
   Text has no NUL terminator. Getters never execute the operation.
 - Probe profile transfer succeeds once and survives free(op). Other results are copied.
