@@ -124,6 +124,16 @@ int main(void) {
                                &step, &error) == CNK_PROTOCOL_ERROR);
   assert(error.kind == CNK_ERROR_NOT_FOUND && error.status_word == 0x6a88);
   cnk_operation_free(name_read);
+  // Runtime response budgets must not be mislabeled as construction errors.
+  cnk_operation_t *limited = NULL;
+  const uint8_t oversized[259] = {0};
+  assert(cnk_probe_device_new(CNK_PROBE_PIV, NULL, &limited, &error) == CNK_OK);
+  assert(cnk_operation_start(limited, &step, &error) == CNK_OK);
+  assert(cnk_operation_advance(limited, oversized, sizeof(oversized), &step,
+                               &error) == CNK_PROTOCOL_ERROR);
+  assert(error.kind == CNK_ERROR_LIMIT_EXCEEDED &&
+         error.phase == CNK_PHASE_CONVERSATION);
+  cnk_operation_free(limited);
   cnk_piv_context_free(NULL);
   return 0;
 }
