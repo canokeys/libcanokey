@@ -50,6 +50,9 @@
 /// Strict parsing of host-managed PIV management-protection objects.
 pub mod protection;
 pub use protection::{protected_management_key_from_object, ManagementProtection};
+/// Explicit credential commands inside a caller-selected PIV transaction.
+pub mod credentials;
+pub use credentials::{credential_in_context, CredentialAction};
 mod access;
 mod context;
 pub use context::{
@@ -132,7 +135,23 @@ fn secret(bytes: &[u8]) -> Result<SecretBytes, Error> {
     }
     Ok(SecretBytes::new(bytes.to_vec()))
 }
+fn legacy_secret(bytes: &[u8]) -> Result<SecretBytes, Error> {
+    if !(1..=8).contains(&bytes.len()) {
+        return Err(Error::new(ErrorKind::InvalidPin));
+    }
+    Ok(SecretBytes::new(bytes.to_vec()))
+}
 impl Pin {
+    /// Copy the legacy PKCS#11 raw credential form: 1..=8 bytes, including FF.
+    /// This explicitly preserves byte-oriented callers; applications choosing a
+    /// new credential should prefer the stricter `from_bytes` constructor.
+    /// Short inputs are FF-padded only when encoding a command.
+    /// # Errors
+    /// Empty or longer-than-eight-byte inputs return InvalidPin.
+    pub fn from_legacy_bytes(bytes: &[u8]) -> Result<Self, Error> {
+        Ok(Self(legacy_secret(bytes)?))
+    }
+
     /// Validate and copy raw credential bytes without string conversion.
     ///
     /// # Errors
@@ -143,6 +162,16 @@ impl Pin {
     }
 }
 impl Puk {
+    /// Copy the legacy PKCS#11 raw credential form: 1..=8 bytes, including FF.
+    /// This explicitly preserves byte-oriented callers; applications choosing a
+    /// new credential should prefer the stricter `from_bytes` constructor.
+    /// Short inputs are FF-padded only when encoding a command.
+    /// # Errors
+    /// Empty or longer-than-eight-byte inputs return InvalidPin.
+    pub fn from_legacy_bytes(bytes: &[u8]) -> Result<Self, Error> {
+        Ok(Self(legacy_secret(bytes)?))
+    }
+
     /// Validate and copy raw credential bytes without string conversion.
     ///
     /// # Errors

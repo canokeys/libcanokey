@@ -76,6 +76,12 @@ int main(void) {
   assert(cnk_piv_read_container_name_in_context_new(
              context, 0xf9, NULL, &name_read, &error) == CNK_OK);
   memset(name, 0, sizeof(name));
+  cnk_operation_t *credential = NULL;
+  uint8_t short_pin[] = {'1'};
+  assert(cnk_piv_credential_in_context_new(
+             context, CNK_PIV_CREDENTIAL_VERIFY_PIN, short_pin, 1, NULL, 0,
+             NULL, &credential, &error) == CNK_OK);
+  short_pin[0] = 0;
   // All borrowed inputs and the context can disappear before execution.
   memset(value, 0, sizeof(value));
   memset(tag, 0, sizeof(tag));
@@ -134,6 +140,19 @@ int main(void) {
   assert(error.kind == CNK_ERROR_LIMIT_EXCEEDED &&
          error.phase == CNK_PHASE_CONVERSATION);
   cnk_operation_free(limited);
+  assert(cnk_operation_start(credential, &step, &error) == CNK_OK);
+  const uint8_t expected_verify[] = {0,    0x20, 0,    0x80, 8,    '1', 0xff,
+                                     0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+  n = sizeof(command);
+  assert(cnk_operation_command(credential, command, &n) == CNK_OK &&
+         n == sizeof(expected_verify));
+  assert(!memcmp(command, expected_verify, n));
+  const uint8_t rejected_pin[] = {0x63, 0xc2};
+  assert(cnk_operation_advance(credential, rejected_pin, sizeof(rejected_pin),
+                               &step, &error) == CNK_PROTOCOL_ERROR);
+  assert(error.kind == CNK_ERROR_AUTHENTICATION_FAILED &&
+         error.reference == CNK_REFERENCE_PIN && error.retries_remaining == 2);
+  cnk_operation_free(credential);
   cnk_piv_context_free(NULL);
   return 0;
 }

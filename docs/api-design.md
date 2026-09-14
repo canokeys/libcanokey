@@ -351,6 +351,12 @@ these boundaries. Package reuse does not establish device support.
 
 ## Bindings
 
+Selected credential actions verify, log out, replace PIN/PUK, or unblock PIN
+without another SELECT. Their owned inputs and encoded copies are zeroized;
+callers retain transaction, credential-cache and uncertain-mutation responsibility.
+The explicit legacy-byte constructors preserve the C consumer's 1..=8-byte raw
+form, including FF. Default Rust credential constructors retain stricter policy.
+
 `ManagementProtection` parses bounded ADMIN DATA and preserves stored flags.
 Empty policy is distinct from malformed data; a blocked-PUK flag is a claim that
 callers must verify against live retries. The PRINTED decoder requires exact
