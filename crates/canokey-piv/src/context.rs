@@ -226,7 +226,7 @@ pub fn authenticate_management_in_context(
 ) -> Result<Operation<()>, Error> {
     context.require_selected()?;
     auth.validate(&context.profile, options)?;
-    super::operation_from_machine(ManagementMachine::new(auth), options)
+    super::access::in_context(&context.profile, ManagementMachine::new(auth), options)
 }
 
 /// Sign using the caller's existing PIV selection and authorization boundary.
@@ -254,7 +254,7 @@ pub fn sign_streaming_in_context(
 ) -> Result<Operation<Signature>, Error> {
     context.require_selected()?;
     let machine = super::streaming::prepare_sign_streaming(&context.profile, slot, input, options)?;
-    super::operation_from_machine(machine, options)
+    super::access::in_context(&context.profile, machine, options)
 }
 
 /// Perform a raw RSA private operation in the caller's selected transaction.

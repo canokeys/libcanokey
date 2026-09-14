@@ -454,13 +454,6 @@ pub(crate) fn operation_from_sequence<T: 'static>(
     Operation::from_machine(sequence, options)
 }
 
-pub(crate) fn operation_from_machine<T: 'static>(
-    machine: impl Machine<T> + 'static,
-    options: OperationOptions,
-) -> Result<Operation<T>, Error> {
-    options.validate()?;
-    Operation::from_machine(machine, options)
-}
 fn request(command: LogicalCommand, phase: Phase, reference: Option<SecretReference>) -> Request {
     Request {
         command,

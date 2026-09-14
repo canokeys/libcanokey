@@ -140,3 +140,22 @@ pub(crate) fn prepare<T: 'static>(
         parse: Some(Box::new(parse)),
     })
 }
+
+// Reuse the selected wrapper's firmware encoding without its SELECT/auth stages.
+pub(crate) fn in_context<T: 'static>(
+    profile: &DeviceProfile,
+    target: impl Machine<T> + 'static,
+    options: OperationOptions,
+) -> Result<Operation<T>, Error> {
+    options.validate()?;
+    Operation::from_machine(
+        Selected {
+            stage: Stage::Target,
+            explicit_le: profile.legacy_explicit_le(),
+            management: None,
+            pin: None,
+            target: Box::new(target),
+        },
+        options,
+    )
+}

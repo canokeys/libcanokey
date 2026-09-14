@@ -421,3 +421,20 @@ fn certificate_deletion_and_management_replacement_are_explicit() {
     )
     .is_err());
 }
+
+#[test]
+fn selected_context_management_preserves_firmware_encoding_without_reselect() {
+    for v in &VECTORS {
+        for mutual in [false, true] {
+            let context = PivAccessContext::selected(&profile(v.version)).unwrap();
+            let mut op =
+                authenticate_management_in_context(&context, auth(v, mutual), Default::default())
+                    .unwrap();
+            drop(context);
+            assert_eq!(op.start().unwrap(), Step::Exchange);
+            assert_eq!(authenticate(&mut op, v, mutual), Step::Done);
+            op.take_result().unwrap();
+            assert!(op.advance(&[0x90, 0]).is_err());
+        }
+    }
+}
