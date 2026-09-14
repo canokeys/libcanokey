@@ -10,7 +10,7 @@ static cnk_profile_t *profile(void) {
   const uint8_t ok[] = {0x90, 0}, absent[] = {0x6d, 0};
   const uint8_t fw[] = {'3', '.', '1', '.', '0', 0x90, 0};
   const uint8_t version[] = {5, 7, 0, 0x90, 0};
-  const uint8_t config[] = {1,    0xe0, 5,    0x16, 0xe1, 0x53,
+  const uint8_t config[] = {1,    0xe0, 0xd1, 0x16, 0xe1, 0x53,
                             0x54, 0x55, 0x56, 0x57, 0x90, 0};
   const uint8_t *responses[] = {ok, fw, absent, absent, ok, version, config};
   const size_t sizes[] = {sizeof(ok),     sizeof(fw), sizeof(absent),
@@ -26,6 +26,18 @@ static cnk_profile_t *profile(void) {
 }
 int main(void) {
   cnk_profile_t *p = profile();
+  uint32_t semantic = 999;
+  assert(cnk_profile_piv_algorithm_from_wire(p, 0xd1, &semantic) == CNK_OK &&
+         semantic == CNK_ALGORITHM_RSA3072);
+  assert(cnk_profile_piv_algorithm_from_wire(p, 0x54, &semantic) == CNK_OK &&
+         semantic == CNK_ALGORITHM_P521);
+  semantic = 999;
+  assert(cnk_profile_piv_algorithm_from_wire(p, 5, &semantic) ==
+             CNK_INVALID_ARGUMENT &&
+         semantic == 999);
+  assert(cnk_profile_piv_algorithm_from_wire(p, 0x1d1, &semantic) ==
+             CNK_INVALID_ARGUMENT &&
+         semantic == 999);
   cnk_piv_context_t *context = NULL;
   cnk_error_v1 error;
   memset(&error, 0xCC, sizeof(error));

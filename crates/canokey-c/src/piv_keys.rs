@@ -21,7 +21,7 @@ pub(super) fn algorithm(value: u32) -> Result<piv::Algorithm, u32> {
         _ => Err(ARG),
     }
 }
-fn algorithm_code(value: piv::Algorithm) -> u32 {
+pub(super) fn algorithm_code(value: piv::Algorithm) -> u32 {
     use piv::Algorithm::*;
     match value {
         Rsa1024 => 1,

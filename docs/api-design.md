@@ -365,7 +365,9 @@ caller-declared authorization state without performing I/O. The caller keeps
 the selected card transaction alive while driving dependent operations; freeing
 a context neither releases that transaction nor invalidates existing operations.
 There is no init/finalize, result/error/key handle, borrowed internal pointer or
-thread-local last_error. Semantic integer enums are distinct from wire IDs.
+thread-local last_error. Semantic integer enums are distinct from wire IDs. Use
+`cnk_profile_piv_algorithm_from_wire` for profile-aware conversion; resolution
+does not replace the operation factory's capability checks.
 
 - POD begins with struct_size; reject unknown input enums/flags. NULL options means
   defaults; explicit zero budgets are invalid. ABI stability is not frozen yet.

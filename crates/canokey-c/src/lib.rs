@@ -809,6 +809,36 @@ pub unsafe extern "C" fn cnk_profile_piv_support(profile: *const CnkProfile, out
         OK
     })
 }
+/// Resolve an observed PIV wire identifier to a CNK_ALGORITHM_* semantic code.
+/// This consults the immutable profile's configuration and legacy IDs; it does
+/// not authorize key use. Factories still enforce capability and input policy.
+/// Unknown/out-of-range IDs return CNK_INVALID_ARGUMENT and leave out unchanged.
+/// # Safety
+/// profile must be live/readable with no concurrent mutation or free. out must
+/// be non-NULL, aligned/writable and not alias the profile. No pointer is retained.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_profile_piv_algorithm_from_wire(
+    profile: *const CnkProfile,
+    wire: u32,
+    out: *mut u32,
+) -> u32 {
+    guard(|| {
+        if out.is_null() || wire > u8::MAX as u32 {
+            return ARG;
+        }
+        let Some(profile) = profile.as_ref() else {
+            return ARG;
+        };
+        match profile.0.algorithm_from_wire_id(wire as u8) {
+            Some(algorithm) => {
+                *out = piv_keys::algorithm_code(algorithm);
+                OK
+            }
+            None => ARG,
+        }
+    })
+}
+
 /// Discard active operation state locally; terminal states are unchanged.
 /// No APDU or transport cancellation occurs. Drain or isolate in-flight I/O
 /// before reusing the application connection. The handle still needs free.
