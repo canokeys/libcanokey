@@ -1,7 +1,7 @@
 //! Caller-owned PIV transaction contexts.
 use crate::{
     Algorithm, Certificate, DeviceProfile, Error, ErrorKind, Metadata, MetadataReference, ObjectId,
-    Operation, OperationOptions, SignInput, Signature, Slot, StreamingSignInput,
+    Operation, OperationOptions, SecretBytes, SignInput, Signature, Slot, StreamingSignInput,
 };
 use canokey_compat::Capability;
 
@@ -135,4 +135,45 @@ pub fn sign_streaming_in_context(
     context.require_selected()?;
     let machine = super::streaming::prepare_sign_streaming(&context.profile, slot, input, options)?;
     super::operation_from_machine(machine, options)
+}
+
+/// Perform a raw RSA private operation in the caller's selected transaction.
+pub fn decrypt_in_context(
+    context: &PivAccessContext,
+    slot: Slot,
+    algorithm: Algorithm,
+    ciphertext: SecretBytes,
+    options: OperationOptions,
+) -> Result<Operation<SecretBytes>, Error> {
+    context.require_selected()?;
+    let sequence =
+        super::private::prepare_decrypt(&context.profile, slot, algorithm, ciphertext, options)?;
+    super::operation_from_sequence(&context.profile, sequence, options)
+}
+
+/// Derive an unprocessed ECDH/X25519 secret in the caller's selected transaction.
+pub fn derive_in_context(
+    context: &PivAccessContext,
+    slot: Slot,
+    algorithm: Algorithm,
+    peer: Vec<u8>,
+    options: OperationOptions,
+) -> Result<Operation<SecretBytes>, Error> {
+    context.require_selected()?;
+    let sequence =
+        super::private::prepare_derive(&context.profile, slot, algorithm, peer, options)?;
+    super::operation_from_sequence(&context.profile, sequence, options)
+}
+
+/// Decapsulate an ML-KEM-768 ciphertext in the caller's selected transaction.
+pub fn decapsulate_in_context(
+    context: &PivAccessContext,
+    slot: Slot,
+    ciphertext: SecretBytes,
+    options: OperationOptions,
+) -> Result<Operation<SecretBytes>, Error> {
+    context.require_selected()?;
+    let sequence =
+        super::private::prepare_decapsulate(&context.profile, slot, ciphertext, options)?;
+    super::operation_from_sequence(&context.profile, sequence, options)
 }

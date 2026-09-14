@@ -166,3 +166,88 @@ pub unsafe extern "C" fn cnk_piv_sign_streaming_in_context_new(
             .map_err(|e| failure(e, error))
     })
 }
+
+/// Construct a raw RSA private operation without SELECT or implicit authentication.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_decrypt_in_context_new(
+    context: *const CnkPivContext,
+    slot_reference: u32,
+    key_algorithm: u32,
+    ciphertext: *const u8,
+    ciphertext_len: usize,
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        let context = context_ref(context)?;
+        let options = options(opts)?;
+        piv::decrypt_in_context(
+            &context.0,
+            slot(slot_reference)?,
+            algorithm(key_algorithm)?,
+            piv_input(ciphertext, ciphertext_len, options, error)?,
+            options,
+        )
+        .map(Inner::Object)
+        .map_err(|e| failure(e, error))
+    })
+}
+
+/// Construct an ECDH/X25519 derivation without SELECT or implicit authentication.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_derive_in_context_new(
+    context: *const CnkPivContext,
+    slot_reference: u32,
+    key_algorithm: u32,
+    peer: *const u8,
+    peer_len: usize,
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        let context = context_ref(context)?;
+        let options = options(opts)?;
+        if peer_len > options.limits.max_input_bytes {
+            return Err(failure(
+                canokey::Error::new(canokey::ErrorKind::LimitExceeded),
+                error,
+            ));
+        }
+        piv::derive_in_context(
+            &context.0,
+            slot(slot_reference)?,
+            algorithm(key_algorithm)?,
+            bytes(peer, peer_len)?.to_vec(),
+            options,
+        )
+        .map(Inner::Object)
+        .map_err(|e| failure(e, error))
+    })
+}
+
+/// Construct an ML-KEM-768 decapsulation without SELECT or implicit authentication.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_decapsulate_in_context_new(
+    context: *const CnkPivContext,
+    slot_reference: u32,
+    ciphertext: *const u8,
+    ciphertext_len: usize,
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        let context = context_ref(context)?;
+        let options = options(opts)?;
+        piv::decapsulate_in_context(
+            &context.0,
+            slot(slot_reference)?,
+            piv_input(ciphertext, ciphertext_len, options, error)?,
+            options,
+        )
+        .map(Inner::Object)
+        .map_err(|e| failure(e, error))
+    })
+}
