@@ -20,7 +20,11 @@ fn minimal_probe_and_optional_statuses() {
     })
     .unwrap();
     op.start().unwrap();
-    exchange(&mut op, &[0, 0xa4, 4, 0, 5, 0xf0, 0, 0, 0, 0], &[0x90, 0]);
+    exchange(
+        &mut op,
+        &[0, 0xa4, 4, 0, 5, 0xf0, 0, 0, 0, 0, 0],
+        &[0x90, 0],
+    );
     exchange(&mut op, &[0, 0x31, 0, 0, 0], b"3.1.0\x90\x00");
     exchange(&mut op, &[0, 0x31, 1, 0, 0], &[0x6d, 0]);
     assert_eq!(
@@ -40,16 +44,16 @@ fn full_probe_keeps_firmware_and_piv_version_separate() {
     op.advance(b"2.0.0\x90\x00").unwrap();
     op.advance(b"CanoKey\x90\x00").unwrap();
     op.advance(&[1, 2, 3, 4, 0x90, 0]).unwrap();
-    exchange(&mut op, &[0, 0xa4, 4, 0, 5, 0xa0, 0, 0, 3, 8], &[0x90, 0]);
-    exchange(&mut op, &[0, 0xfd, 0, 0, 0], &[5, 7, 0, 0x90, 0]);
+    exchange(
+        &mut op,
+        &[0, 0xa4, 4, 0, 5, 0xa0, 0, 0, 3, 8, 0],
+        &[0x90, 0],
+    );
     assert_eq!(
-        exchange(
-            &mut op,
-            &[0, 0xee, 1, 0, 0],
-            &[1, 0x22, 0x50, 0x51, 0x52, 0x53, 0x54, 0x90, 0]
-        ),
+        exchange(&mut op, &[0, 0xfd, 0, 0, 0], &[5, 7, 0, 0x90, 0]),
         Step::Done
     );
+    // 2.x has no PIV EE configuration command; do not probe a colliding/missing API.
     let p = op.result().unwrap();
     assert_eq!(p.info().firmware().unwrap().major, 2);
     assert_eq!(p.info().piv_version().unwrap().0, [5, 7, 0]);

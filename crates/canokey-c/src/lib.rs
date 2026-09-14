@@ -905,3 +905,43 @@ pub unsafe extern "C" fn cnk_operation_result_kind(op: *const CnkOperation, out:
         OK
     })
 }
+
+/// Copy a 2.x profile with a caller-confirmed Admin 40/07 extension flag.
+/// This performs no I/O and returns a separately owned immutable snapshot. The
+/// caller must have an acknowledged write on the same connection generation;
+/// unknown/lost outcomes must not be promoted to an observed flag.
+///
+/// # Safety
+/// Follow the crate pointer contract. profile is live/non-NULL, enabled is 0/1,
+/// out is writable/non-NULL and does not alias inputs; error is optional/versioned.
+/// On success release the new *out with cnk_profile_free. Original stays owned.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_profile_with_legacy_piv_extensions(
+    profile: *const CnkProfile,
+    enabled: u32,
+    out: *mut *mut CnkProfile,
+    error: *mut CnkError,
+) -> u32 {
+    guard(|| {
+        if out.is_null() {
+            return ARG;
+        }
+        ptr::write(out, ptr::null_mut());
+        if let Err(code) = clear_error(error) {
+            return code;
+        }
+        if enabled > 1 {
+            return ARG;
+        }
+        let Some(profile) = profile.as_ref() else {
+            return ARG;
+        };
+        match profile.0.with_legacy_piv_extensions(enabled != 0) {
+            Ok(p) => {
+                ptr::write(out, Box::into_raw(Box::new(CnkProfile(p))));
+                OK
+            }
+            Err(e) => failure(e, error),
+        }
+    })
+}

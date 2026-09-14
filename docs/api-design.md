@@ -77,6 +77,27 @@ new profile. Configuration changes or uncertain writes invalidate relevant profi
 observations; ordinary key/certificate changes invalidate application caches.
 `MutationResult::profile_effect` does not refresh either cache automatically.
 
+The historical matrix follows ckman's pinned firmware changelog and executable
+feature rules, cross-checked against core sources. It recognizes 1.3 and the existing
+1.5.2–3.0.3/3.1.0 ranges; missing, unrecognized, development-suffixed and newer
+versions cannot authorize historical layouts. Applet-reported version numbers never
+select a dialect. See each applet's historical subsection for command boundaries.
+
+PIV baseline slots, 3DES management, key/object operations and blocked-credential
+reset extend to 1.3. Explicit generation policies require 2.0. PIV SELECT preserves
+old authentication through 1.6.2; `PivSelectResetsAuthentication` records the 2.0
+transition. Operations still authenticate explicitly and never assume SELECT logout.
+Probe SELECT and historical final APDUs carry short explicit Le. Intermediate
+command-chain fragments retain the protocol engine's ordinary chaining format.
+
+PIV EE configuration reads start at 3.0; probes omit EE on 2.x. After an acknowledged
+2.x Admin 40/07 write, callers may create a new immutable snapshot using
+`with_legacy_piv_extensions(bool)` (C: `cnk_profile_with_legacy_piv_extensions`).
+This records caller-confirmed enablement and uses firmware-fixed IDs; it never
+fabricates an `AlgorithmConfig` response. Absent enablement remains Unknown and
+explicit false is Unsupported. Lost responses and reconnections require renewed
+evidence. Ed/X private-operation fix gates remain separate from the switch.
+
 ## Authentication and PIV values
 
 Standalone operations select once, then apply `Access::None`, `Pin`, `Management`
@@ -165,7 +186,7 @@ All patch fields are checked before the first write. Writes persist separately:
 write may still have changed the device. Invalidate credential/object caches on their
 mutation attempts too. Neither progress nor completion is an automatic refresh.
 
-Current Admin layout is gated to pinned 3.1.0 evidence. CTAP SM2 configuration contains
+The 3.1 CTAP SM2 configuration contains
 two signed big-endian i32 identifiers, without an enable flag. NFC commands are vendor
 hooks; a supported firmware layout does not establish vendor hardware support.
 
@@ -267,6 +288,29 @@ PW1/PW3 defaults; Terminate and Activate are separate explicit operations. Finge
 and timestamps are caller-supplied writes. DO parsers preserve unknown values without
 identity/trust validation. Current firmware has no KDF DO/configuration implementation.
 
+### Historical OpenPGP formats
+
+Baseline commands cover audited 1.3–3.1.0 firmware. Actual firmware selects
+65/6E/7A contents before 2.0 and wrapped objects from 2.0. Algorithm information
+is absent before 1.6.1, bare until 3.1, then wrapped in FA. `ReadData` preserves
+wire bytes; `parse_with_profile` and `data_object_contents` interpret these layouts
+without guessing. OpenPGP uses explicit definite BER parsing, including firmware's
+fixed-width lengths; other TLV readers keep their strict default.
+
+Key operations read current attributes in 6E even when FA is unavailable.
+Advertisements and configured attributes do not authorize every operation:
+pre-2.0 RSA generation accepts only 2048 bits, P-521 requires 3.1, and digests
+shorter than the curve width require 3.1. UIF starts at 1.5.2; retry reset at 3.1.
+Old Ed/X public-key responses have one extraneous trailing byte until 1.6.1;
+only that exact evidenced layout is normalized. On 1.3, short-Weierstrass ECDH
+returns a point; Derive extracts its fixed-width X coordinate as the shared secret.
+Neither normalization validates a peer or applies an OpenPGP KDF. X25519 import
+bytes remain caller-supplied firmware bytes; the library never reverses them.
+
+Final historical APDUs use explicit Le. Certificate occurrences remain sig=0,
+dec=1, aut=2. Only explicit Activate accepts empty SELECT status 6285 and proceeds
+to 44; unrelated requests preserve the failure.
+
 ## Batch
 
 `batch(profile, Vec<BatchRequest>, options)` executes explicit requests under one
@@ -327,27 +371,3 @@ hold a private enum of concrete Operation types and Option for idempotent close,
 but must not duplicate protocol state. Dart owns async execution; Python bindings
 would follow the same model with a caller-owned synchronous loop. Binding examples:
 [Console](console-integration.md), [PKCS#11](pkcs11-integration.md).
-
-
-### Historical OpenPGP formats
-
-Baseline commands cover audited 1.3–3.1.0 firmware. Actual firmware selects
-65/6E/7A contents before 2.0 and wrapped objects from 2.0. Algorithm information
-is absent before 1.6.1, bare until 3.1, then wrapped in FA. `ReadData` preserves
-wire bytes; `parse_with_profile` and `data_object_contents` interpret these layouts
-without guessing. OpenPGP uses explicit definite BER parsing, including firmware's
-fixed-width lengths; other TLV readers keep their strict default.
-
-Key operations read current attributes in 6E even when FA is unavailable.
-Advertisements and configured attributes do not authorize every operation:
-pre-2.0 RSA generation accepts only 2048 bits, P-521 requires 3.1, and digests
-shorter than the curve width require 3.1. UIF starts at 1.5.2; retry reset at 3.1.
-Old Ed/X public-key responses have one extraneous trailing byte until 1.6.1;
-only that exact evidenced layout is normalized. On 1.3, short-Weierstrass ECDH
-returns a point; Derive extracts its fixed-width X coordinate as the shared secret.
-Neither normalization validates a peer or applies an OpenPGP KDF. X25519 import
-bytes remain caller-supplied firmware bytes; the library never reverses them.
-
-Final historical APDUs use explicit Le. Certificate occurrences remain sig=0,
-dec=1, aut=2. Only explicit Activate accepts empty SELECT status 6285 and proceeds
-to 44; unrelated requests preserve the failure.

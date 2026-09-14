@@ -14,9 +14,9 @@ int main(void) {
     assert(cnk_abi_version()==1);
     assert(cnk_probe_device_new(CNK_PROBE_PIV,NULL,&op,&err)==CNK_OK);
     assert(cnk_operation_start(op,&step,&err)==CNK_OK);
-    size_t n=0;assert(cnk_operation_command(op,NULL,&n)==CNK_OK&&n==10);
+    size_t n=0;assert(cnk_operation_command(op,NULL,&n)==CNK_OK&&n==11);
     uint8_t tiny[2]={0xaa,0xbb};n=sizeof(tiny);
-    assert(cnk_operation_command(op,tiny,&n)==CNK_BUFFER_TOO_SMALL&&n==10);
+    assert(cnk_operation_command(op,tiny,&n)==CNK_BUFFER_TOO_SMALL&&n==11);
     assert(tiny[0]==0xaa&&tiny[1]==0xbb);
     feed(op,ok,sizeof(ok),&step);
     const uint8_t fw[]={'9','.','0','.','0',0x90,0};feed(op,fw,sizeof(fw),&step);

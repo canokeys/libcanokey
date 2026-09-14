@@ -404,12 +404,18 @@ impl<T> Machine<T> for Sequence<T> {
     }
 }
 fn make<T: 'static>(
-    commands: Vec<Request>,
+    profile: &DeviceProfile,
+    mut commands: Vec<Request>,
     options: OperationOptions,
     parse: impl FnOnce(ResponseData) -> Result<T, Error> + Send + 'static,
 ) -> Result<Operation<T>, Error> {
     options.validate()?;
-    for request in &commands {
+    for request in &mut commands {
+        if profile.legacy_explicit_le()
+            && request.command.le == canokey_protocol::ExpectedLength::Absent
+        {
+            request.command.le = canokey_protocol::ExpectedLength::Exact(256);
+        }
         canokey_protocol::operation::validate_command(&request.command, options)?;
     }
     Operation::from_machine(
@@ -445,6 +451,7 @@ pub fn select(
 ) -> Result<Operation<SelectionInfo>, Error> {
     require(profile)?;
     make(
+        profile,
         vec![request(command::select(), Phase::Select, None)],
         options,
         |r| {
@@ -467,7 +474,7 @@ pub fn verify_pin(
     options: OperationOptions,
 ) -> Result<Operation<()>, Error> {
     require(profile)?;
-    make(selected(command::verify_pin(&pin)), options, |r| {
+    make(profile, selected(command::verify_pin(&pin)), options, |r| {
         require_auth(&r, SecretReference::Pin)
     })
 }
@@ -484,7 +491,7 @@ pub fn get_pin_status(
     options: OperationOptions,
 ) -> Result<Operation<PinStatus>, Error> {
     require(profile)?;
-    make(selected(command::pin_status()), options, |r| {
+    make(profile, selected(command::pin_status()), options, |r| {
         if !r.data.is_empty() {
             return Err(Error::new(ErrorKind::InvalidResponse));
         }
@@ -520,7 +527,7 @@ pub fn get_pin_status(
 /// See the [crate-level errors](crate#errors); card failures propagate.
 pub fn logout(profile: &DeviceProfile, options: OperationOptions) -> Result<Operation<()>, Error> {
     require(profile)?;
-    make(selected(command::logout()), options, |r| {
+    make(profile, selected(command::logout()), options, |r| {
         r.ensure_success(Phase::Authentication)
     })
 }
@@ -602,6 +609,7 @@ fn change_secret(
 ) -> Result<Operation<MutationResult>, Error> {
     require(profile)?;
     make(
+        profile,
         selected(command::change(ins, p2, old, new)),
         options,
         move |r| {

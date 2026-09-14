@@ -179,3 +179,11 @@ uses INS 09, which collides with the 3.0 CTAP reset. The 2.x extension switch is
 3.0.0/3.0.3 serialize nine native-layout SM2 bytes, unlike Console's big-endian
 decoder. Legacy SM2 reads/writes therefore preserve raw identifier bytes; the
 current eight-byte format is explicitly big-endian at core `a0f0c09`.
+
+PIV 1.3 core `5f1e95f` confirms 3DES authentication, the four primary slots,
+RSA2048/P-256/P-384 generation, object writes and FB reset after both credentials
+are blocked. ckman's matrix establishes SELECT authentication reset at 2.0.
+The 2.x Admin 40/07 enable flag and fixed IDs are distinct from PIV EE (3.0+);
+profiles record caller-confirmed enablement without fabricating response bytes.
+Probe and historical applet commands use explicit short Le per ckman's transport
+contract. No reference repository was modified or used as a build dependency.

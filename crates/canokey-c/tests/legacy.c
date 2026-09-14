@@ -38,5 +38,16 @@ int main(void) {
  n=0;assert(cnk_operation_result_copy_bytes(op,NULL,&n)==CNK_OK&&n==6);cnk_operation_free(op);
  p=profile("3.0.0");admin.kind=CNK_ADMIN_SET_LEGACY_OPENPGP_TOUCH;admin.present=0;admin.values=0;
  assert(cnk_admin_new(p,&admin,NULL,&op,NULL)==CNK_PROTOCOL_ERROR&&op==NULL);cnk_profile_free(p);
+ p=profile("2.0.0");cnk_profile_t *enabled=NULL;
+ cnk_error_v1 error={0};error.struct_size=1;
+ assert(cnk_profile_with_legacy_piv_extensions(p,1,&enabled,&error)==CNK_INVALID_ARGUMENT&&enabled==NULL);
+ error.struct_size=sizeof(error);error.presence_flags=3;error.status_word=0x6983;
+ assert(cnk_profile_with_legacy_piv_extensions(p,1,&enabled,&error)==CNK_OK&&error.presence_flags==0);
+ cnk_profile_free(enabled);enabled=NULL;
+ assert(cnk_profile_with_legacy_piv_extensions(p,1,&enabled,NULL)==CNK_OK&&enabled!=NULL);
+ cnk_profile_free(p);cnk_profile_free(enabled);
+ p=profile("3.1.0");enabled=NULL;
+ assert(cnk_profile_with_legacy_piv_extensions(p,1,&enabled,NULL)==CNK_PROTOCOL_ERROR&&enabled==NULL);
+ cnk_profile_free(p);
  return 0;
 }

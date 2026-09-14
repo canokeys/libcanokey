@@ -167,6 +167,8 @@ pub enum Capability {
     AdminLegacySm2,
     /// Observed PIV applet availability.
     Piv,
+    /// PIV SELECT clears PIN and management authentication from 2.0 onward.
+    PivSelectResetsAuthentication,
     /// PIV metadata command availability.
     Metadata,
     /// NIST P-256 capability/algorithm (wire support remains context-dependent).
@@ -418,6 +420,7 @@ pub enum CompatibilityWarning {
 pub struct DeviceProfile {
     info: DeviceInfo,
     config: Option<AlgorithmConfig>,
+    legacy_piv_extensions: Option<bool>,
     warnings: Vec<CompatibilityWarning>,
 }
 impl DeviceProfile {
@@ -472,6 +475,7 @@ impl DeviceProfile {
                 piv_version: observations.piv_version,
             },
             config: observations.algorithm_config,
+            legacy_piv_extensions: None,
             warnings: observations.warnings,
         })
     }
@@ -487,13 +491,36 @@ impl DeviceProfile {
     pub fn algorithm_config(&self) -> Option<&AlgorithmConfig> {
         self.config.as_ref()
     }
+    /// Return a new snapshot with a caller-confirmed 2.x Admin PIV-extension flag.
+    /// READ CONFIG does not expose this flag. Supply it only from an explicit,
+    /// acknowledged Admin 40/07 write on this connection generation, never a lost
+    /// response or a guessed default. No credentials or global state are retained.
+    /// Rejects non-2.x/unknown firmware and conflicting observed EE configuration.
+    pub fn with_legacy_piv_extensions(&self, enabled: bool) -> Result<Self, Error> {
+        self.capability(Capability::AdminLegacyPivExtensions)
+            .require()?;
+        if self.config.is_some() {
+            return Err(Error::new(ErrorKind::InvalidArgument));
+        }
+        let mut profile = self.clone();
+        profile.legacy_piv_extensions = Some(enabled);
+        Ok(profile)
+    }
+    /// Caller-confirmed 2.x extension enablement, absent when not established.
+    pub fn legacy_piv_extensions(&self) -> Option<bool> {
+        self.legacy_piv_extensions
+    }
     /// Resolve a feature using observations, recognized firmware, or conservative fallback.
     /// Never probes the card or changes this snapshot.
     pub fn capability(&self, feature: Capability) -> CapabilityStatus {
         use {Evidence::*, Support::*};
         match feature {
-            Capability::ObjectWrites => return self.firmware_range((1, 5, 2), (3, 1, 0)),
-            Capability::ObjectWriteChaining => return self.firmware_range((1, 5, 2), (3, 1, 0)),
+            Capability::PivReset => return self.firmware_range((1, 3, 0), (3, 1, 0)),
+            Capability::PivSelectResetsAuthentication => {
+                return self.firmware_range((2, 0, 0), (3, 1, 0))
+            }
+            Capability::ObjectWrites => return self.firmware_range((1, 3, 0), (3, 1, 0)),
+            Capability::ObjectWriteChaining => return self.firmware_range((1, 3, 0), (3, 1, 0)),
             Capability::Oath => return self.firmware_range((1, 3, 0), (3, 1, 0)),
             Capability::OathLegacy => return self.firmware_range((1, 3, 0), (1, 3, 0)),
             Capability::OathModern => return self.firmware_range((1, 5, 2), (3, 1, 0)),
@@ -537,8 +564,7 @@ impl DeviceProfile {
             | Capability::RetryReset
             | Capability::AlgorithmConfigWrite
             | Capability::Sm2Agreement
-            | Capability::Attestation
-            | Capability::PivReset => return self.firmware_range((3, 1, 0), (3, 1, 0)),
+            | Capability::Attestation => return self.firmware_range((3, 1, 0), (3, 1, 0)),
             _ => {}
         }
         if feature == Capability::Piv {
@@ -552,6 +578,12 @@ impl DeviceProfile {
             };
         }
         if feature == Capability::AlgorithmExtensions {
+            if let Some(enabled) = self.legacy_piv_extensions {
+                return CapabilityStatus {
+                    support: if enabled { Supported } else { Unsupported },
+                    evidence: Observed,
+                };
+            }
             if self
                 .warnings
                 .contains(&CompatibilityWarning::OptionalCommandUnsupported(
@@ -611,11 +643,11 @@ impl DeviceProfile {
         }
     }
     /// Resolve management-key algorithm support for both External and Mutual modes.
-    /// Firmware 1.5.2..=3.0.3 uses 3DES; 3.1.0 uses AES-192. Unrecognized,
+    /// Firmware 1.3..=3.0.3 uses 3DES; 3.1.0 uses AES-192. Unrecognized,
     /// development and newer firmware remain Unknown; no algorithm is tried implicitly.
     pub fn management_key_support(&self, algorithm: ManagementKeyAlgorithm) -> CapabilityStatus {
         match algorithm {
-            ManagementKeyAlgorithm::Tdes => self.firmware_range((1, 5, 2), (3, 0, 3)),
+            ManagementKeyAlgorithm::Tdes => self.firmware_range((1, 3, 0), (3, 0, 3)),
             ManagementKeyAlgorithm::Aes192 => self.firmware_range((3, 1, 0), (3, 1, 0)),
         }
     }
@@ -732,6 +764,8 @@ impl DeviceProfile {
                     Algorithm::Rsa3072 => Some(if legacy { 0x50 } else { 0x05 }),
                     Algorithm::Rsa4096 => Some(if legacy { 0x51 } else { 0x16 }),
                     Algorithm::X25519 => Some(if legacy { 0x52 } else { 0xe1 }),
+                    Algorithm::Secp256k1 if legacy => Some(0x53),
+                    Algorithm::Sm2 if legacy => Some(0x54),
                     _ => None,
                 }
             }
@@ -759,11 +793,11 @@ impl DeviceProfile {
         .find(|a| self.algorithm_wire_id(*a) == Some(id))
     }
     /// Whether a slot reference is implemented in the inspected firmware range.
-    /// Primary slots are available from 1.5.2; 82/83 from 2.0; 84..95 from 3.1.
+    /// Primary slots are available from 1.3; 82/83 from 2.0; 84..95 from 3.1.
     /// Management/PIN references are not asymmetric slots.
     pub fn piv_slot_support(&self, reference: u8) -> CapabilityStatus {
         match reference {
-            0x9a | 0x9c | 0x9d | 0x9e => self.firmware_range((1, 5, 2), (3, 1, 0)),
+            0x9a | 0x9c | 0x9d | 0x9e => self.firmware_range((1, 3, 0), (3, 1, 0)),
             0x82 | 0x83 => self.firmware_range((2, 0, 0), (3, 1, 0)),
             0x84..=0x95 => self.firmware_range((3, 1, 0), (3, 1, 0)),
             _ => CapabilityStatus {
@@ -786,14 +820,15 @@ impl DeviceProfile {
                 evidence: Evidence::Observed,
             };
         }
-        self.firmware_range((2, 0, 0), (3, 1, 0))
+        self.firmware_range((3, 0, 0), (3, 1, 0))
     }
     /// Whether an asymmetric algorithm is evidenced for PIV key operations.
-    /// Extended algorithms require observed, enabled IDs; guessed fallback IDs
+    /// Extended algorithms require observed enabled IDs or a caller-confirmed 2.x
+    /// Admin switch with firmware-fixed IDs; guessed fallback IDs
     /// never authorize a key write. RSA-1024 is not implemented by inspected firmware.
     /// Ed/X operations require the encoding fixes from 3.0.1 onward.
     pub fn key_algorithm_support(&self, algorithm: Algorithm) -> CapabilityStatus {
-        let baseline = self.firmware_range((1, 5, 2), (3, 1, 0));
+        let baseline = self.firmware_range((1, 3, 0), (3, 1, 0));
         if baseline.support != Support::Supported {
             return baseline;
         }
@@ -817,6 +852,17 @@ impl DeviceProfile {
                 }
                 CapabilityStatus {
                     support: match &self.config {
+                        None if self
+                            .capability(Capability::AdminLegacyPivExtensions)
+                            .support
+                            == Support::Supported =>
+                        {
+                            match self.legacy_piv_extensions {
+                                Some(true) => Support::Supported,
+                                Some(false) => Support::Unsupported,
+                                None => Support::Unknown,
+                            }
+                        }
                         Some(_) if self.extension_wire_id(algorithm).is_some() => {
                             Support::Supported
                         }

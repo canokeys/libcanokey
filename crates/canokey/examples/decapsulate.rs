@@ -7,11 +7,11 @@ use support::{execute, AppResult, Card};
 fn main() -> AppResult<()> {
     // Probe the synthetic device, including its configurable ML-KEM wire ID (57).
     let mut card = Card::new(&[
-        (&[0, 0xa4, 4, 0, 5, 0xf0, 0, 0, 0, 0], &[0x90, 0]),
+        (&[0, 0xa4, 4, 0, 5, 0xf0, 0, 0, 0, 0, 0], &[0x90, 0]),
         (&[0, 0x31, 0, 0, 0], b"3.1.0\x90\x00"),
         (&[0, 0x31, 1, 0, 0], &[0x6d, 0]),
         (&[0, 0x32, 0, 0, 0], &[0x6d, 0]),
-        (&[0, 0xa4, 4, 0, 5, 0xa0, 0, 0, 3, 8], &[0x90, 0]),
+        (&[0, 0xa4, 4, 0, 5, 0xa0, 0, 0, 3, 8, 0], &[0x90, 0]),
         (&[0, 0xfd, 0, 0, 0], &[5, 7, 0, 0x90, 0]),
         (
             &[0, 0xee, 1, 0, 0],

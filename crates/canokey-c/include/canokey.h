@@ -226,6 +226,10 @@ cnk_status_t cnk_operation_take_profile(cnk_operation_t *,cnk_profile_t **);
 cnk_status_t cnk_operation_result_copy_bytes(const cnk_operation_t *,uint8_t *,size_t *);
 cnk_status_t cnk_operation_pin_status(const cnk_operation_t *,cnk_pin_status_v1 *);
 cnk_status_t cnk_profile_firmware_text(const cnk_profile_t *,uint8_t *,size_t *);
+/* Copy a 2.x snapshot after a confirmed Admin 40/07 write on the same device.
+ * enabled=0/1; never infer from lost responses. Caller owns the new *out. */
+cnk_status_t cnk_profile_with_legacy_piv_extensions(const cnk_profile_t *, uint32_t enabled,
+ cnk_profile_t **out, cnk_error_v1 *error);
 cnk_status_t cnk_profile_piv_support(const cnk_profile_t *,uint32_t *);
 cnk_status_t cnk_operation_cancel(cnk_operation_t *);
 cnk_status_t cnk_operation_state(const cnk_operation_t *,uint32_t *);

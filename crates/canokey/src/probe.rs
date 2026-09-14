@@ -7,8 +7,7 @@ use canokey_protocol::{
     Phase,
 };
 use compatibility::{
-    AlgorithmConfig, Capability, CompatibilityWarning, DeviceObservations, PivApplicationVersion,
-    Support,
+    AlgorithmConfig, CompatibilityWarning, DeviceObservations, PivApplicationVersion, Support,
 };
 /// Read-only discovery scope. Both modes select Admin and change applet state.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -125,7 +124,7 @@ impl Machine<DeviceProfile> for Probe {
                 _ => return Err(Error::new(ErrorKind::ProtocolViolation)),
             }
         }
-        let command: LogicalCommand = match self.stage {
+        let mut command: LogicalCommand = match self.stage {
             0 => admin::command::select(),
             1 => admin::command::firmware(),
             2 => admin::command::model(),
@@ -135,8 +134,7 @@ impl Machine<DeviceProfile> for Probe {
             5 => piv::command::version(),
             6 => {
                 let profile = DeviceProfile::from_observations(self.observations.clone())?;
-                if profile.capability(Capability::AlgorithmExtensions).support != Support::Supported
-                {
+                if profile.algorithm_config_read_support().support != Support::Supported {
                     return self.finish();
                 }
                 piv::command::algorithm_config()
@@ -144,6 +142,11 @@ impl Machine<DeviceProfile> for Probe {
             7 => return self.finish(),
             _ => return Err(Error::new(ErrorKind::ProtocolViolation)),
         };
+        // SELECT is used before actual firmware is known; explicit short Le is
+        // compatible with every audited release and prevents legacy empty 61 loops.
+        if command.le == canokey_protocol::ExpectedLength::Absent {
+            command.le = canokey_protocol::ExpectedLength::Exact(256);
+        }
         self.stage += 1;
         Ok(Action::Command(command))
     }

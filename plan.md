@@ -16,11 +16,14 @@
 
 ## Compatibility and adoption
 
-Admin, OATH and OpenPGP factories now select audited historical layouts from actual
-firmware with independent feature gates. Legacy CTAP SM2 identifiers remain explicit
-raw native-layout bytes until byte order is established for the target hardware.
-Hardware/usbip checks remain necessary to
-establish interoperability across firmware and transport variants.
+- Validate Admin/OATH/OpenPGP/PIV against hardware or usbip on the ckman catalog:
+  1.3, 1.5.2, 1.6.1, 1.6.2, 2.0.x, 3.0.x and 3.1.0. Check authentication,
+  legacy TLV lengths, pagination boundaries, command chaining and cancellation.
+  Offline transcript tests establish command behavior, not device interoperability.
+- Establish legacy CTAP SM2 integer byte order for each target before offering
+  typed identifier conversion; the existing raw nine-byte interface preserves data.
+- Split PIV Ed/X read/generate/import/private-operation evidence if enabling more
+  pre-3.0.1 operations. Keep known signing/import bug gates until independently tested.
 
 Consumer integration, FIDO/CTAP operations and Python bindings require separate
 scope. Integrate PKCS#11 first, then Console/ckman, with one connection lease and

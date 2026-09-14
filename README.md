@@ -56,11 +56,14 @@ protocol state.
 - Explicit Batch requests under one SELECT, with completed results retained after
   a later failure; corresponding C factories and indexed result getters.
 
-Admin, OATH and OpenPGP factories target known 3.1.0 firmware; PIV uses its existing
-version matrix. Every semantic factory checks required evidence. PIV `sign_streaming`
+Firmware compatibility covers audited 1.3–3.1.0 layouts with per-operation gates.
+Legacy OATH commands, OpenPGP DO framing and Admin configuration fields are selected
+from actual Admin firmware; unknown/development versions do not enable mutations.
+See [compatibility contracts](docs/api-design.md#profiles-and-probing) for the model
+and each applet's historical restrictions. Every factory checks required evidence. PIV `sign_streaming`
 handles ML-DSA and empty Ed25519 messages explicitly; SM2 initiators require PIN
 Never/Once and peer keys supplied at construction. See [plan](plan.md) for firmware
-limitations and compatibility work. Validation uses pinned sources and offline
+limitations and remaining hardware validation. Validation uses pinned sources and offline
 transcripts; hardware checks and consumer integration remain separate.
 
 ## Examples
@@ -71,6 +74,7 @@ challenges and certificate payloads are fixtures, not production inputs.
 
 | Example | Demonstrates |
 | --- | --- |
+| [historical](crates/canokey/examples/historical.rs) | Firmware 1.3 OATH LIST and profile-aware OpenPGP field parsing |
 | [openpgp](crates/canokey/examples/openpgp.rs) | Observed key attributes, explicit PW1-sign and owned signature |
 | [oath](crates/canokey/examples/oath.rs) | Caller-supplied TOTP time step and owned code bytes |
 | [admin](crates/canokey/examples/admin.rs) | Explicit PIN and configuration patch under one SELECT |

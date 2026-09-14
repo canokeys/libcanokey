@@ -105,7 +105,7 @@ fn metadata_legacy_status_and_slot_gates_are_narrow() {
             Default::default(),
         )
         .unwrap();
-        selected(&mut op);
+        selected_with_le(&mut op, true);
         let error = op.advance(&[0x69, 0]).unwrap_err();
         assert_eq!(
             error.kind,
@@ -126,7 +126,7 @@ fn metadata_legacy_status_and_slot_gates_are_narrow() {
     .is_err());
     let mut op =
         read_algorithm_config(&profile("3.0.3"), Access::None, Default::default()).unwrap();
-    selected(&mut op);
+    selected_with_le(&mut op, true);
     assert_eq!(op.command().unwrap().as_bytes(), hex("00ee010000"));
     op.advance(&[0, 0xe0, 5, 0x16, 0xe1, 0x53, 0x55, 0x90, 0])
         .unwrap();
@@ -418,7 +418,7 @@ fn sm2_signature_encoding_follows_firmware_and_preserves_original_bytes() {
             Default::default(),
         )
         .unwrap();
-        selected(&mut op);
+        selected_with_le(&mut op, version == "3.0.3");
         op.advance(&response(&tlv(&[0x7c], &tlv(&[0x82], wire))))
             .unwrap();
         let signature = op.take_result().unwrap();
@@ -437,7 +437,7 @@ fn sm2_signature_encoding_follows_firmware_and_preserves_original_bytes() {
             Default::default(),
         )
         .unwrap();
-        selected(&mut op);
+        selected_with_le(&mut op, version == "3.0.3");
         assert_eq!(
             op.advance(&response(&tlv(&[0x7c], &tlv(&[0x82], wrong))))
                 .unwrap_err()

@@ -22,10 +22,17 @@ pub fn access() -> Access {
     ))
 }
 pub fn selected<T>(op: &mut Operation<T>) {
+    selected_with_le(op, false);
+}
+pub fn selected_with_le<T>(op: &mut Operation<T>, explicit_le: bool) {
     assert_eq!(op.start().unwrap(), Step::Exchange);
     assert_eq!(
         op.command().unwrap().as_bytes(),
-        hex("00a4040005a000000308")
+        hex(if explicit_le {
+            "00a4040005a00000030800"
+        } else {
+            "00a4040005a000000308"
+        })
     );
     op.advance(&[0x90, 0]).unwrap();
 }

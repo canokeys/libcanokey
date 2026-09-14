@@ -11,6 +11,7 @@ enum Stage {
 }
 struct Selected<T> {
     stage: Stage,
+    explicit_le: bool,
     management: Option<ManagementMachine>,
     pin: Option<Pin>,
     target: Box<dyn Machine<T>>,
@@ -55,7 +56,7 @@ impl<T> Machine<T> for Selected<T> {
         }
     }
     fn next(&mut self, response: Option<ResponseData>) -> Result<Action<T>, Error> {
-        match self.stage {
+        let mut action = match self.stage {
             Stage::Begin => {
                 self.stage = Stage::Select;
                 Ok(Action::Command(command::select()))
@@ -82,7 +83,15 @@ impl<T> Machine<T> for Selected<T> {
                 self.target.next(None)
             }
             Stage::Target => self.target.next(response),
+        }?;
+        if self.explicit_le {
+            if let Action::Command(c) = &mut action {
+                if c.le == canokey_protocol::ExpectedLength::Absent {
+                    c.le = canokey_protocol::ExpectedLength::Exact(256);
+                }
+            }
         }
+        Ok(action)
     }
 }
 
@@ -110,6 +119,7 @@ pub(crate) fn with_access<T: 'static>(
     Operation::from_machine(
         Selected {
             stage: Stage::Begin,
+            explicit_le: profile.legacy_explicit_le(),
             management: management.map(ManagementMachine::new),
             pin,
             target: Box::new(target),

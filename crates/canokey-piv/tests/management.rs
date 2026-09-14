@@ -29,7 +29,7 @@ struct Vector {
 }
 // AES-192 FIPS 197 example and three-key TDEA known-answer inputs. Both directions
 // and separate all-zero host challenges were cross-checked with OpenSSL 3 enc.
-const VECTORS: [Vector; 2] = [
+const VECTORS: [Vector; 3] = [
     Vector {
         algorithm: ManagementKeyAlgorithm::Tdes,
         version: "3.0.3",
@@ -46,6 +46,14 @@ const VECTORS: [Vector; 2] = [
         cipher: "dda97ca4864cdfe06eaf70a0ec0d7191",
         encrypted_zero: "916251821c73a522c396d62738019607",
     },
+    Vector {
+        algorithm: ManagementKeyAlgorithm::Tdes,
+        version: "1.3",
+        key: "0123456789abcdef23456789abcdef01456789abcdef0123",
+        plain: "fedcba9876543210",
+        cipher: "0737f6c53750d4a4",
+        encrypted_zero: "4eba739c998bcb60",
+    },
 ];
 fn auth(v: &Vector, mutual: bool) -> ManagementAuthentication {
     let key = ManagementKey::from_bytes(v.algorithm, &hex(v.key)).unwrap();
@@ -61,30 +69,35 @@ fn reply(tag: u8, value: &[u8]) -> Vec<u8> {
     out.extend([0x90, 0]);
     out
 }
-fn selected<T>(op: &mut Operation<T>) {
+fn selected<T>(op: &mut Operation<T>, v: &Vector) {
     assert_eq!(op.start().unwrap(), Step::Exchange);
     assert_eq!(
         op.command().unwrap().as_bytes(),
-        hex("00a4040005a000000308")
+        hex(if v.algorithm == ManagementKeyAlgorithm::Tdes {
+            "00a4040005a00000030800"
+        } else {
+            "00a4040005a000000308"
+        })
     );
     op.advance(&[0x90, 0]).unwrap();
 }
 fn authenticate<T>(op: &mut Operation<T>, v: &Vector, mutual: bool) -> Step {
     let id = v.algorithm.wire_id();
-    assert_eq!(
-        op.command().unwrap().as_bytes(),
-        &[
-            0,
-            0x87,
-            id,
-            0x9b,
-            4,
-            0x7c,
-            2,
-            if mutual { 0x80 } else { 0x81 },
-            0
-        ]
-    );
+    let mut expected = vec![
+        0,
+        0x87,
+        id,
+        0x9b,
+        4,
+        0x7c,
+        2,
+        if mutual { 0x80 } else { 0x81 },
+        0,
+    ];
+    if v.algorithm == ManagementKeyAlgorithm::Tdes {
+        expected.push(0);
+    }
+    assert_eq!(op.command().unwrap().as_bytes(), expected);
     op.advance(&reply(
         if mutual { 0x80 } else { 0x81 },
         &hex(if mutual { v.cipher } else { v.plain }),
@@ -109,6 +122,9 @@ fn authenticate<T>(op: &mut Operation<T>, v: &Vector, mutual: bool) -> Step {
         fields.len() as u8,
     ];
     command.extend(fields);
+    if v.algorithm == ManagementKeyAlgorithm::Tdes {
+        command.push(0);
+    }
     assert_eq!(op.command().unwrap().as_bytes(), command);
     if mutual {
         op.advance(&reply(0x82, &hex(v.encrypted_zero))).unwrap()
@@ -125,7 +141,7 @@ fn external_and_mutual_known_answers() {
                 authenticate_management_key(&p, auth(v, mutual), Default::default()).unwrap();
             drop(p);
             assert!(!format!("{op:?}").contains(v.key));
-            selected(&mut op);
+            selected(&mut op, v);
             assert_eq!(authenticate(&mut op, v, mutual), Step::Done);
             op.result().unwrap();
             op.result().unwrap();
@@ -147,7 +163,7 @@ fn reject_wrong_card_and_malformed_authentication_fields() {
         let mut op =
             authenticate_management_key(&profile(v.version), auth(v, true), Default::default())
                 .unwrap();
-        selected(&mut op);
+        selected(&mut op, v);
         op.advance(&reply(0x80, &hex(v.cipher))).unwrap();
         let err = op.advance(&response).unwrap_err();
         if response == reply(0x82, &[0; 16]) {
@@ -169,7 +185,7 @@ fn reject_wrong_card_and_malformed_authentication_fields() {
         let mut op =
             authenticate_management_key(&profile(v.version), auth(v, true), Default::default())
                 .unwrap();
-        selected(&mut op);
+        selected(&mut op, v);
         assert!(op.advance(&response).is_err());
         assert!(op.command().is_err());
     }
@@ -187,7 +203,7 @@ fn management_failures_have_no_pin_retries_or_blocked_pin() {
         let mut op =
             authenticate_management_key(&profile(v.version), auth(v, false), Default::default())
                 .unwrap();
-        selected(&mut op);
+        selected(&mut op, v);
         let err = op.advance(&sw).unwrap_err();
         assert_eq!(err.reference, Some(SecretReference::ManagementKey));
         assert_eq!(err.phase, Phase::Authentication);
@@ -247,7 +263,7 @@ fn cancellation_and_select_failure_never_emit_authentication_or_target() {
         )
         .unwrap();
         if stage > 0 {
-            selected(&mut op);
+            selected(&mut op, v);
         }
         if stage > 1 {
             op.advance(&reply(0x80, &hex(v.cipher))).unwrap();
@@ -279,7 +295,7 @@ fn authenticated_certificate_write_keeps_pin_next_to_target() {
         Default::default(),
     )
     .unwrap();
-    selected(&mut op);
+    selected(&mut op, v);
     assert_eq!(authenticate(&mut op, v, true), Step::Exchange);
     assert_eq!(
         op.command().unwrap().as_bytes(),
@@ -302,7 +318,7 @@ fn mutual_authentication_can_continue_but_never_correct_le() {
     let mut op =
         authenticate_management_key(&profile(v.version), auth(v, true), Default::default())
             .unwrap();
-    selected(&mut op);
+    selected(&mut op, v);
     let response = reply(0x80, &hex(v.cipher));
     let mut first = response[..6].to_vec();
     first.extend([0x61, 6]);
@@ -331,7 +347,7 @@ fn chained_write_stops_without_replay_after_intermediate_error() {
         Default::default(),
     )
     .unwrap();
-    selected(&mut op);
+    selected(&mut op, v);
     authenticate(&mut op, v, false);
     let first = op.command().unwrap().as_bytes().to_vec();
     assert_eq!(&first[..5], &[0x10, 0xdb, 0x3f, 0xff, 255]);
@@ -367,7 +383,7 @@ fn certificate_deletion_and_management_replacement_are_explicit() {
         Default::default(),
     )
     .unwrap();
-    selected(&mut op);
+    selected(&mut op, v);
     authenticate(&mut op, v, false);
     assert_eq!(
         op.command().unwrap().as_bytes(),
@@ -390,7 +406,7 @@ fn certificate_deletion_and_management_replacement_are_explicit() {
         Default::default(),
     )
     .unwrap();
-    selected(&mut op);
+    selected(&mut op, v);
     authenticate(&mut op, v, false);
     let command = op.command().unwrap().as_bytes();
     assert_eq!(&command[..8], hex("00fffffe1b0a9b18"));
