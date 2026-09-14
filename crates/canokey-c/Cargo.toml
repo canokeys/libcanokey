@@ -10,8 +10,13 @@ description = "C ABI for caller-owned CanoKey host protocol operations"
 publish = false
 
 [features]
-default = ["piv"]
+# Preserve the complete standalone C API by default. Embedders can select PIV
+# alone to remove unrelated applet factories and erased-operation variants.
+default = ["piv", "admin", "oath", "openpgp"]
 piv = []
+admin = []
+oath = []
+openpgp = []
 
 [dependencies]
 canokey.workspace = true

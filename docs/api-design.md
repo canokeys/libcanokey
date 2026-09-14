@@ -393,3 +393,10 @@ validate and preserve the complete 53/7E read response and accept one complete
 keeps ADMIN DATA/PRINTED and certificate write framing consistent without
 reintroducing TLV parsing into consumers; malformed/trailing containers fail
 before a write operation is exposed.
+
+The C ABI builds all applet factories by default. Embedders that set
+`default-features = false, features = ["piv"]` retain PIV and device probing,
+but exclude Admin operation, OATH and OpenPGP C factories and their erased
+operation variants. This is a link-time API subset: declarations in the common
+header for an excluded applet have no corresponding symbols in that build.
+PIV is the baseline C ABI; these flags do not disable its factories.

@@ -8,11 +8,17 @@
 #![deny(missing_docs)]
 mod piv_credentials;
 pub use piv_credentials::*;
+#[cfg(feature = "openpgp")]
 mod openpgp;
+#[cfg(feature = "openpgp")]
 pub use openpgp::*;
+#[cfg(feature = "oath")]
 mod oath;
+#[cfg(feature = "oath")]
 pub use oath::*;
+#[cfg(feature = "admin")]
 mod admin;
+#[cfg(feature = "admin")]
 pub use admin::*;
 mod piv_sm2;
 pub use piv_sm2::*;
@@ -85,8 +91,11 @@ pub struct CnkOperation {
     poisoned: bool,
 }
 enum Inner {
+    #[cfg(feature = "openpgp")]
     OpenPgp(Operation<canokey::openpgp::Outcome>),
+    #[cfg(feature = "oath")]
     Oath(Operation<canokey::oath::Outcome>),
+    #[cfg(feature = "admin")]
     Admin(Operation<canokey::admin::Outcome>),
     Sm2Agreement(Operation<piv::Sm2Agreement>),
     Directory(Operation<piv::MetadataDirectory>),
@@ -106,8 +115,11 @@ enum Inner {
 macro_rules! dispatch {
     ($value:expr, $op:ident => $body:expr) => {
         match $value {
+            #[cfg(feature = "openpgp")]
             Inner::OpenPgp($op) => $body,
+            #[cfg(feature = "oath")]
             Inner::Oath($op) => $body,
+            #[cfg(feature = "admin")]
             Inner::Admin($op) => $body,
             Inner::Sm2Agreement($op) => $body,
             Inner::Directory($op) => $body,
@@ -619,6 +631,7 @@ pub unsafe extern "C" fn cnk_operation_result_copy_bytes(
             return STATE;
         }
         match &op.inner {
+            #[cfg(feature = "openpgp")]
             Inner::OpenPgp(p) => match p.result() {
                 Ok(
                     canokey::openpgp::Outcome::Bytes(b)
@@ -627,6 +640,7 @@ pub unsafe extern "C" fn cnk_operation_result_copy_bytes(
                 Ok(_) => TYPE,
                 Err(_) => STATE,
             },
+            #[cfg(feature = "admin")]
             Inner::Admin(p) => match p.result() {
                 Ok(v) => match admin::result_bytes(&v.value) {
                     Some(b) => copy(&b, buffer, len),
@@ -710,6 +724,7 @@ pub unsafe extern "C" fn cnk_operation_pin_status(
             return STATE;
         }
         match &op.inner {
+            #[cfg(feature = "openpgp")]
             Inner::OpenPgp(p) => match p.result() {
                 Ok(canokey::openpgp::Outcome::PinStatus(s)) => {
                     ptr::write(
@@ -886,8 +901,11 @@ pub unsafe extern "C" fn cnk_operation_result_kind(op: *const CnkOperation, out:
             return STATE;
         }
         *out = match &op.inner {
+            #[cfg(feature = "openpgp")]
             Inner::OpenPgp(_) => 17,
+            #[cfg(feature = "oath")]
             Inner::Oath(_) => 16,
+            #[cfg(feature = "admin")]
             Inner::Admin(_) => 15,
             Inner::Probe(_) => 1,
             Inner::Unit(_) => 2,

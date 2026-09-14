@@ -441,6 +441,7 @@ unsafe fn public_key<'a>(op: *const CnkOperation) -> Result<&'a piv::PublicKey, 
         return Err(STATE);
     }
     match &op.inner {
+        #[cfg(feature = "openpgp")]
         Inner::OpenPgp(op) => match op.result().map_err(|_| STATE)? {
             canokey::openpgp::Outcome::PublicKey(key) => Ok(key),
             _ => Err(TYPE),
@@ -497,6 +498,7 @@ pub unsafe extern "C" fn cnk_operation_key_algorithm(
         if value.poisoned {
             return STATE;
         }
+        #[cfg(feature = "openpgp")]
         if let Inner::OpenPgp(inner) = &value.inner {
             match inner.result() {
                 Ok(canokey::openpgp::Outcome::Signature { algorithm, .. }) => {
