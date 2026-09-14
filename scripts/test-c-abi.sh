@@ -2,13 +2,12 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 abi_mode=${1:-full}
-abi_features=()
 case "$abi_mode" in
-    full) ;;
-    piv) abi_features=(--no-default-features --features piv) ;;
+    full) set -- ;;
+    piv) set -- --no-default-features --features piv ;;
     *) printf '%s\n' 'Usage: test-c-abi.sh [full|piv]' >&2; exit 2 ;;
 esac
-cargo build -p canokey-c --locked "${abi_features[@]}"
+cargo build -p canokey-c --locked "$@"
 abi_target_dir=$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
 abi_build_dir=$(mktemp -d "$abi_target_dir/c-abi.XXXXXX")
 trap 'rm -rf "$abi_build_dir"' EXIT
