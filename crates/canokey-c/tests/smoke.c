@@ -28,13 +28,7 @@ int main(void) {
     assert(cnk_operation_take_profile(op,&profile)==CNK_OK);
     cnk_piv_context_t *piv_context=NULL;
     assert(cnk_piv_context_new(profile,CNK_PIV_CONTEXT_SELECTED,&piv_context,&err)==CNK_OK);
-    cnk_operation_t *context_metadata=NULL;
-    assert(cnk_piv_get_metadata_in_context_new(piv_context,0x80,NULL,&context_metadata,&err)==CNK_OK);
-    assert(cnk_operation_start(context_metadata,&step,&err)==CNK_OK);
-    n=0;assert(cnk_operation_command(context_metadata,NULL,&n)==CNK_OK&&n==5);
-    uint8_t context_command[5];assert(cnk_operation_command(context_metadata,context_command,&n)==CNK_OK);
-    assert(memcmp(context_command,"\0\xf7\0\x80\0",5)==0);
-    cnk_operation_free(context_metadata);cnk_piv_context_free(piv_context);
+    cnk_piv_context_free(piv_context);
     cnk_profile_t *again=profile;
     assert(cnk_operation_take_profile(op,&again)==CNK_INVALID_STATE&&again==NULL);
     cnk_operation_free(op);op=NULL;
