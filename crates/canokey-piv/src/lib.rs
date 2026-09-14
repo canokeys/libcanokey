@@ -48,6 +48,11 @@
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 mod access;
+mod context;
+pub use context::{
+    get_metadata_in_context, read_certificate_in_context, sign_in_context, PivAccessContext,
+    PivAccessState,
+};
 /// SM2 agreement with explicitly pre-exchanged peer keys.
 pub mod sm2_agreement;
 pub use sm2_agreement::{agree_sm2, Sm2Agreement, Sm2AgreementInput, Sm2Role};
@@ -426,6 +431,12 @@ fn make<T: 'static>(
         },
         options,
     )
+}
+pub(crate) fn operation_from_sequence<T: 'static>(
+    sequence: Sequence<T>,
+    options: OperationOptions,
+) -> Result<Operation<T>, Error> {
+    Operation::from_machine(sequence, options)
 }
 fn request(command: LogicalCommand, phase: Phase, reference: Option<SecretReference>) -> Request {
     Request {

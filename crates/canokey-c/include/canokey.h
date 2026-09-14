@@ -11,12 +11,16 @@ extern "C" {
  */
 typedef struct CnkProfile cnk_profile_t;
 typedef struct CnkOperation cnk_operation_t;
+typedef struct CnkPivContext cnk_piv_context_t;
 typedef uint32_t cnk_status_t;
 typedef uint32_t cnk_step_kind_t;
 enum { CNK_OK=0, CNK_INVALID_ARGUMENT=1, CNK_INVALID_STATE=2,
        CNK_BUFFER_TOO_SMALL=3, CNK_RESULT_TYPE_MISMATCH=4,
        CNK_PROTOCOL_ERROR=5, CNK_PANIC=6 };
 enum { CNK_STEP_EXCHANGE=1, CNK_STEP_DONE=2 };
+enum { CNK_PIV_CONTEXT_SELECTED=1, CNK_PIV_CONTEXT_PIN_VERIFIED=2,
+       CNK_PIV_CONTEXT_MANAGEMENT_AUTHORIZED=3,
+       CNK_PIV_CONTEXT_PIN_AND_MANAGEMENT_AUTHORIZED=4 };
 enum { CNK_PROBE_MINIMAL=0, CNK_PROBE_PIV=1 };
 enum { CNK_SUPPORT_UNKNOWN=0, CNK_SUPPORT_SUPPORTED=1, CNK_SUPPORT_UNSUPPORTED=2 };
 enum { CNK_ERROR_INVALID_ARGUMENT=1, CNK_ERROR_INVALID_PIN=2,
@@ -116,6 +120,11 @@ cnk_status_t cnk_piv_generate_key_new(const cnk_profile_t *,const cnk_piv_key_pa
 /* RSA: five components p/q/dP/dQ/qInv, implicit e=65537. Others: one scalar/seed. */
 cnk_status_t cnk_piv_import_key_new(const cnk_profile_t *,const cnk_piv_key_parameters_v1 *,const cnk_bytes_t *,size_t count,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_get_metadata_new(const cnk_profile_t *,uint32_t reference,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_piv_context_new(const cnk_profile_t *,uint32_t state,cnk_piv_context_t **,cnk_error_v1 *);
+void cnk_piv_context_free(cnk_piv_context_t *);
+cnk_status_t cnk_piv_get_metadata_in_context_new(const cnk_piv_context_t *,uint32_t reference,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_piv_read_certificate_in_context_new(const cnk_piv_context_t *,uint32_t slot,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_piv_sign_in_context_new(const cnk_piv_context_t *,uint32_t slot,uint32_t algorithm,uint32_t kind,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_read_algorithm_config_new(const cnk_profile_t *,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_sign_new(const cnk_profile_t *,uint32_t slot,uint32_t algorithm,uint32_t kind,const uint8_t *,size_t,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 /* Explicit full-message signing. ML-DSA has empty context; only SM2 accepts

@@ -234,7 +234,7 @@ pub unsafe extern "C" fn cnk_piv_read_algorithm_config_new(
         .map_err(|e| failure(e, error))
     })
 }
-unsafe fn input(
+pub(super) unsafe fn piv_input(
     data: *const u8,
     len: usize,
     options: OperationOptions,
@@ -266,7 +266,7 @@ pub unsafe extern "C" fn cnk_piv_sign_new(
 ) -> u32 {
     create(out, error, || {
         let options = options(opts)?;
-        let data = input(data, len, options, error)?;
+        let data = piv_input(data, len, options, error)?;
         let input = match kind {
             1 => piv::SignInput::RsaEncodedBlock(data),
             2 => piv::SignInput::Digest(data),
@@ -308,7 +308,7 @@ pub unsafe extern "C" fn cnk_piv_decrypt_new(
             &profile.as_ref().ok_or(ARG)?.0,
             slot(reference)?,
             algorithm(key_algorithm)?,
-            input(data, len, options, error)?,
+            piv_input(data, len, options, error)?,
             access(auth, error)?,
             options,
         )
@@ -374,7 +374,7 @@ pub unsafe extern "C" fn cnk_piv_decapsulate_new(
         piv::decapsulate(
             &profile.as_ref().ok_or(ARG)?.0,
             slot(reference)?,
-            input(data, len, options, error)?,
+            piv_input(data, len, options, error)?,
             access(auth, error)?,
             options,
         )
@@ -722,7 +722,7 @@ pub(super) unsafe fn streaming_input(
     if user_id_len > 32 || (mode != 3 && (!user_id.is_null() || user_id_len != 0)) {
         return Err(ARG);
     }
-    let message = input(data, len, options, error)?;
+    let message = piv_input(data, len, options, error)?;
     match mode {
         1 => Ok(piv::StreamingSignInput::MlDsa65(message)),
         2 => Ok(piv::StreamingSignInput::Ed25519Randomized(message)),

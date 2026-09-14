@@ -27,6 +27,8 @@ use canokey::{
     compatibility::{Capability, DeviceProfile, Support},
     piv, Error, ErrorKind, Operation, OperationOptions, ProbeMode, ProbeOptions, SecretBytes, Step,
 };
+mod piv_context;
+pub use piv_context::CnkPivContext;
 pub use piv_mutation::*;
 use std::{
     panic::{catch_unwind, AssertUnwindSafe},

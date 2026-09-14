@@ -132,6 +132,40 @@ fn metadata_legacy_status_and_slot_gates_are_narrow() {
         .unwrap();
     assert!(!op.result().unwrap().enabled());
 }
+
+#[test]
+fn caller_owned_context_does_not_select_or_authenticate() {
+    let p = profile("3.1.0");
+    let context = PivAccessContext::selected(&p).unwrap();
+    let mut metadata =
+        get_metadata_in_context(&context, MetadataReference::Pin, Default::default()).unwrap();
+    assert_eq!(metadata.start().unwrap(), Step::Exchange);
+    assert_eq!(metadata.command().unwrap().as_bytes(), hex("00f7008000"));
+
+    let mut certificate =
+        read_certificate_in_context(&context, Slot::Authentication, Default::default()).unwrap();
+    assert_eq!(certificate.start().unwrap(), Step::Exchange);
+    assert_eq!(
+        certificate.command().unwrap().as_bytes(),
+        hex("00cb3fff055c035fc10500")
+    );
+
+    let mut signing = sign_in_context(
+        &context,
+        Slot::Signature,
+        Algorithm::EccP256,
+        SignInput::Digest(SecretBytes::new(vec![0x11; 32])),
+        Default::default(),
+    )
+    .unwrap();
+    assert_eq!(signing.start().unwrap(), Step::Exchange);
+    assert!(!signing
+        .command()
+        .unwrap()
+        .as_bytes()
+        .starts_with(&[0, 0xa4]));
+    assert_ne!(signing.command().unwrap().as_bytes()[1], 0x20);
+}
 #[test]
 fn generation_and_import_are_authenticated_and_never_replayed() {
     let mut params = KeyParameters::new(Slot::Signature, Algorithm::EccP256);
