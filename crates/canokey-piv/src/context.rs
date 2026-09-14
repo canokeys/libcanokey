@@ -1,7 +1,7 @@
 //! Caller-owned PIV transaction contexts.
 use crate::{
     Algorithm, Certificate, DeviceProfile, Error, ErrorKind, Metadata, MetadataReference, ObjectId,
-    Operation, OperationOptions, SignInput, Signature, Slot,
+    Operation, OperationOptions, SignInput, Signature, Slot, StreamingSignInput,
 };
 use canokey_compat::Capability;
 
@@ -122,4 +122,17 @@ pub fn sign_in_context(
     context.require_selected()?;
     let sequence = super::private::prepare_sign(&context.profile, slot, algorithm, input, options)?;
     super::operation_from_sequence(&context.profile, sequence, options)
+}
+
+/// Sign a complete ML-DSA, Ed25519, or SM2 message using the caller's selected
+/// transaction. This operation never performs implicit authentication.
+pub fn sign_streaming_in_context(
+    context: &PivAccessContext,
+    slot: Slot,
+    input: StreamingSignInput,
+    options: OperationOptions,
+) -> Result<Operation<Signature>, Error> {
+    context.require_selected()?;
+    let machine = super::streaming::prepare_sign_streaming(&context.profile, slot, input, options)?;
+    super::operation_from_machine(machine, options)
 }

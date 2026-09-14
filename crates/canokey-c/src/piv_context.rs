@@ -128,3 +128,41 @@ pub unsafe extern "C" fn cnk_piv_sign_in_context_new(
         .map_err(|e| failure(e, error))
     })
 }
+
+/// Construct an explicitly selected streaming sign operation without SELECT
+/// or implicit authentication. Modes are CNK_STREAM_* constants.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_sign_streaming_in_context_new(
+    context: *const CnkPivContext,
+    slot_reference: u32,
+    mode: u32,
+    message: *const u8,
+    message_len: usize,
+    user_id: *const u8,
+    user_id_len: usize,
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        let context = context_ref(context)?;
+        let options = options(opts)?;
+        let message = piv_input(message, message_len, options, error)?;
+        let input = match mode {
+            1 => piv::StreamingSignInput::MlDsa65(message),
+            2 => piv::StreamingSignInput::Ed25519Randomized(message),
+            3 => piv::StreamingSignInput::Sm2 {
+                message,
+                user_id: if user_id_len == 0 {
+                    None
+                } else {
+                    Some(bytes(user_id, user_id_len)?.to_vec())
+                },
+            },
+            _ => return Err(ARG),
+        };
+        piv::sign_streaming_in_context(&context.0, slot(slot_reference)?, input, options)
+            .map(Inner::Signature)
+            .map_err(|e| failure(e, error))
+    })
+}

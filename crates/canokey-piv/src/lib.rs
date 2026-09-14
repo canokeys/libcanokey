@@ -50,8 +50,8 @@
 mod access;
 mod context;
 pub use context::{
-    get_metadata_in_context, read_certificate_in_context, sign_in_context, PivAccessContext,
-    PivAccessState,
+    get_metadata_in_context, read_certificate_in_context, sign_in_context,
+    sign_streaming_in_context, PivAccessContext, PivAccessState,
 };
 /// SM2 agreement with explicitly pre-exchanged peer keys.
 pub mod sm2_agreement;
@@ -448,6 +448,14 @@ pub(crate) fn operation_from_sequence<T: 'static>(
         canokey_protocol::operation::validate_command(&request.command, options)?;
     }
     Operation::from_machine(sequence, options)
+}
+
+pub(crate) fn operation_from_machine<T: 'static>(
+    machine: impl Machine<T> + 'static,
+    options: OperationOptions,
+) -> Result<Operation<T>, Error> {
+    options.validate()?;
+    Operation::from_machine(machine, options)
 }
 fn request(command: LogicalCommand, phase: Phase, reference: Option<SecretReference>) -> Request {
     Request {
