@@ -9,6 +9,10 @@ homepage.workspace = true
 description = "C ABI for caller-owned CanoKey host protocol operations"
 publish = false
 
+[features]
+default = ["piv"]
+piv = []
+
 [dependencies]
 canokey.workspace = true
 
