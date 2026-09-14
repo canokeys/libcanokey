@@ -47,6 +47,9 @@
 //!
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
+/// Strict parsing of host-managed PIV management-protection objects.
+pub mod protection;
+pub use protection::{protected_management_key_from_object, ManagementProtection};
 mod access;
 mod context;
 pub use context::{

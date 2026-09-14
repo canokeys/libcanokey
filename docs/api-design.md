@@ -351,6 +351,12 @@ these boundaries. Package reuse does not establish device support.
 
 ## Bindings
 
+`ManagementProtection` parses bounded ADMIN DATA and preserves stored flags.
+Empty policy is distinct from malformed data; a blocked-PUK flag is a claim that
+callers must verify against live retries. The PRINTED decoder requires exact
+53/88/89 nesting and returns owned, zeroizing key bytes without authenticating
+them. C callers use the same parsers with output atomicity and size-query rules.
+
 Container names use `ContainerNameReference`: ordinary key slots or attestation
 reference F9. This does not widen ordinary key-operation slots. Name reads and
 writes have selected-context factories; writes require existing management

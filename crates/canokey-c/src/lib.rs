@@ -6,6 +6,8 @@
 //! library, accessed without concurrent mutation, and freed exactly once.
 //! A non-null versioned struct must contain at least its declared supported prefix.
 #![deny(missing_docs)]
+mod piv_protection;
+pub use piv_protection::*;
 mod piv_credentials;
 pub use piv_credentials::*;
 #[cfg(feature = "openpgp")]
