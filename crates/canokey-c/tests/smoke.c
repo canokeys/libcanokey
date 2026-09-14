@@ -34,6 +34,9 @@ int main(void) {
     cnk_piv_context_t *piv_context=NULL;
     assert(cnk_piv_context_new(profile,CNK_PIV_CONTEXT_SELECTED,&piv_context,&err)==CNK_OK);
     cnk_piv_context_free(piv_context);
+    cnk_error_v1 admission={0};admission.struct_size=sizeof(admission);
+    assert(cnk_profile_piv_require_algorithm(profile,CNK_ALGORITHM_RSA2048,&admission)==CNK_PROTOCOL_ERROR);
+    assert(admission.kind==CNK_ERROR_CAPABILITY_UNKNOWN && admission.presence_flags==0);
     cnk_profile_t *again=profile;
     assert(cnk_operation_take_profile(op,&again)==CNK_INVALID_STATE&&again==NULL);
     cnk_operation_free(op);op=NULL;

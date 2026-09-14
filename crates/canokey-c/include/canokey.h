@@ -276,6 +276,7 @@ cnk_status_t cnk_profile_with_legacy_piv_extensions(const cnk_profile_t *, uint3
 cnk_status_t cnk_profile_piv_support(const cnk_profile_t *,uint32_t *);
 /* Resolution reports the profile's observed mapping, not authorization. */
 cnk_status_t cnk_profile_piv_algorithm_from_wire(const cnk_profile_t *,uint32_t,uint32_t *);
+cnk_status_t cnk_profile_piv_require_algorithm(const cnk_profile_t *,uint32_t,cnk_error_v1 *);
 cnk_status_t cnk_operation_cancel(cnk_operation_t *);
 cnk_status_t cnk_operation_state(const cnk_operation_t *,uint32_t *);
 cnk_status_t cnk_operation_error(const cnk_operation_t *,cnk_error_v1 *);

@@ -46,6 +46,15 @@ int main(void) {
   assert(cnk_profile_piv_algorithm_from_wire(p, 0x1d1, &semantic) ==
              CNK_INVALID_ARGUMENT &&
          semantic == 999);
+  cnk_error_v1 admission = {0};
+  admission.struct_size = sizeof(admission);
+  assert(cnk_profile_piv_require_algorithm(p, CNK_ALGORITHM_RSA3072, &admission) == CNK_OK);
+  assert(cnk_profile_piv_require_algorithm(p, CNK_ALGORITHM_P521, &admission) == CNK_OK);
+  assert(cnk_profile_piv_require_algorithm(p, CNK_ALGORITHM_RSA1024, &admission) == CNK_PROTOCOL_ERROR);
+  assert(admission.kind == CNK_ERROR_UNSUPPORTED_FEATURE && admission.presence_flags == 0);
+  assert(cnk_profile_piv_require_algorithm(p, 0xd1, &admission) == CNK_INVALID_ARGUMENT);
+  assert(admission.kind == 0);
+  assert(cnk_profile_piv_require_algorithm(NULL, CNK_ALGORITHM_RSA2048, NULL) == CNK_INVALID_ARGUMENT);
   cnk_piv_context_t *context = NULL;
   cnk_error_v1 error;
   memset(&error, 0xCC, sizeof(error));

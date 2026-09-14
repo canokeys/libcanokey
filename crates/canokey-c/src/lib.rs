@@ -914,6 +914,44 @@ pub unsafe extern "C" fn cnk_profile_piv_algorithm_from_wire(
     })
 }
 
+/// Require observed PIV and key-algorithm support without I/O or retained state.
+/// `algorithm` is a CNK_ALGORITHM_* semantic code, never a configurable wire ID.
+/// Unsupported and unknown capabilities return distinct typed protocol errors;
+/// invalid codes/pointers return INVALID_ARGUMENT. This does not authenticate,
+/// reserve a slot, or replace an operation factory's policy and input checks.
+///
+/// # Safety
+/// profile must be live/readable without concurrent mutation or free. Optional
+/// error must be writable with initialized struct_size and must not alias profile.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_profile_piv_require_algorithm(
+    profile: *const CnkProfile,
+    algorithm: u32,
+    error: *mut CnkError,
+) -> u32 {
+    guard(|| {
+        if let Err(code) = clear_error(error) {
+            return code;
+        }
+        let Some(profile) = profile.as_ref() else {
+            return ARG;
+        };
+        let algorithm = match piv_keys::algorithm(algorithm) {
+            Ok(algorithm) => algorithm,
+            Err(code) => return code,
+        };
+        match profile
+            .0
+            .capability(Capability::Piv)
+            .require()
+            .and_then(|()| profile.0.key_algorithm_support(algorithm).require())
+        {
+            Ok(()) => OK,
+            Err(e) => failure(e, error),
+        }
+    })
+}
+
 /// Discard active operation state locally; terminal states are unchanged.
 /// No APDU or transport cancellation occurs. Drain or isolate in-flight I/O
 /// before reusing the application connection. The handle still needs free.

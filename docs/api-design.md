@@ -389,6 +389,9 @@ There is no init/finalize, result/error/key handle, borrowed internal pointer or
 thread-local last_error. Semantic integer enums are distinct from wire IDs. Use
 `cnk_profile_piv_algorithm_from_wire` for profile-aware conversion; resolution
 does not replace the operation factory's capability checks.
+`cnk_profile_piv_require_algorithm` checks observed PIV and semantic key support
+locally, preserving Unsupported versus Unknown errors without authenticating or
+retaining state. Factories still revalidate their complete operation policy.
 
 - POD begins with struct_size; reject unknown input enums/flags. NULL options means
   defaults; explicit zero budgets are invalid. ABI stability is not frozen yet.
