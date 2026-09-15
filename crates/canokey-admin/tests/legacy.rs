@@ -251,3 +251,10 @@ fn nfc_read_authentication_and_sm2_layout_have_separate_boundaries() {
         ErrorKind::UnsupportedFeature
     );
 }
+
+#[test]
+fn keyboard_keymap_requires_fixed_wire_length() {
+    let map = [0u8; 256];
+    assert_eq!(KeyboardKeymap::from_bytes(&map).unwrap().as_bytes(), &map);
+    assert!(KeyboardKeymap::from_bytes(&map[..255]).is_err());
+}
