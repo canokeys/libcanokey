@@ -47,12 +47,18 @@ pub mod command {
         LogicalCommand::new(ApduHeader::new(0, 0x45, 0, layout), keymap.to_vec(), ExpectedLength::Absent)
     }
     /// Build READ KBD keymap layout-id query.
-    pub fn read_keyboard_layout() -> LogicalCommand { read(0x46, 1) }
+    pub fn read_keyboard_layout() -> LogicalCommand { read(0x46, 0) }
     /// Build READ KBD keymap table query.
-    pub fn read_keyboard_keymap() -> LogicalCommand { read(0x46, 2) }
+    pub fn read_keyboard_keymap() -> LogicalCommand { read(0x46, 1) }
     /// Build CLEAR KBD keymap.
     pub fn clear_keyboard_keymap() -> LogicalCommand {
         LogicalCommand::new(ApduHeader::new(0, 0x47, 0, 0), vec![], ExpectedLength::Absent)
+    }
+    /// Build READ PASS configuration (INS 43).
+    pub fn pass_configuration() -> LogicalCommand { read(0x43, 0) }
+    /// Build WRITE PASS configuration (INS 44).
+    pub fn write_pass_configuration(data: &[u8]) -> LogicalCommand {
+        LogicalCommand::new(ApduHeader::new(0, 0x44, 0, 0), data.to_vec(), ExpectedLength::Absent)
     }
 }
 
