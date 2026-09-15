@@ -35,8 +35,6 @@ use canokey::{
     compatibility::{Capability, DeviceProfile, Support},
     piv, Error, ErrorKind, Operation, OperationOptions, ProbeMode, ProbeOptions, SecretBytes, Step,
 };
-mod piv_context;
-pub use piv_context::CnkPivContext;
 pub use piv_mutation::*;
 use std::{
     panic::{catch_unwind, AssertUnwindSafe},
@@ -67,11 +65,12 @@ pub struct CnkError {
 /// Caller-owned `cnk_operation_options_v1`; constructors copy these limits.
 /// NULL options selects Rust defaults. Zero explicit budgets are invalid.
 /// The logical-command input limit currently remains the Rust default.
+#[derive(Clone, Copy)]
 #[repr(C)]
 pub struct CnkOptions {
     /// Caller-supplied size in bytes; must include the entire supported struct prefix.
     pub struct_size: u32,
-    /// CNK_ALLOW_EXTENDED or zero; other input flag bits are rejected.
+    /// CNK_ALLOW_EXTENDED; PIV factories also accept CNK_PIV_USE_EXISTING.
     pub flags: u32,
     /// Maximum physical command bytes, including header and Lc/Le.
     pub max_command_bytes: u32,
@@ -417,8 +416,8 @@ pub unsafe extern "C" fn cnk_piv_read_object_new(
         piv::read_object(
             &profile.as_ref().ok_or(ARG)?.0,
             id,
-            piv::Access::None,
-            options(opts)?,
+            piv_mutation::piv_access(ptr::null(), opts, error)?,
+            piv_mutation::piv_options(opts)?,
         )
         .map(Inner::Object)
         .map_err(|e| failure(e, error))
@@ -454,8 +453,8 @@ pub unsafe extern "C" fn cnk_piv_read_certificate_new(
         piv::read_certificate(
             &profile.as_ref().ok_or(ARG)?.0,
             slot,
-            piv::Access::None,
-            options(opts)?,
+            piv_mutation::piv_access(ptr::null(), opts, error)?,
+            piv_mutation::piv_options(opts)?,
         )
         .map(Inner::Certificate)
         .map_err(|e| failure(e, error))

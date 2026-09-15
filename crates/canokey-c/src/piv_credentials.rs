@@ -98,20 +98,20 @@ pub unsafe extern "C" fn cnk_piv_unblock_pin_new(
     })
 }
 
-/// Run an explicit credential command without SELECT in an existing context.
+/// Run an explicit credential command; CNK_PIV_USE_EXISTING omits initial SELECT.
 /// action uses CNK_PIV_CREDENTIAL_*: VERIFY uses old only, LOGOUT neither,
 /// CHANGE_PIN/CHANGE_PUK both, UNBLOCK old PUK and new PIN. Credentials use the
 /// legacy raw 1..=8-byte form, preserving FF bytes; factories copy them and
 /// zeroize temporary storage. Unused spans must be empty. No implicit retry.
 /// # Safety
-/// context must be live with no concurrent mutation/free. Nonempty credential
+/// profile must be live with no concurrent mutation/free. Nonempty credential
 /// spans must be readable; NULL requires zero length. out is non-NULL/writable.
 /// Optional opts is readable; optional error is writable with initialized
 /// struct_size. All outputs are disjoint from inputs and each other. The caller
 /// holds the selected transaction through completion and owns cache updates.
 #[no_mangle]
-pub unsafe extern "C" fn cnk_piv_credential_in_context_new(
-    context: *const CnkPivContext,
+pub unsafe extern "C" fn cnk_piv_credential_new(
+    profile: *const CnkProfile,
     action: u32,
     old: *const u8,
     old_len: usize,
@@ -122,7 +122,8 @@ pub unsafe extern "C" fn cnk_piv_credential_in_context_new(
     error: *mut CnkError,
 ) -> u32 {
     create(out, error, || {
-        let context = context.as_ref().ok_or(ARG)?;
+        let options = crate::piv_mutation::piv_options(opts)?;
+        let profile = profile.as_ref().ok_or(ARG)?;
         if old_len > 8 || new_len > 8 {
             return Err(failure(Error::new(ErrorKind::InvalidPin), error));
         }
@@ -147,9 +148,14 @@ pub unsafe extern "C" fn cnk_piv_credential_in_context_new(
             },
             _ => return Err(ARG),
         };
-        piv::credential_in_context(&context.0, action, options(opts)?)
-            .map(Inner::Mutation)
-            .map_err(|e| failure(e, error))
+        piv::credential(
+            &profile.0,
+            action,
+            crate::piv_mutation::select(opts),
+            options,
+        )
+        .map(Inner::Mutation)
+        .map_err(|e| failure(e, error))
     })
 }
 

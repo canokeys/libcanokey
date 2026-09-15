@@ -103,9 +103,12 @@ pub(crate) fn with_access<T: 'static>(
 ) -> Result<Operation<T>, Error> {
     require(profile)?;
     options.validate()?;
-    canokey_protocol::operation::validate_command(&command::select(), options)?;
+    let selected = matches!(access, Access::Existing);
+    if !selected {
+        canokey_protocol::operation::validate_command(&command::select(), options)?;
+    }
     let (management, pin) = match access {
-        Access::None => (None, None),
+        Access::None | Access::Existing => (None, None),
         Access::Pin(pin) => (None, Some(pin)),
         Access::Management(auth) => (Some(auth), None),
         Access::PinAndManagement { pin, management } => (Some(management), Some(pin)),
@@ -118,7 +121,11 @@ pub(crate) fn with_access<T: 'static>(
     }
     Operation::from_machine(
         Selected {
-            stage: Stage::Begin,
+            stage: if selected {
+                Stage::Target
+            } else {
+                Stage::Begin
+            },
             explicit_le: profile.legacy_explicit_le(),
             management: management.map(ManagementMachine::new),
             pin,
@@ -139,23 +146,4 @@ pub(crate) fn prepare<T: 'static>(
         current: None,
         parse: Some(Box::new(parse)),
     })
-}
-
-// Reuse the selected wrapper's firmware encoding without its SELECT/auth stages.
-pub(crate) fn in_context<T: 'static>(
-    profile: &DeviceProfile,
-    target: impl Machine<T> + 'static,
-    options: OperationOptions,
-) -> Result<Operation<T>, Error> {
-    options.validate()?;
-    Operation::from_machine(
-        Selected {
-            stage: Stage::Target,
-            explicit_le: profile.legacy_explicit_le(),
-            management: None,
-            pin: None,
-            target: Box::new(target),
-        },
-        options,
-    )
 }

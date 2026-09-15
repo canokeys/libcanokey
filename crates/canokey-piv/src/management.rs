@@ -274,7 +274,8 @@ impl Machine<()> for ManagementMachine {
 }
 
 /// Select PIV and perform one explicit External or Mutual authentication.
-/// Owns key/challenge inputs and selects exactly once. Success is not an
+/// Owns key/challenge inputs. `select=false` reuses a caller-owned selected
+/// transaction; otherwise selects once. Success is not an
 /// authorization token for subsequent standalone operations; use Access to
 /// authenticate and execute a dependent command together.
 ///
@@ -286,9 +287,19 @@ impl Machine<()> for ManagementMachine {
 pub fn authenticate_management_key(
     profile: &DeviceProfile,
     auth: ManagementAuthentication,
+    select: bool,
     options: OperationOptions,
 ) -> Result<Operation<()>, Error> {
     require(profile)?;
     auth.validate(profile, options)?;
-    crate::access::with_access(profile, Access::None, ManagementMachine::new(auth), options)
+    crate::access::with_access(
+        profile,
+        if select {
+            Access::None
+        } else {
+            Access::Existing
+        },
+        ManagementMachine::new(auth),
+        options,
+    )
 }

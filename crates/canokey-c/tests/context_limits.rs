@@ -40,50 +40,46 @@ static ALLOCATOR: ObservedAllocator = ObservedAllocator;
 // Opaque pointee layouts never cross the ABI; only library-owned pointers do.
 #[allow(improper_ctypes)]
 extern "C" {
-    fn cnk_piv_context_new(
-        profile: *const CnkProfile,
-        state: u32,
-        out: *mut *mut CnkPivContext,
-        error: *mut CnkError,
-    ) -> u32;
-    fn cnk_piv_context_free(context: *mut CnkPivContext);
-    fn cnk_piv_sign_streaming_in_context_new(
-        context: *const CnkPivContext,
+    fn cnk_piv_sign_streaming_new(
+        context: *const CnkProfile,
         slot: u32,
         mode: u32,
         message: *const u8,
         message_len: usize,
         user_id: *const u8,
         user_id_len: usize,
+        auth: *const std::ffi::c_void,
         options: *const CnkOptions,
         out: *mut *mut CnkOperation,
         error: *mut CnkError,
     ) -> u32;
-    fn cnk_piv_write_object_in_context_new(
-        context: *const CnkPivContext,
+    fn cnk_piv_write_object_new(
+        context: *const CnkProfile,
         tag: *const u8,
         tag_len: usize,
         data: *const u8,
         data_len: usize,
+        auth: *const std::ffi::c_void,
         options: *const CnkOptions,
         out: *mut *mut CnkOperation,
         error: *mut CnkError,
     ) -> u32;
-    fn cnk_piv_write_certificate_in_context_new(
-        context: *const CnkPivContext,
+    fn cnk_piv_write_certificate_new(
+        context: *const CnkProfile,
         slot: u32,
         data: *const u8,
         data_len: usize,
+        auth: *const std::ffi::c_void,
         options: *const CnkOptions,
         out: *mut *mut CnkOperation,
         error: *mut CnkError,
     ) -> u32;
 }
 
-struct Context(*mut CnkPivContext);
+struct Context(*mut CnkProfile);
 impl Drop for Context {
     fn drop(&mut self) {
-        unsafe { cnk_piv_context_free(self.0) }
+        unsafe { cnk_profile_free(self.0) }
     }
 }
 fn context() -> Context {
@@ -120,15 +116,17 @@ fn context() -> Context {
         let mut profile = ptr::null_mut();
         assert_eq!(cnk_operation_take_profile(probe, &mut profile), 0);
         cnk_operation_free(probe);
-        let mut context = ptr::null_mut();
-        assert_eq!(
-            cnk_piv_context_new(profile, 3, &mut context, ptr::null_mut()),
-            0
-        );
-        cnk_profile_free(profile);
-        Context(context)
+        Context(profile)
     }
 }
+const EXISTING: CnkOptions = CnkOptions {
+    struct_size: size_of::<CnkOptions>() as u32,
+    flags: 2,
+    max_command_bytes: 261,
+    max_response_bytes: 258,
+    max_total_response_bytes: 1024 * 1024,
+    max_exchanges: 4096,
+};
 fn error() -> CnkError {
     CnkError {
         struct_size: size_of::<CnkError>() as u32,
@@ -163,7 +161,7 @@ fn streaming_user_id_is_rejected_before_copy_and_matches_standalone_rules() {
         let mut output = ptr::null_mut();
         let mut error = error();
         let (status, peak) = observed(|| unsafe {
-            cnk_piv_sign_streaming_in_context_new(
+            cnk_piv_sign_streaming_new(
                 context.0,
                 0x9c,
                 mode,
@@ -172,6 +170,7 @@ fn streaming_user_id_is_rejected_before_copy_and_matches_standalone_rules() {
                 input.as_ptr(),
                 len,
                 ptr::null(),
+                &EXISTING,
                 &mut output,
                 &mut error,
             )
@@ -198,23 +197,25 @@ fn mutation_payloads_are_rejected_before_allocation() {
         let mut error = error();
         let (status, peak) = observed(|| unsafe {
             if certificate {
-                cnk_piv_write_certificate_in_context_new(
+                cnk_piv_write_certificate_new(
                     context.0,
                     0x9c,
                     input.as_ptr(),
                     input.len(),
                     ptr::null(),
+                    &EXISTING,
                     &mut output,
                     &mut error,
                 )
             } else {
-                cnk_piv_write_object_in_context_new(
+                cnk_piv_write_object_new(
                     context.0,
                     tag.as_ptr(),
                     tag.len(),
                     input.as_ptr(),
                     input.len(),
                     ptr::null(),
+                    &EXISTING,
                     &mut output,
                     &mut error,
                 )

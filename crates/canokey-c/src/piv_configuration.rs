@@ -1,6 +1,6 @@
 //! C factories for PIV configuration, names, directory and key lifecycle.
 use super::*;
-use piv_mutation::{access, slot};
+use piv_mutation::{piv_access, piv_options, slot};
 pub(super) fn name_reference(value: u32) -> Result<piv::ContainerNameReference, u32> {
     if value == 0xf9 {
         Ok(piv::ContainerNameReference::Attestation)
@@ -53,8 +53,8 @@ pub unsafe extern "C" fn cnk_piv_read_metadata_directory_new(
     create(out, error, || {
         piv::read_metadata_directory(
             &profile.as_ref().ok_or(ARG)?.0,
-            access(auth, error)?,
-            options(opts)?,
+            piv_access(auth, opts, error)?,
+            piv_options(opts)?,
         )
         .map(Inner::Directory)
         .map_err(|e| failure(e, error))
@@ -78,8 +78,8 @@ pub unsafe extern "C" fn cnk_piv_read_container_name_new(
         piv::read_container_name(
             &profile.as_ref().ok_or(ARG)?.0,
             name_reference(reference)?,
-            access(auth, error)?,
-            options(opts)?,
+            piv_access(auth, opts, error)?,
+            piv_options(opts)?,
         )
         .map(Inner::ContainerName)
         .map_err(|e| failure(e, error))
@@ -109,8 +109,8 @@ pub unsafe extern "C" fn cnk_piv_set_container_name_new(
             &profile.as_ref().ok_or(ARG)?.0,
             name_reference(reference)?,
             piv::ContainerName::from_utf16le(bytes(data, len)?).map_err(|e| failure(e, error))?,
-            access(auth, error)?,
-            options(opts)?,
+            piv_access(auth, opts, error)?,
+            piv_options(opts)?,
         )
         .map(Inner::Mutation)
         .map_err(|e| failure(e, error))
@@ -136,8 +136,8 @@ pub unsafe extern "C" fn cnk_piv_move_key_new(
             &profile.as_ref().ok_or(ARG)?.0,
             slot(source)?,
             slot(target)?,
-            access(auth, error)?,
-            options(opts)?,
+            piv_access(auth, opts, error)?,
+            piv_options(opts)?,
         )
         .map(Inner::Mutation)
         .map_err(|e| failure(e, error))
@@ -161,8 +161,8 @@ pub unsafe extern "C" fn cnk_piv_delete_key_new(
         piv::delete_key(
             &profile.as_ref().ok_or(ARG)?.0,
             slot(reference)?,
-            access(auth, error)?,
-            options(opts)?,
+            piv_access(auth, opts, error)?,
+            piv_options(opts)?,
         )
         .map(Inner::Mutation)
         .map_err(|e| failure(e, error))
@@ -188,8 +188,8 @@ pub unsafe extern "C" fn cnk_piv_reset_pin_puk_retries_new(
             &profile.as_ref().ok_or(ARG)?.0,
             u8::try_from(pin_retries).map_err(|_| ARG)?,
             u8::try_from(puk_retries).map_err(|_| ARG)?,
-            access(auth, error)?,
-            options(opts)?,
+            piv_access(auth, opts, error)?,
+            piv_options(opts)?,
         )
         .map(Inner::Mutation)
         .map_err(|e| failure(e, error))
@@ -218,8 +218,8 @@ pub unsafe extern "C" fn cnk_piv_set_algorithm_config_new(
             &profile.as_ref().ok_or(ARG)?.0,
             canokey::compatibility::AlgorithmConfig::parse(bytes(data, len)?)
                 .map_err(|e| failure(e, error))?,
-            access(auth, error)?,
-            options(opts)?,
+            piv_access(auth, opts, error)?,
+            piv_options(opts)?,
         )
         .map(Inner::Mutation)
         .map_err(|e| failure(e, error))

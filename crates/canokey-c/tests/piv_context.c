@@ -69,31 +69,20 @@ int main(void) {
   assert(admission.kind == 0);
   assert(cnk_profile_piv_require_algorithm(NULL, CNK_ALGORITHM_RSA2048, NULL) ==
          CNK_INVALID_ARGUMENT);
-  cnk_piv_context_t *context = NULL;
-  cnk_error_v1 error;
-  memset(&error, 0xCC, sizeof(error));
-  error.struct_size = sizeof(error) - 1;
-  assert(cnk_piv_context_new(p, CNK_PIV_CONTEXT_SELECTED, &context, &error) ==
-         CNK_INVALID_ARGUMENT);
-  assert(context == NULL && error.kind == 0xCCCCCCCC);
-  error.struct_size = sizeof(error);
-  assert(cnk_piv_context_new(p, CNK_PIV_CONTEXT_MANAGEMENT_AUTHORIZED, &context,
-                             &error) == CNK_OK);
-  assert(context != NULL && error.kind == 0 && error.presence_flags == 0);
-  cnk_profile_free(p);
-
+  cnk_operation_options_v1 existing = {sizeof(existing), CNK_PIV_USE_EXISTING, 261, 258, 1024*1024, 4096};
+  cnk_error_v1 error = {.struct_size = sizeof(error)};
   uint8_t tag[] = {0x5f, 0xc1, 5}, value[] = {0xA5};
   cnk_operation_t *op = NULL;
-  assert(cnk_piv_write_object_in_context_new(context, tag, sizeof(tag), value,
-                                             sizeof(value), NULL, &op,
+  assert(cnk_piv_write_object_new(p, tag, sizeof(tag), value,
+                                             sizeof(value), NULL, &existing, &op,
                                              &error) == CNK_OK);
   cnk_operation_t *framed = NULL, *read = NULL;
   const uint8_t container[] = {0x53, 1, 0xA5};
-  assert(cnk_piv_write_object_container_in_context_new(
-             context, tag, sizeof(tag), container, sizeof(container), NULL,
+  assert(cnk_piv_write_object_container_new(
+             p, tag, sizeof(tag), container, sizeof(container), NULL, &existing,
              &framed, &error) == CNK_OK);
-  assert(cnk_piv_read_object_container_in_context_new(
-             context, tag, sizeof(tag), NULL, &read, &error) == CNK_OK);
+  assert(cnk_piv_read_object_container_new(
+             p, tag, sizeof(tag), &existing, &read, &error) == CNK_OK);
   cnk_operation_t *name_write = NULL, *name_read = NULL;
   uint8_t name[] = {'K', 0};
   assert(cnk_piv_container_name_validate(name, 1, &error) ==
@@ -101,25 +90,41 @@ int main(void) {
   assert(error.kind == CNK_ERROR_INVALID_ARGUMENT);
   assert(cnk_piv_container_name_validate(NULL, 0, &error) == CNK_OK &&
          error.kind == 0);
-  assert(cnk_piv_set_container_name_in_context_new(
-             context, 0xf9, name, sizeof(name), NULL, &name_write, &error) ==
+  assert(cnk_piv_set_container_name_new(
+             p, 0xf9, name, sizeof(name), NULL, &existing, &name_write, &error) ==
          CNK_OK);
-  assert(cnk_piv_read_container_name_in_context_new(
-             context, 0xf9, NULL, &name_read, &error) == CNK_OK);
+  assert(cnk_piv_read_container_name_new(
+             p, 0xf9, NULL, &existing, &name_read, &error) == CNK_OK);
   memset(name, 0, sizeof(name));
   cnk_operation_t *credential = NULL;
   uint8_t short_pin[] = {'1'};
-  assert(cnk_piv_credential_in_context_new(
-             context, CNK_PIV_CREDENTIAL_VERIFY_PIN, short_pin, 1, NULL, 0,
-             NULL, &credential, &error) == CNK_OK);
+  assert(cnk_piv_credential_new(
+             p, CNK_PIV_CREDENTIAL_VERIFY_PIN, short_pin, 1, NULL, 0,
+             &existing, &credential, &error) == CNK_OK);
   short_pin[0] = 0;
   cnk_operation_t *empty_slot = NULL;
-  assert(cnk_piv_require_empty_key_slot_in_context_new(
-             context, 0x9c, NULL, &empty_slot, &error) == CNK_OK);
-  // All borrowed inputs and the context can disappear before execution.
+  assert(cnk_piv_require_empty_key_slot_new(
+             p, 0x9c, &existing, &empty_slot, &error) == CNK_OK);
+  // Default selection and explicit reuse share a factory; inputs are copied.
+  cnk_operation_t *ordinary = NULL;
+  assert(cnk_piv_read_object_new(p, tag, sizeof(tag), NULL, &ordinary, &error) == CNK_OK);
+  uint32_t first_step = 0;
+  assert(cnk_operation_start(ordinary, &first_step, &error) == CNK_OK);
+  uint8_t first_command[32]; size_t first_len = sizeof(first_command);
+  assert(cnk_operation_command(ordinary, first_command, &first_len) == CNK_OK && first_command[1] == 0xa4);
+  cnk_operation_free(ordinary);
+  cnk_operation_options_v1 bad = existing; bad.flags |= 4;
+  assert(cnk_piv_read_object_new(p, tag, sizeof(tag), &bad, &ordinary, &error) == CNK_INVALID_ARGUMENT && ordinary == NULL);
+  bad = existing; bad.struct_size = 4;
+  assert(cnk_piv_read_object_new(p, tag, sizeof(tag), &bad, &ordinary, &error) == CNK_INVALID_ARGUMENT && ordinary == NULL);
+  const uint8_t pin[] = "123456";
+  cnk_piv_access_v1 auth = {sizeof(auth), pin, 6, NULL};
+  assert(cnk_piv_get_metadata_new(p, 0x80, &auth, &existing, &ordinary, &error) == CNK_INVALID_ARGUMENT && ordinary == NULL);
+  assert(cnk_probe_device_new(CNK_PROBE_PIV, &existing, &ordinary, &error) == CNK_INVALID_ARGUMENT && ordinary == NULL);
+  // All borrowed inputs and the profile can disappear before execution.
   memset(value, 0, sizeof(value));
   memset(tag, 0, sizeof(tag));
-  cnk_piv_context_free(context);
+  cnk_profile_free(p);
   uint32_t step = 0;
   assert(cnk_operation_start(op, &step, &error) == CNK_OK);
   const uint8_t expected[] = {0,    0xdb, 0x3f, 0xff, 8, 0x5c, 3,
@@ -205,6 +210,5 @@ int main(void) {
                                &step, &error) == CNK_OK &&
          step == CNK_STEP_DONE);
   cnk_operation_free(empty_slot);
-  cnk_piv_context_free(NULL);
   return 0;
 }

@@ -136,25 +136,36 @@ fn metadata_legacy_status_and_slot_gates_are_narrow() {
 #[test]
 fn caller_owned_context_does_not_select_or_authenticate() {
     let p = profile("3.1.0");
-    let context = PivAccessContext::selected(&p).unwrap();
-    let mut metadata =
-        get_metadata_in_context(&context, MetadataReference::Pin, Default::default()).unwrap();
+    let context = (p).clone();
+    let mut metadata = get_metadata(
+        &context,
+        MetadataReference::Pin,
+        Access::Existing,
+        Default::default(),
+    )
+    .unwrap();
     assert_eq!(metadata.start().unwrap(), Step::Exchange);
     assert_eq!(metadata.command().unwrap().as_bytes(), hex("00f7008000"));
 
-    let mut certificate =
-        read_certificate_in_context(&context, Slot::Authentication, Default::default()).unwrap();
+    let mut certificate = read_certificate(
+        &context,
+        Slot::Authentication,
+        Access::Existing,
+        Default::default(),
+    )
+    .unwrap();
     assert_eq!(certificate.start().unwrap(), Step::Exchange);
     assert_eq!(
         certificate.command().unwrap().as_bytes(),
         hex("00cb3fff055c035fc10500")
     );
 
-    let mut signing = sign_in_context(
+    let mut signing = sign(
         &context,
         Slot::Signature,
         Algorithm::EccP256,
         SignInput::Digest(SecretBytes::new(vec![0x11; 32])),
+        Access::Existing,
         Default::default(),
     )
     .unwrap();
@@ -509,12 +520,13 @@ fn agreement_and_rsa_private_operations_accept_all_evidenced_key_slots() {
         Slot::KeyManagement,
         Slot::CardAuthentication,
     ] {
-        let context = PivAccessContext::pin_verified(&p).unwrap();
-        let mut agreement = derive_in_context(
+        let context = (p).clone();
+        let mut agreement = derive(
             &context,
             slot,
             Algorithm::EccP256,
             hex(P256_POINT),
+            Access::Existing,
             Default::default(),
         )
         .unwrap();
@@ -528,11 +540,12 @@ fn agreement_and_rsa_private_operations_accept_all_evidenced_key_slots() {
             .advance(&response(&tlv(&[0x7c], &tlv(&[0x82], &secret))))
             .unwrap();
         assert_eq!(agreement.take_result().unwrap().as_bytes(), secret);
-        let mut decrypt = decrypt_in_context(
+        let mut decrypt = decrypt(
             &context,
             slot,
             Algorithm::Rsa2048,
             SecretBytes::new(vec![1; 256]),
+            Access::Existing,
             Default::default(),
         )
         .unwrap();
@@ -546,17 +559,19 @@ fn agreement_and_rsa_private_operations_accept_all_evidenced_key_slots() {
 
 #[test]
 fn raw_object_compatibility_preserves_read_and_writes_one_wrapper() {
-    let context = PivAccessContext::management_authorized(&profile("3.1.0")).unwrap();
+    let context = (profile("3.1.0")).clone();
     let id = ObjectId::from_bytes(&[0x5f, 0xc1, 9]).unwrap();
     let bytes = hex("5306800401010102");
-    let mut read = read_object_container_in_context(&context, id, Default::default()).unwrap();
+    let mut read =
+        read_object_container(&context, id, Access::Existing, Default::default()).unwrap();
     read.start().unwrap();
     read.advance(&response(&bytes)).unwrap();
     assert_eq!(read.take_result().unwrap().as_bytes(), bytes);
-    let mut write = write_object_container_in_context(
+    let mut write = write_object_container(
         &context,
         id,
         SecretBytes::new(bytes.clone()),
+        Access::Existing,
         Default::default(),
     )
     .unwrap();
@@ -566,10 +581,11 @@ fn raw_object_compatibility_preserves_read_and_writes_one_wrapper() {
         hex("00db3fff0d5c035fc1095306800401010102")
     );
     for malformed in [hex("5301005300"), hex("7000"), hex("538201"), vec![]] {
-        assert!(write_object_container_in_context(
+        assert!(write_object_container(
             &context,
             id,
             SecretBytes::new(malformed),
+            Access::Existing,
             Default::default()
         )
         .is_err());
@@ -578,7 +594,7 @@ fn raw_object_compatibility_preserves_read_and_writes_one_wrapper() {
 
 #[test]
 fn p521_general_authenticate_accepts_definite_ber_containers() {
-    let context = PivAccessContext::pin_verified(&profile("3.1.0")).unwrap();
+    let context = (profile("3.1.0")).clone();
     let mut raw = vec![0x42; 132];
     raw[0] = 1;
     raw[66] = 1;
@@ -598,22 +614,24 @@ fn p521_general_authenticate_accepts_definite_ber_containers() {
     ];
     response.extend(der);
     response.extend([0x90, 0]);
-    let mut op = sign_in_context(
+    let mut op = sign(
         &context,
         Slot::Signature,
         Algorithm::EccP521,
         SignInput::Digest(SecretBytes::new(vec![0x42; 32])),
+        Access::Existing,
         Default::default(),
     )
     .unwrap();
     op.start().unwrap();
     op.advance(&response).unwrap();
     assert_eq!(op.take_result().unwrap().to_p1363().unwrap(), raw);
-    let mut op = sign_in_context(
+    let mut op = sign(
         &context,
         Slot::Signature,
         Algorithm::EccP521,
         SignInput::Digest(SecretBytes::new(vec![0x42; 32])),
+        Access::Existing,
         Default::default(),
     )
     .unwrap();

@@ -274,36 +274,40 @@ fn batch_authentication_and_profile_invalidation_are_explicit() {
 #[test]
 fn selected_names_include_attestation_and_never_replay_writes() {
     let p = profile("3.1.0");
-    let selected = PivAccessContext::selected(&p).unwrap();
+    let selected = (p).clone();
     assert_eq!(
-        set_container_name_in_context(
+        set_container_name(
             &selected,
             Slot::Signature,
             ContainerName::from_text("key").unwrap(),
+            Access::None,
             Default::default()
         )
         .unwrap_err()
         .kind,
-        ErrorKind::SecurityStatusNotSatisfied
+        ErrorKind::InvalidArgument
     );
-    let management = PivAccessContext::management_authorized(&p).unwrap();
-    let mut write = set_container_name_in_context(
+    let management = (p).clone();
+    let mut write = set_container_name(
         &management,
         ContainerNameReference::Attestation,
         ContainerName::from_text("K").unwrap(),
+        Access::Existing,
         Default::default(),
     )
     .unwrap();
-    let mut clear = set_container_name_in_context(
+    let mut clear = set_container_name(
         &management,
         Slot::Signature,
         ContainerName::from_text("").unwrap(),
+        Access::Existing,
         Default::default(),
     )
     .unwrap();
-    let mut read = read_container_name_in_context(
+    let mut read = read_container_name(
         &selected,
         ContainerNameReference::Attestation,
+        Access::Existing,
         Default::default(),
     )
     .unwrap();

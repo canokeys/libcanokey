@@ -33,6 +33,38 @@ pub struct CnkPivAccess {
     /// Optional management descriptor; must be present for mutation factories.
     pub management: *const CnkManagement,
 }
+// The PIV-only flag must not alter options accepted by other applets.
+pub(super) unsafe fn piv_options(p: *const CnkOptions) -> Result<OperationOptions, u32> {
+    if p.is_null() {
+        return options(p);
+    }
+    if (*p).struct_size < std::mem::size_of::<CnkOptions>() as u32 {
+        return Err(ARG);
+    }
+    let mut value = *p;
+    value.flags &= !2;
+    options(&value)
+}
+pub(super) unsafe fn select(p: *const CnkOptions) -> bool {
+    p.is_null() || (*p).flags & 2 == 0
+}
+pub(super) unsafe fn piv_access(
+    p: *const CnkPivAccess,
+    opts: *const CnkOptions,
+    error: *mut CnkError,
+) -> Result<piv::Access, u32> {
+    // Validate the version and flags before reading the selection bit.
+    piv_options(opts)?;
+    let access = access(p, error)?;
+    if select(opts) {
+        return Ok(access);
+    }
+    if !matches!(access, piv::Access::None) {
+        return Err(ARG);
+    }
+    Ok(piv::Access::Existing)
+}
+
 unsafe fn algorithm(value: u32) -> Result<piv::ManagementKeyAlgorithm, u32> {
     match value {
         1 => Ok(piv::ManagementKeyAlgorithm::Tdes),
@@ -117,10 +149,12 @@ pub unsafe extern "C" fn cnk_piv_authenticate_management_key_new(
     error: *mut CnkError,
 ) -> u32 {
     create(out, error, || {
+        let options = piv_options(opts)?;
         piv::authenticate_management_key(
             &profile.as_ref().ok_or(ARG)?.0,
             management(auth, error)?,
-            options(opts)?,
+            select(opts),
+            options,
         )
         .map(Inner::Unit)
         .map_err(|e| failure(e, error))
@@ -146,7 +180,7 @@ pub unsafe extern "C" fn cnk_piv_write_object_new(
     error: *mut CnkError,
 ) -> u32 {
     create(out, error, || {
-        let options = options(opts)?;
+        let options = piv_options(opts)?;
         if data_len > options.limits.max_input_bytes {
             return Err(failure(Error::new(ErrorKind::LimitExceeded), error));
         }
@@ -154,7 +188,7 @@ pub unsafe extern "C" fn cnk_piv_write_object_new(
             &profile.as_ref().ok_or(ARG)?.0,
             piv::ObjectId::from_bytes(bytes(tag, tag_len)?).map_err(|e| failure(e, error))?,
             SecretBytes::new(bytes(data, data_len)?.to_vec()),
-            access(auth, error)?,
+            piv_access(auth, opts, error)?,
             options,
         )
         .map(Inner::Mutation)
@@ -180,7 +214,7 @@ pub unsafe extern "C" fn cnk_piv_write_certificate_new(
     error: *mut CnkError,
 ) -> u32 {
     create(out, error, || {
-        let options = options(opts)?;
+        let options = piv_options(opts)?;
         if data_len > options.limits.max_input_bytes {
             return Err(failure(Error::new(ErrorKind::LimitExceeded), error));
         }
@@ -188,7 +222,7 @@ pub unsafe extern "C" fn cnk_piv_write_certificate_new(
             &profile.as_ref().ok_or(ARG)?.0,
             slot(reference)?,
             SecretBytes::new(bytes(data, data_len)?.to_vec()),
-            access(auth, error)?,
+            piv_access(auth, opts, error)?,
             options,
         )
         .map(Inner::Mutation)
@@ -214,8 +248,8 @@ pub unsafe extern "C" fn cnk_piv_delete_certificate_new(
         piv::delete_certificate(
             &profile.as_ref().ok_or(ARG)?.0,
             slot(reference)?,
-            access(auth, error)?,
-            options(opts)?,
+            piv_access(auth, opts, error)?,
+            piv_options(opts)?,
         )
         .map(Inner::Mutation)
         .map_err(|e| failure(e, error))
@@ -255,8 +289,8 @@ pub unsafe extern "C" fn cnk_piv_set_management_key_new(
             &profile.as_ref().ok_or(ARG)?.0,
             key,
             touch,
-            access(auth, error)?,
-            options(opts)?,
+            piv_access(auth, opts, error)?,
+            piv_options(opts)?,
         )
         .map(Inner::Mutation)
         .map_err(|e| failure(e, error))
@@ -302,5 +336,67 @@ pub unsafe extern "C" fn cnk_operation_mutation_result(
             },
             _ => TYPE,
         }
+    })
+}
+
+/// Construct read object container. Honors CNK_PIV_USE_EXISTING.
+/// Inputs are copied; getters do not advance or retry the operation.
+/// # Safety
+/// Follow the crate pointer contract: profile is live, byte ranges readable,
+/// out writable/non-NULL, and optional descriptors cover initialized prefixes.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_read_object_container_new(
+    profile: *const CnkProfile,
+    tag: *const u8,
+    tag_len: usize,
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        let profile = &profile.as_ref().ok_or(ARG)?.0;
+        let options = piv_options(opts)?;
+        let access = piv_access(ptr::null(), opts, error)?;
+        let id = piv::ObjectId::from_bytes(bytes(tag, tag_len)?).map_err(|e| failure(e, error))?;
+        piv::read_object_container(profile, id, access, options)
+            .map(Inner::Object)
+            .map_err(|e| failure(e, error))
+    })
+}
+
+/// Construct write object container. Honors CNK_PIV_USE_EXISTING.
+/// Inputs are copied; getters do not advance or retry the operation.
+/// # Safety
+/// Follow the crate pointer contract: profile is live, byte ranges readable,
+/// out writable/non-NULL, and optional descriptors cover initialized prefixes.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_write_object_container_new(
+    profile: *const CnkProfile,
+    tag: *const u8,
+    tag_len: usize,
+    data: *const u8,
+    data_len: usize,
+    auth: *const CnkPivAccess,
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        let profile = &profile.as_ref().ok_or(ARG)?.0;
+        let options = piv_options(opts)?;
+        let access = piv_access(auth, opts, error)?;
+        if data_len > options.limits.max_input_bytes {
+            return Err(failure(Error::new(ErrorKind::LimitExceeded), error));
+        }
+        let id = piv::ObjectId::from_bytes(bytes(tag, tag_len)?).map_err(|e| failure(e, error))?;
+        piv::write_object_container(
+            profile,
+            id,
+            piv_input(data, data_len, options, error)?,
+            access,
+            options,
+        )
+        .map(Inner::Mutation)
+        .map_err(|e| failure(e, error))
     })
 }

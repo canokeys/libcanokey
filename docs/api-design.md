@@ -106,7 +106,7 @@ evidence. Ed/X private-operation fix gates remain separate from the switch.
 
 ## Authentication and PIV values
 
-Standalone operations select once, then apply `Access::None`, `Pin`, `Management`
+By default operations select once, then apply `Access::None`, `Pin`, `Management`
 or `PinAndManagement` before their target. None does not assert an authenticated
 session. Management precedes PIN so VERIFY stays next to PIN-always operations.
 Verify success is not an authorization object surviving SELECT or reconnect.
@@ -379,17 +379,28 @@ them. C callers use the same parsers with output atomicity and size-query rules.
 
 Container names use `ContainerNameReference`: ordinary key slots or attestation
 reference F9. This does not widen ordinary key-operation slots. Name reads and
-writes have selected-context factories; writes require existing management
-authorization and never SELECT or retry. Name clearing uses the five-byte F5
-form without enabling 6C replay. The pure C name validator supports caller-side
-preflight before card access; UTF-16 validation remains in the applet crate.
+writes use the same factories for standalone and caller-selected transactions.
+Name clearing uses the five-byte F5 form without enabling 6C replay. The pure
+C name validator supports caller-side preflight; UTF-16 validation stays in PIV.
 
-The C ABI exposes `cnk_profile_t`, `cnk_piv_context_t`, and `cnk_operation_t`
-opaque handles. Inputs are copied versioned descriptors; errors are caller-owned
-POD; results use query-size/copy. A selected PIV context copies its profile and
-caller-declared authorization state without performing I/O. The caller keeps
-the selected card transaction alive while driving dependent operations; freeing
-a context neither releases that transaction nor invalidates existing operations.
+The C ABI exposes only `cnk_profile_t` and `cnk_operation_t` opaque handles.
+Rust callers use `Access::Existing` to omit SELECT and reuse the caller's live
+card authorization. C callers set `CNK_PIV_USE_EXISTING` in operation options;
+access descriptors must then be empty. Explicit credential and management-auth
+operations still send their requested authentication, but omit SELECT. Other
+applets and standalone probe/bootstrap/selected-only factories reject the flag.
+Default/null options retain previous behavior. Read APIs with no C access
+argument also honor this flag for public object and certificate reads.
+
+This policy is not proof of authentication: firmware authorizes the actual
+command, and the host retains session policy and reservation checks. Hold one
+PC/SC transaction from SELECT through authentication and dependent operations.
+For concurrent profile refresh, hold the profile lock only during synchronous
+factory construction; factories copy their inputs before releasing it. No
+profile lock may survive into card I/O. Failed unlock discards the provisional
+operation before execution. There is no separate selected-context allocation.
+Inputs are copied versioned descriptors; errors are caller-owned POD; results
+use query-size/copy. Freeing the source profile cannot invalidate an operation.
 There is no init/finalize, result/error/key handle, borrowed internal pointer or
 thread-local last_error. Semantic integer enums are distinct from wire IDs. Use
 `cnk_profile_piv_algorithm_from_wire` for profile-aware conversion; resolution
@@ -425,7 +436,7 @@ key-usage policy; consumers such as PKCS#11/cardmod retain their own mapping and
 operation admission rules. Algorithm/peer/ciphertext validation and card PIN
 policy continue to apply, including on authentication and signature slots.
 
-For raw PIV-object compatibility APIs, selected-context container factories
+For raw PIV-object compatibility APIs, raw-container factories
 validate and preserve the complete 53/7E read response and accept one complete
 53 container for writes. Normalized value factories remain unchanged. This
 keeps ADMIN DATA/PRINTED and certificate write framing consistent without

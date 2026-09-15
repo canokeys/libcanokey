@@ -1,6 +1,6 @@
 //! Copied key/metadata descriptors and result projections.
 use super::*;
-use piv_mutation::{access, slot};
+use piv_mutation::{piv_access, piv_options, slot};
 
 pub(super) fn algorithm(value: u32) -> Result<piv::Algorithm, u32> {
     use piv::Algorithm::*;
@@ -141,8 +141,8 @@ pub unsafe extern "C" fn cnk_piv_generate_key_new(
         piv::generate_key(
             &profile.as_ref().ok_or(ARG)?.0,
             parameters(params)?,
-            access(auth, error)?,
-            options(opts)?,
+            piv_access(auth, opts, error)?,
+            piv_options(opts)?,
         )
         .map(Inner::PublicKey)
         .map_err(|e| failure(e, error))
@@ -171,8 +171,8 @@ pub unsafe extern "C" fn cnk_piv_import_key_new(
             &profile.as_ref().ok_or(ARG)?.0,
             params,
             material(params.algorithm, components, count, error)?,
-            access(auth, error)?,
-            options(opts)?,
+            piv_access(auth, opts, error)?,
+            piv_options(opts)?,
         )
         .map(Inner::Mutation)
         .map_err(|e| failure(e, error))
@@ -203,8 +203,8 @@ pub unsafe extern "C" fn cnk_piv_get_metadata_new(
         piv::get_metadata(
             &profile.as_ref().ok_or(ARG)?.0,
             reference,
-            access(auth, error)?,
-            options(opts)?,
+            piv_access(auth, opts, error)?,
+            piv_options(opts)?,
         )
         .map(Inner::Metadata)
         .map_err(|e| failure(e, error))
@@ -227,8 +227,8 @@ pub unsafe extern "C" fn cnk_piv_read_algorithm_config_new(
     create(out, error, || {
         piv::read_algorithm_config(
             &profile.as_ref().ok_or(ARG)?.0,
-            access(auth, error)?,
-            options(opts)?,
+            piv_access(auth, opts, error)?,
+            piv_options(opts)?,
         )
         .map(Inner::AlgorithmConfig)
         .map_err(|e| failure(e, error))
@@ -265,7 +265,7 @@ pub unsafe extern "C" fn cnk_piv_sign_new(
     error: *mut CnkError,
 ) -> u32 {
     create(out, error, || {
-        let options = options(opts)?;
+        let options = piv_options(opts)?;
         let data = piv_input(data, len, options, error)?;
         let input = match kind {
             1 => piv::SignInput::RsaEncodedBlock(data),
@@ -278,7 +278,7 @@ pub unsafe extern "C" fn cnk_piv_sign_new(
             slot(reference)?,
             algorithm(key_algorithm)?,
             input,
-            access(auth, error)?,
+            piv_access(auth, opts, error)?,
             options,
         )
         .map(Inner::Signature)
@@ -303,13 +303,13 @@ pub unsafe extern "C" fn cnk_piv_decrypt_new(
     error: *mut CnkError,
 ) -> u32 {
     create(out, error, || {
-        let options = options(opts)?;
+        let options = piv_options(opts)?;
         piv::decrypt(
             &profile.as_ref().ok_or(ARG)?.0,
             slot(reference)?,
             algorithm(key_algorithm)?,
             piv_input(data, len, options, error)?,
-            access(auth, error)?,
+            piv_access(auth, opts, error)?,
             options,
         )
         .map(Inner::Object)
@@ -335,7 +335,7 @@ pub unsafe extern "C" fn cnk_piv_derive_new(
     error: *mut CnkError,
 ) -> u32 {
     create(out, error, || {
-        let options = options(opts)?;
+        let options = piv_options(opts)?;
         if len > options.limits.max_input_bytes {
             return Err(failure(Error::new(ErrorKind::LimitExceeded), error));
         }
@@ -344,7 +344,7 @@ pub unsafe extern "C" fn cnk_piv_derive_new(
             slot(reference)?,
             algorithm(key_algorithm)?,
             bytes(peer, len)?.to_vec(),
-            access(auth, error)?,
+            piv_access(auth, opts, error)?,
             options,
         )
         .map(Inner::Object)
@@ -370,12 +370,12 @@ pub unsafe extern "C" fn cnk_piv_decapsulate_new(
     error: *mut CnkError,
 ) -> u32 {
     create(out, error, || {
-        let options = options(opts)?;
+        let options = piv_options(opts)?;
         piv::decapsulate(
             &profile.as_ref().ok_or(ARG)?.0,
             slot(reference)?,
             piv_input(data, len, options, error)?,
-            access(auth, error)?,
+            piv_access(auth, opts, error)?,
             options,
         )
         .map(Inner::Object)
@@ -764,15 +764,38 @@ pub unsafe extern "C" fn cnk_piv_sign_streaming_new(
     error: *mut CnkError,
 ) -> u32 {
     create(out, error, || {
-        let options = options(opts)?;
+        let options = piv_options(opts)?;
         piv::sign_streaming(
             &profile.as_ref().ok_or(ARG)?.0,
             slot(reference)?,
             streaming_input(mode, data, len, user_id, user_id_len, options, error)?,
-            access(auth, error)?,
+            piv_access(auth, opts, error)?,
             options,
         )
         .map(Inner::Signature)
         .map_err(|e| failure(e, error))
+    })
+}
+
+/// Construct require empty key slot. Honors CNK_PIV_USE_EXISTING.
+/// Inputs are copied; getters do not advance or retry the operation.
+/// # Safety
+/// Follow the crate pointer contract: profile is live, byte ranges readable,
+/// out writable/non-NULL, and optional descriptors cover initialized prefixes.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_require_empty_key_slot_new(
+    profile: *const CnkProfile,
+    reference: u32,
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        let profile = &profile.as_ref().ok_or(ARG)?.0;
+        let options = piv_options(opts)?;
+        let access = piv_access(ptr::null(), opts, error)?;
+        piv::require_empty_key_slot(profile, slot(reference)?, access, options)
+            .map(Inner::Unit)
+            .map_err(|e| failure(e, error))
     })
 }

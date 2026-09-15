@@ -227,7 +227,7 @@ pub fn reset_pin_puk_retries(
     access: Access,
     options: OperationOptions,
 ) -> Result<Operation<MutationResult>, Error> {
-    if !matches!(access, Access::PinAndManagement { .. }) {
+    if !matches!(access, Access::PinAndManagement { .. } | Access::Existing) {
         return Err(Error::new(ErrorKind::InvalidArgument));
     }
     let target = prepare_retry_reset(profile, pin_retries, puk_retries, options)?;

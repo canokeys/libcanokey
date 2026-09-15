@@ -269,3 +269,41 @@ pub(crate) fn prepare_import_key(
         write::mutation,
     )
 }
+
+/// Require fresh, explicit absence before a managed key write.
+/// This reads metadata without parsing an occupied key's algorithm or public key:
+/// any successful status means occupied, including unknown/malformed key data.
+/// The caller holds this transaction and management reservation through the write.
+/// # Errors
+/// Only an empty 6A82/6A88 response succeeds. Occupied slots return
+/// ConditionsNotSatisfied; unsupported commands, malformed absence and other
+/// failures block the write. Existing omits SELECT/authentication; this read
+/// never mutates the card.
+pub fn require_empty_key_slot(
+    profile: &DeviceProfile,
+    slot: Slot,
+    access: Access,
+    options: OperationOptions,
+) -> Result<Operation<()>, Error> {
+    profile.piv_slot_support(slot.reference()).require()?;
+    let sequence = super::access::prepare(
+        super::command::metadata(MetadataReference::Key(slot)),
+        options,
+        |response| {
+            if response.status.is_success() {
+                return Err(Error::new(ErrorKind::ConditionsNotSatisfied)
+                    .at(canokey_protocol::Phase::Command));
+            }
+            if matches!(response.status.raw(), 0x6a82 | 0x6a88) && response.data.is_empty() {
+                return Ok(());
+            }
+            if matches!(response.status.raw(), 0x6a82 | 0x6a88) {
+                return Err(
+                    Error::new(ErrorKind::InvalidResponse).at(canokey_protocol::Phase::Parsing)
+                );
+            }
+            response.ensure_success(canokey_protocol::Phase::Command)
+        },
+    )?;
+    crate::access::with_access(profile, access, sequence, options)
+}

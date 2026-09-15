@@ -31,17 +31,19 @@ pub enum CredentialAction {
     },
 }
 
-/// Run one explicit credential command in the caller's selected transaction.
-/// No SELECT, extra VERIFY, implicit retry or host-cache update occurs. The
+/// Run one explicit credential command, optionally selecting PIV first.
+/// `select=false` requires a caller-owned selected transaction. No extra VERIFY,
+/// implicit retry or host-cache update occurs. The
 /// action owns credentials; the operation owns encoded temporary copies.
 /// All successes have Unchanged profile effect, not a reusable authorization.
 /// # Errors
 /// Profile/options/command limits fail at construction. At execution, failed
 /// verification/replacement retains PIN versus PUK reference and retries;
 /// malformed replies and uncertain I/O remain terminal. Drop is not rollback.
-pub fn credential_in_context(
-    context: &PivAccessContext,
+pub fn credential(
+    profile: &DeviceProfile,
     action: CredentialAction,
+    select: bool,
     options: OperationOptions,
 ) -> Result<Operation<MutationResult>, Error> {
     let (command, reference) = match action {
@@ -60,20 +62,21 @@ pub fn credential_in_context(
             Some(SecretReference::Puk),
         ),
     };
-    super::make(
-        context.profile(),
-        vec![super::request(command, Phase::Authentication, reference)],
-        options,
-        move |response| {
-            if !response.data.is_empty() {
-                return Err(Error::new(ErrorKind::InvalidResponse).at(Phase::Parsing));
-            }
-            if let Some(reference) = reference {
-                super::require_auth(&response, reference)?;
-            } else {
-                response.ensure_success(Phase::Authentication)?;
-            }
-            Ok(super::unchanged())
-        },
-    )
+    require(profile)?;
+    let mut commands = Vec::new();
+    if select {
+        commands.push(super::request(command::select(), Phase::Select, None));
+    }
+    commands.push(super::request(command, Phase::Authentication, reference));
+    super::make(profile, commands, options, move |response| {
+        if !response.data.is_empty() {
+            return Err(Error::new(ErrorKind::InvalidResponse).at(Phase::Parsing));
+        }
+        if let Some(reference) = reference {
+            super::require_auth(&response, reference)?;
+        } else {
+            response.ensure_success(Phase::Authentication)?;
+        }
+        Ok(super::unchanged())
+    })
 }

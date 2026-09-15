@@ -11,16 +11,12 @@ extern "C" {
  */
 typedef struct CnkProfile cnk_profile_t;
 typedef struct CnkOperation cnk_operation_t;
-typedef struct CnkPivContext cnk_piv_context_t;
 typedef uint32_t cnk_status_t;
 typedef uint32_t cnk_step_kind_t;
 enum { CNK_OK=0, CNK_INVALID_ARGUMENT=1, CNK_INVALID_STATE=2,
        CNK_BUFFER_TOO_SMALL=3, CNK_RESULT_TYPE_MISMATCH=4,
        CNK_PROTOCOL_ERROR=5, CNK_PANIC=6 };
 enum { CNK_STEP_EXCHANGE=1, CNK_STEP_DONE=2 };
-enum { CNK_PIV_CONTEXT_SELECTED=1, CNK_PIV_CONTEXT_PIN_VERIFIED=2,
-       CNK_PIV_CONTEXT_MANAGEMENT_AUTHORIZED=3,
-       CNK_PIV_CONTEXT_PIN_AND_MANAGEMENT_AUTHORIZED=4 };
 enum { CNK_PROBE_MINIMAL=0, CNK_PROBE_PIV=1 };
 enum { CNK_SUPPORT_UNKNOWN=0, CNK_SUPPORT_SUPPORTED=1, CNK_SUPPORT_UNSUPPORTED=2 };
 enum { CNK_ERROR_INVALID_ARGUMENT=1, CNK_ERROR_INVALID_PIN=2,
@@ -50,7 +46,15 @@ enum { CNK_MANAGEMENT_TDES=1, CNK_MANAGEMENT_AES192=2 };
 enum { CNK_AUTH_EXTERNAL=1, CNK_AUTH_MUTUAL=2 };
 enum { CNK_MANAGEMENT_TOUCH_NEVER=0, CNK_MANAGEMENT_TOUCH_ALWAYS=1 };
 enum { CNK_PROFILE_UNCHANGED=0, CNK_PROFILE_REPROBE_REQUIRED=1 };
-enum { CNK_ALLOW_EXTENDED=1 };
+enum { CNK_ALLOW_EXTENDED=1, CNK_PIV_USE_EXISTING=2 };
+/* PIV operation factories with an access descriptor, public object/certificate
+ * reads, explicit management authentication, cnk_piv_credential_new and empty-slot factories
+ * accept USE_EXISTING: omit SELECT and reuse caller-owned card authorization.
+ * Access descriptors must be empty in this mode; explicit credential/management
+ * operations still send their requested authentication. Other applets and
+ * profile/bootstrap/selected-only factories reject this flag. NULL options
+ * retain the original selection behavior. Keep the PC/SC transaction through
+ * completion; this flag does not prove authentication or create a card session. */
 enum { CNK_PIN_HAS_VERIFIED=1, CNK_PIN_HAS_REMAINING=2, CNK_PIN_HAS_TOTAL=4 };
 typedef struct {
     uint32_t struct_size,kind,phase,reference,presence_flags;
@@ -122,24 +126,12 @@ cnk_status_t cnk_piv_import_key_new(const cnk_profile_t *,const cnk_piv_key_para
 cnk_status_t cnk_piv_get_metadata_new(const cnk_profile_t *,uint32_t reference,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 enum { CNK_PIV_CREDENTIAL_VERIFY_PIN=1, CNK_PIV_CREDENTIAL_LOGOUT=2,
        CNK_PIV_CREDENTIAL_CHANGE_PIN=3, CNK_PIV_CREDENTIAL_CHANGE_PUK=4, CNK_PIV_CREDENTIAL_UNBLOCK_PIN=5 };
-cnk_status_t cnk_piv_credential_in_context_new(const cnk_piv_context_t *,uint32_t,const uint8_t *,size_t,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_piv_credential_new(const cnk_profile_t *,uint32_t,const uint8_t *,size_t,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_select_application_new(const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
-cnk_status_t cnk_piv_context_new(const cnk_profile_t *,uint32_t state,cnk_piv_context_t **,cnk_error_v1 *);
-void cnk_piv_context_free(cnk_piv_context_t *);
-cnk_status_t cnk_piv_require_empty_key_slot_in_context_new(const cnk_piv_context_t *,uint32_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
-cnk_status_t cnk_piv_get_metadata_in_context_new(const cnk_piv_context_t *,uint32_t reference,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
-cnk_status_t cnk_piv_read_certificate_in_context_new(const cnk_piv_context_t *,uint32_t slot,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
-cnk_status_t cnk_piv_sign_in_context_new(const cnk_piv_context_t *,uint32_t slot,uint32_t algorithm,uint32_t kind,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
-cnk_status_t cnk_piv_sign_streaming_in_context_new(const cnk_piv_context_t *,uint32_t slot,uint32_t mode,const uint8_t *,size_t,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
-cnk_status_t cnk_piv_decrypt_in_context_new(const cnk_piv_context_t *,uint32_t slot,uint32_t algorithm,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
-cnk_status_t cnk_piv_derive_in_context_new(const cnk_piv_context_t *,uint32_t slot,uint32_t algorithm,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
-cnk_status_t cnk_piv_decapsulate_in_context_new(const cnk_piv_context_t *,uint32_t slot,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
-cnk_status_t cnk_piv_read_object_in_context_new(const cnk_piv_context_t *,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
-cnk_status_t cnk_piv_read_object_container_in_context_new(const cnk_piv_context_t *,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
-cnk_status_t cnk_piv_read_metadata_directory_in_context_new(const cnk_piv_context_t *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
-cnk_status_t cnk_piv_read_container_name_in_context_new(const cnk_piv_context_t *,uint32_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_piv_require_empty_key_slot_new(const cnk_profile_t *,uint32_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_piv_read_object_container_new(const cnk_profile_t *,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 /* Container-name references include ordinary key slots and F9. Validation is
- * pure and retains no input. Context writes require existing management auth. */
+ * pure and retains no input. Writes require explicit management auth or USE_EXISTING. */
 /* Pure, bounded protection-object parsing; flags are claims, not authorization. */
 cnk_status_t cnk_piv_admin_data_flags(const uint8_t *,size_t,uint32_t *,cnk_error_v1 *);
 cnk_status_t cnk_piv_printed_management_key_copy(const uint8_t *,size_t,uint8_t *,size_t *,cnk_error_v1 *);
@@ -148,14 +140,7 @@ cnk_status_t cnk_piv_read_configuration_selected_new(const cnk_operation_options
 cnk_status_t cnk_piv_random_selected_new(size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_operation_piv_configuration_copy(const cnk_operation_t *,uint8_t *,size_t *);
 cnk_status_t cnk_piv_container_name_validate(const uint8_t *,size_t,cnk_error_v1 *);
-cnk_status_t cnk_piv_set_container_name_in_context_new(const cnk_piv_context_t *,uint32_t,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
-cnk_status_t cnk_piv_write_object_in_context_new(const cnk_piv_context_t *,const uint8_t *,size_t,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
-cnk_status_t cnk_piv_write_object_container_in_context_new(const cnk_piv_context_t *,const uint8_t *,size_t,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
-cnk_status_t cnk_piv_write_certificate_in_context_new(const cnk_piv_context_t *,uint32_t,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
-cnk_status_t cnk_piv_delete_certificate_in_context_new(const cnk_piv_context_t *,uint32_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
-cnk_status_t cnk_piv_generate_key_in_context_new(const cnk_piv_context_t *,const cnk_piv_key_parameters_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
-cnk_status_t cnk_piv_import_key_in_context_new(const cnk_piv_context_t *,const cnk_piv_key_parameters_v1 *,const cnk_bytes_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
-cnk_status_t cnk_piv_authenticate_management_in_context_new(const cnk_piv_context_t *,const cnk_piv_management_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_piv_write_object_container_new(const cnk_profile_t *,const uint8_t *,size_t,const uint8_t *,size_t,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_read_algorithm_config_new(const cnk_profile_t *,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_sign_new(const cnk_profile_t *,uint32_t slot,uint32_t algorithm,uint32_t kind,const uint8_t *,size_t,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 /* Explicit full-message signing. ML-DSA has empty context; only SM2 accepts

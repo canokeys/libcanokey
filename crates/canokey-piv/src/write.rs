@@ -22,7 +22,7 @@ pub(crate) fn mutation(response: ResponseData) -> Result<MutationResult, Error> 
 pub(crate) fn require_management(access: &Access) -> Result<(), Error> {
     if matches!(
         access,
-        Access::Management(_) | Access::PinAndManagement { .. }
+        Access::Existing | Access::Management(_) | Access::PinAndManagement { .. }
     ) {
         Ok(())
     } else {
@@ -62,7 +62,7 @@ fn put_command(
 /// Select, explicitly authenticate management (then optional PIN), and PUT DATA.
 /// `data` is the normalized object value, without the outer 53 container. This
 /// factory adds 5C/53 framing and owns the input. Access must contain management
-/// authentication; None/Pin returns InvalidArgument before SELECT.
+/// authentication or Existing; None/Pin returns InvalidArgument before SELECT.
 ///
 /// # Errors
 /// Unknown/unsupported write firmware, invalid budgets and oversized encoded
@@ -199,4 +199,47 @@ pub(crate) fn prepare_set_management_key(
     }
     let command = key.replacement_command(touch == ManagementTouchPolicy::Always);
     access::prepare(command, options, mutation)
+}
+
+/// Write one complete 53 object container in a management-authorized transaction.
+/// Owns and validates the container, then emits exactly one 53 wrapper on PUT DATA.
+/// This compatibility form is for existing APIs passing framed PIV data, including
+/// certificates. Value consumers should use [`write_object`].
+///
+/// # Errors
+/// Existing delegates authorization to the card; other access must authenticate
+/// management. Invalid
+/// framing, a wrong outer tag, trailing fields, and input limits reject construction.
+/// Profile/options/card errors and uncertain-write behavior match [`write_object`].
+pub fn write_object_container(
+    profile: &DeviceProfile,
+    id: ObjectId,
+    container: SecretBytes,
+    access: Access,
+    options: OperationOptions,
+) -> Result<Operation<super::MutationResult>, Error> {
+    write::require_management(&access)?;
+    if container.len() > options.limits.max_input_bytes {
+        return Err(Error::new(ErrorKind::LimitExceeded));
+    }
+    let mut reader = canokey_protocol::tlv::TlvReader::new(
+        container.as_bytes(),
+        canokey_protocol::tlv::TlvLimits {
+            max_value_bytes: options.limits.max_input_bytes,
+            ..Default::default()
+        },
+    );
+    let value = reader
+        .next()?
+        .ok_or_else(|| Error::new(ErrorKind::InvalidArgument))?;
+    if value.tag.value() != 0x53 || reader.next()?.is_some() {
+        return Err(Error::new(ErrorKind::InvalidArgument));
+    }
+    let sequence = super::write::prepare_write_object(
+        profile,
+        id,
+        SecretBytes::new(value.value.to_vec()),
+        options,
+    )?;
+    crate::access::with_access(profile, access, sequence, options)
 }

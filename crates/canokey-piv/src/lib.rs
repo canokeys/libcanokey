@@ -52,22 +52,11 @@ pub mod protection;
 pub use protection::{protected_management_key_from_object, ManagementProtection};
 /// Explicit credential commands inside a caller-selected PIV transaction.
 pub mod credentials;
-pub use credentials::{credential_in_context, CredentialAction};
+pub use credentials::{credential, CredentialAction};
 /// Explicit version/configuration/RNG operations in an already selected applet.
 pub mod discovery;
 pub use discovery::{random_selected, read_configuration_selected, read_version_selected};
 mod access;
-mod context;
-pub use context::{
-    authenticate_management_in_context, decapsulate_in_context, decrypt_in_context,
-    delete_certificate_in_context, derive_in_context, generate_key_in_context,
-    get_metadata_in_context, import_key_in_context, read_certificate_in_context,
-    read_container_name_in_context, read_metadata_directory_in_context,
-    read_object_container_in_context, read_object_in_context, require_empty_key_slot_in_context,
-    set_container_name_in_context, sign_in_context, sign_streaming_in_context,
-    write_certificate_in_context, write_object_container_in_context, write_object_in_context,
-    PivAccessContext, PivAccessState,
-};
 /// SM2 agreement with explicitly pre-exchanged peer keys.
 pub mod sm2_agreement;
 pub use sm2_agreement::{agree_sm2, Sm2Agreement, Sm2AgreementInput, Sm2Role};
@@ -91,7 +80,9 @@ pub mod private;
 pub use private::{decapsulate, decrypt, derive, sign, SignInput, Signature, SignatureEncoding};
 /// Key generation, import material and policies.
 pub mod keys;
-pub use keys::{generate_key, import_key, KeyParameters, PrivateKeyMaterial};
+pub use keys::{
+    generate_key, import_key, require_empty_key_slot, KeyParameters, PrivateKeyMaterial,
+};
 /// Owned metadata records and key policy values.
 pub mod metadata;
 pub use metadata::{
@@ -104,7 +95,8 @@ pub use public_key::PublicKey;
 /// Authenticated object/certificate writes and management-key replacement.
 pub mod write;
 pub use write::{
-    delete_certificate, set_management_key, write_certificate, write_object, ManagementTouchPolicy,
+    delete_certificate, set_management_key, write_certificate, write_object,
+    write_object_container, ManagementTouchPolicy,
 };
 /// Management-key types and explicit External/Mutual authentication.
 pub mod management;
@@ -185,10 +177,16 @@ impl Puk {
         Ok(Self(secret(bytes)?))
     }
 }
-/// Authentication to perform after SELECT within one high-level operation.
-/// This is an owned input, not a persistent authorization token.
+/// Selection and authentication policy for one high-level operation.
+/// None/Pin/Management variants SELECT first; Existing reuses the caller's
+/// selected transaction. This owns inputs, not a persistent authorization token.
 #[derive(Clone, Debug)]
 pub enum Access {
+    /// Reuse the caller's selected PIV transaction and existing card authorization.
+    /// No SELECT or implicit authentication is sent. The caller must retain the
+    /// transaction through completion; the card enforces authorization for writes.
+    /// This is an execution policy, not proof of live authentication.
+    Existing,
     /// Perform no explicit authentication; the card may still reject access.
     None,
     /// Verify the supplied PIN immediately before the target command.
@@ -472,23 +470,6 @@ fn make<T: 'static>(
         },
         options,
     )
-}
-pub(crate) fn operation_from_sequence<T: 'static>(
-    profile: &DeviceProfile,
-    mut sequence: Sequence<T>,
-    options: OperationOptions,
-) -> Result<Operation<T>, Error> {
-    if profile.legacy_explicit_le() {
-        for request in &mut sequence.pending {
-            if request.command.le == canokey_protocol::ExpectedLength::Absent {
-                request.command.le = canokey_protocol::ExpectedLength::Exact(256);
-            }
-        }
-    }
-    for request in &sequence.pending {
-        canokey_protocol::operation::validate_command(&request.command, options)?;
-    }
-    Operation::from_machine(sequence, options)
 }
 
 fn request(command: LogicalCommand, phase: Phase, reference: Option<SecretReference>) -> Request {
@@ -803,4 +784,22 @@ pub(crate) fn prepare_read_object_format<T: 'static>(
             parse(SecretBytes::new(tlv.value.to_vec()))
         }
     })
+}
+
+/// Read a validated PIV object while retaining its complete 53/7E container.
+/// This compatibility form preserves device bytes for existing raw-object APIs;
+/// new value consumers should use [`read_object`]. The result owns and
+/// zeroizes its bytes; Existing omits SELECT and implicit authentication.
+///
+/// # Errors
+/// Profile, options, status, framing and response-limit errors are the same as
+/// [`read_object`]. Malformed containers never become successful reads.
+pub fn read_object_container(
+    profile: &DeviceProfile,
+    id: ObjectId,
+    access: Access,
+    options: OperationOptions,
+) -> Result<Operation<SecretBytes>, Error> {
+    let sequence = prepare_read_object_format(profile, id, options, true, Ok)?;
+    crate::access::with_access(profile, access, sequence, options)
 }
