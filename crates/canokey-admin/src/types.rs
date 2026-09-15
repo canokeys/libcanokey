@@ -342,6 +342,10 @@ pub enum Value {
     FlashUsage(FlashUsage),
     /// Logical usage records.
     AppletUsage(Vec<AppletUsage>),
+    /// Keyboard layout identifier.
+    KeyboardLayout(u8),
+    /// Complete keyboard HID mapping.
+    KeyboardKeymap(KeyboardKeymap),
     /// Empty-VERIFY observations.
     PinStatus(PinStatus),
     /// Vendor NFC flag.

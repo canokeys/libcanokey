@@ -444,6 +444,12 @@ impl Admin {
                         .collect(),
                 )
             }
+            Request::KeyboardLayout => {
+                if raw.len() != 1 { return Err(invalid()); }
+                Value::KeyboardLayout(raw[0])
+            }
+            Request::KeyboardKeymap => Value::KeyboardKeymap(KeyboardKeymap::from_bytes(raw)?),
+            Request::SetKeyboardKeymap { .. } | Request::ClearKeyboardKeymap => Value::None,
             Request::NfcStatus => {
                 if raw.len() != 1 || raw[0] > 1 {
                     return Err(invalid());
