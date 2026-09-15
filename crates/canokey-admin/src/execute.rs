@@ -127,6 +127,9 @@ pub fn operation(
                 | Request::SetLegacyPivExtensions(_)
                 | Request::SetLegacyOpenPgpTouch(_)
                 | Request::WriteLegacySm2(_)
+                | Request::SetKeyboardKeymap { .. }
+                | Request::ClearKeyboardKeymap
+                | Request::SetPassConfiguration(_)
         );
     if protected && pin.is_none() {
         return Err(Error::new(ErrorKind::SecurityStatusNotSatisfied));
