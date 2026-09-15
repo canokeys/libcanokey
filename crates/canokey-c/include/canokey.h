@@ -289,7 +289,9 @@ enum { CNK_ADMIN_FIRMWARE=1, CNK_ADMIN_MODEL=2, CNK_ADMIN_SERIAL=3,
   CNK_ADMIN_CONFIGURE_SM2=17, CNK_ADMIN_RESET_APPLET=18, CNK_ADMIN_FACTORY_RESET=19,
   CNK_ADMIN_SET_KEYBOARD_INTERFACE=20, CNK_ADMIN_SET_KEYBOARD_RETURN=21,
   CNK_ADMIN_SET_LEGACY_PIV_EXTENSIONS=22, CNK_ADMIN_SET_LEGACY_OPENPGP_TOUCH=23,
-  CNK_ADMIN_WRITE_LEGACY_SM2=24, CNK_RESULT_ADMIN=15 };
+  CNK_ADMIN_WRITE_LEGACY_SM2=24, CNK_ADMIN_KEYBOARD_LAYOUT=25,
+  CNK_ADMIN_KEYBOARD_KEYMAP=26, CNK_ADMIN_SET_KEYBOARD_KEYMAP=27,
+  CNK_ADMIN_CLEAR_KEYBOARD_KEYMAP=28, CNK_RESULT_ADMIN=15 };
 typedef struct {
   uint32_t struct_size, kind;
   const uint8_t *pin; size_t pin_len;
@@ -302,6 +304,7 @@ typedef struct {
   uint32_t present, values;
   uint8_t feature_mask, feature_values, reserved[2];
   int32_t curve_id, algorithm_id;
+  uint8_t layout_id; const uint8_t *keymap; size_t keymap_len;
 } cnk_admin_request_v1;
 typedef struct {
   uint32_t struct_size;

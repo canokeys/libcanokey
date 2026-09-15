@@ -34,6 +34,12 @@ pub struct CnkAdminRequest {
     pub curve_id: i32,
     /// CONFIGURE_SM2: replacement signed algorithm ID when selected.
     pub algorithm_id: i32,
+    /// Keyboard layout identifier for keymap writes.
+    pub layout_id: u8,
+    /// Keyboard keymap bytes (exactly 256 for WRITE_KBD_KEYMAP).
+    pub keymap: *const u8,
+    /// Keyboard keymap byte count.
+    pub keymap_len: usize,
 }
 unsafe fn request(d: &CnkAdminRequest) -> Result<admin::Request, u32> {
     use admin::Request as R;
@@ -112,6 +118,10 @@ unsafe fn request(d: &CnkAdminRequest) -> Result<admin::Request, u32> {
             admin::LegacySm2Configuration::from_bytes(bytes(d.data, d.data_len)?)
                 .map_err(|_| ARG)?,
         ),
+        25 => R::KeyboardLayout,
+        26 => R::KeyboardKeymap,
+        27 => R::SetKeyboardKeymap { layout_id: d.layout_id, keymap: admin::KeyboardKeymap::from_bytes(bytes(d.keymap, d.keymap_len)?).map_err(|_| ARG)? },
+        28 => R::ClearKeyboardKeymap,
         _ => return Err(ARG),
     })
 }
