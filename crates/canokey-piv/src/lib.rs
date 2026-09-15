@@ -778,11 +778,11 @@ pub(crate) fn prepare_read_object_format<T: 'static>(
         );
         let tlv = reader
             .next()?
-            .ok_or_else(|| Error::new(ErrorKind::InvalidResponse))?;
+            .ok_or_else(|| Error::new(ErrorKind::InvalidResponse).at(Phase::Parsing))?;
         if tlv.tag.value() != if id.0.value() == 0x7e { 0x7e } else { 0x53 }
             || reader.next()?.is_some()
         {
-            return Err(Error::new(ErrorKind::InvalidResponse));
+            return Err(Error::new(ErrorKind::InvalidResponse).at(Phase::Parsing));
         }
         if preserve_container {
             parse(r.data)
