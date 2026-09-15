@@ -42,6 +42,18 @@ pub mod command {
     pub fn serial() -> LogicalCommand {
         read(0x32, 0)
     }
+    /// Build WRITE KBD keymap (layout id in P2, exactly 256 mapping bytes).
+    pub fn write_keyboard_keymap(layout: u8, keymap: &[u8; 256]) -> LogicalCommand {
+        LogicalCommand::new(ApduHeader::new(0, 0x45, 0, layout), keymap.to_vec(), ExpectedLength::Absent)
+    }
+    /// Build READ KBD keymap layout-id query.
+    pub fn read_keyboard_layout() -> LogicalCommand { read(0x46, 1) }
+    /// Build READ KBD keymap table query.
+    pub fn read_keyboard_keymap() -> LogicalCommand { read(0x46, 2) }
+    /// Build CLEAR KBD keymap.
+    pub fn clear_keyboard_keymap() -> LogicalCommand {
+        LogicalCommand::new(ApduHeader::new(0, 0x47, 0, 0), vec![], ExpectedLength::Absent)
+    }
 }
 
 mod types;
