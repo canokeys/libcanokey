@@ -191,7 +191,7 @@ fn retry_reset_is_dually_authenticated_and_config_changes_require_reprobe() {
         ErrorKind::SecurityStatusNotSatisfied
     );
     assert!(op.command().is_err()); // Never manufacture PIN failures to enable reset.
-    let mut op = attest(&profile("3.1.0"), Slot::Signature, Default::default()).unwrap();
+    let mut op = attest(&profile("3.1.0"), Slot::Signature, true, Default::default()).unwrap();
     selected(&mut op);
     assert_eq!(op.command().unwrap().as_bytes(), hex("00f99c0000"));
     assert!(op.advance(&[0x6c, 0x40]).is_err());

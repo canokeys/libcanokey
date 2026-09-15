@@ -70,6 +70,8 @@ protocol state.
 - PIV selection, PIN status/verification/logout, PIN/PUK changes and unblock.
 - External/Mutual 3DES or AES-192 management authentication, explicit caller-supplied
   mutual challenges; authenticated object/certificate writes and management-key replacement.
+  PIN-managed protection validation/finalization owns policy parsing, recovered-key
+  authentication and explicit PUK blocking. Key rotation can maintain PRINTED.
 - Object/certificate reads, bounded gzip decoding, certificate deletion, metadata
   and algorithm-configuration reads; compact directory with entry diagnostics,
   UTF-16 container names, key move/delete, explicit PIN/PUK retry reset, algorithm

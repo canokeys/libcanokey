@@ -105,3 +105,231 @@ pub fn protected_management_key_from_object(data: &[u8]) -> Result<SecretBytes, 
     }
     Ok(SecretBytes::new(key.to_vec()))
 }
+
+use crate::{
+    access, command, management::ManagementMachine, metadata, Access, DeviceProfile,
+    ManagementAuthentication, ManagementKey, ManagementKeyAlgorithm, MetadataReference, ObjectId,
+    Operation, OperationOptions,
+};
+use crate::{Action, Machine, ResponseData};
+use canokey_protocol::SecretReference;
+
+/// Check and authenticate PIN-managed management protection in one selected transaction.
+/// `block_puk=None` requires an already blocked PUK. `Some` explicitly authorizes
+/// irreversible PUK blocking and supplies eight caller-generated random bytes for
+/// a temporary replacement if an attempted old PUK happens to match. Authentication
+/// of the recovered management key completes before any PUK mutation.
+///
+/// Access must provide the user PIN or reuse a transaction where it was verified.
+/// Returns the verified, owned 24-byte management key for the caller's protected
+/// credential cache. The result is redacted/zeroized; no host login state is owned.
+/// ADMIN DATA must claim both PIN protection and PUK blocking in either mode.
+///
+/// # Errors
+/// Missing/unconfigured protection is NotFound; inconsistent live PUK state is
+/// ConditionsNotSatisfied. Malformed data, unknown management algorithms, auth
+/// failures and uncertain transport outcomes stop immediately. At most 32 explicit
+/// PUK attempts are sent; failure/drop never restores retries or replays a mutation.
+pub fn pin_managed(
+    profile: &DeviceProfile,
+    block_puk: Option<SecretBytes>,
+    access: Access,
+    options: OperationOptions,
+) -> Result<Operation<SecretBytes>, Error> {
+    crate::require(profile)?;
+    profile
+        .capability(canokey_compat::Capability::Metadata)
+        .require()?;
+    let replacement = match block_puk {
+        Some(bytes) if bytes.len() == 8 => Some(SecretBytes::new(
+            bytes.as_bytes().iter().map(|b| b'0' + b % 10).collect(),
+        )),
+        Some(_) => return Err(Error::new(ErrorKind::InvalidArgument)),
+        None => None,
+    };
+    let target = PinManaged {
+        stage: Stage::Begin,
+        profile: profile.clone(),
+        options,
+        replacement,
+        key: None,
+        authentication: None,
+        attempts: 0,
+        known: false,
+    };
+    access::with_access(profile, access, target, options)
+}
+#[derive(Clone, Copy)]
+enum Stage {
+    Begin,
+    Admin,
+    Puk,
+    Printed,
+    ManagementMetadata,
+    Authentication,
+    Change,
+    Confirm,
+}
+struct PinManaged {
+    stage: Stage,
+    profile: DeviceProfile,
+    options: OperationOptions,
+    replacement: Option<SecretBytes>,
+    key: Option<SecretBytes>,
+    authentication: Option<ManagementMachine>,
+    attempts: u8,
+    known: bool,
+}
+impl PinManaged {
+    fn metadata(
+        &self,
+        response: ResponseData,
+        reference: MetadataReference,
+    ) -> Result<metadata::Metadata, Error> {
+        response.ensure_success(Phase::Command)?;
+        metadata::decode(
+            &self.profile,
+            reference,
+            response.data,
+            self.options.limits.max_total_response_bytes,
+        )
+    }
+    fn result(&mut self) -> Result<Action<SecretBytes>, Error> {
+        Ok(Action::Done(self.key.take().ok_or_else(invalid)?))
+    }
+    fn change(&mut self) -> Result<Action<SecretBytes>, Error> {
+        if self.attempts >= 32 {
+            return Err(Error::new(ErrorKind::ConditionsNotSatisfied).at(Phase::Command));
+        }
+        let replacement = self.replacement.as_ref().ok_or_else(invalid)?;
+        let old = if self.known {
+            let mut bytes = replacement.as_bytes().to_vec();
+            bytes[0] = if bytes[0] == b'9' { b'0' } else { bytes[0] + 1 };
+            SecretBytes::new(bytes)
+        } else {
+            // Distinct guesses are explicit only in this destructive operation.
+            let value = format!("{:08}", self.attempts);
+            SecretBytes::new(value.into_bytes())
+        };
+        self.attempts += 1;
+        self.stage = Stage::Change;
+        Ok(Action::Command(command::change(
+            0x24,
+            0x81,
+            &old,
+            replacement,
+        )))
+    }
+}
+impl Machine<SecretBytes> for PinManaged {
+    fn next(&mut self, response: Option<ResponseData>) -> Result<Action<SecretBytes>, Error> {
+        if matches!(self.stage, Stage::Begin) {
+            self.stage = Stage::Admin;
+            return Ok(Action::Command(command::get_data(ObjectId::from_bytes(
+                &[0x5f, 0xff, 0],
+            )?)));
+        }
+        if matches!(self.stage, Stage::Authentication) {
+            match self
+                .authentication
+                .as_mut()
+                .ok_or_else(invalid)?
+                .next(response)?
+            {
+                Action::Command(c) => return Ok(Action::Command(c)),
+                Action::Done(()) => {
+                    self.authentication = None;
+                    return if self.replacement.is_some() {
+                        self.change()
+                    } else {
+                        self.result()
+                    };
+                }
+            }
+        }
+        let response = response.ok_or_else(invalid)?;
+        match self.stage {
+            Stage::Admin => {
+                response.ensure_success(Phase::Command)?;
+                let policy = ManagementProtection::from_admin_object(response.data.as_bytes())?;
+                if !policy.claims_blocked_puk() || !policy.protects_management_key() {
+                    return Err(Error::new(ErrorKind::NotFound).at(Phase::Parsing));
+                }
+                self.stage = Stage::Puk;
+                Ok(Action::Command(command::metadata(MetadataReference::Puk)))
+            }
+            Stage::Puk | Stage::Confirm => {
+                let metadata = self.metadata(response, MetadataReference::Puk)?;
+                let (_, remaining) = metadata.fields().retries.ok_or_else(invalid)?;
+                if matches!(self.stage, Stage::Confirm) {
+                    if remaining != 0 {
+                        return Err(
+                            Error::new(ErrorKind::ConditionsNotSatisfied).at(Phase::Command)
+                        );
+                    }
+                    return self.result();
+                }
+                if remaining == 0 {
+                    self.replacement = None;
+                } else if self.replacement.is_none() {
+                    return Err(Error::new(ErrorKind::ConditionsNotSatisfied).at(Phase::Command));
+                }
+                self.stage = Stage::Printed;
+                Ok(Action::Command(command::get_data(ObjectId::from_bytes(
+                    &[0x5f, 0xc1, 9],
+                )?)))
+            }
+            Stage::Printed => {
+                response.ensure_success(Phase::Command)?;
+                self.key = Some(protected_management_key_from_object(
+                    response.data.as_bytes(),
+                )?);
+                self.stage = Stage::ManagementMetadata;
+                Ok(Action::Command(command::metadata(
+                    MetadataReference::Management,
+                )))
+            }
+            Stage::ManagementMetadata => {
+                let algorithm = match response.status.raw() {
+                    0x6d00 | 0x6a81 | 0x6a88 | 0x6a82 => ManagementKeyAlgorithm::Tdes,
+                    _ => match self
+                        .metadata(response, MetadataReference::Management)?
+                        .fields()
+                        .algorithm_id
+                    {
+                        Some(3) => ManagementKeyAlgorithm::Tdes,
+                        Some(10) => ManagementKeyAlgorithm::Aes192,
+                        _ => return Err(Error::new(ErrorKind::UnsupportedAlgorithm)),
+                    },
+                };
+                let key = ManagementKey::from_bytes(
+                    algorithm,
+                    self.key.as_ref().ok_or_else(invalid)?.as_bytes(),
+                )?;
+                let auth = ManagementAuthentication::external(key);
+                auth.validate(&self.profile, self.options)?;
+                self.authentication = Some(ManagementMachine::new(auth));
+                self.stage = Stage::Authentication;
+                self.next(None)
+            }
+            Stage::Change => {
+                if !response.data.is_empty() {
+                    return Err(invalid());
+                }
+                match response.status.raw() {
+                    0x9000 => self.known = true,
+                    0x6983 | 0x63c0 => {
+                        self.stage = Stage::Confirm;
+                        return Ok(Action::Command(command::metadata(MetadataReference::Puk)));
+                    }
+                    sw if sw & 0xfff0 == 0x63c0 => {}
+                    _ => {
+                        crate::require_auth(&response, SecretReference::Puk)?;
+                    }
+                }
+                self.change()
+            }
+            _ => Err(Error::new(ErrorKind::OperationStateError)),
+        }
+    }
+}

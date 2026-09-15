@@ -124,6 +124,16 @@ cnk_status_t cnk_piv_generate_key_new(const cnk_profile_t *,const cnk_piv_key_pa
 /* RSA: five components p/q/dP/dQ/qInv, implicit e=65537. Others: one scalar/seed. */
 cnk_status_t cnk_piv_import_key_new(const cnk_profile_t *,const cnk_piv_key_parameters_v1 *,const cnk_bytes_t *,size_t count,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_get_metadata_new(const cnk_profile_t *,uint32_t reference,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+enum { CNK_PIV_FEATURE_KEY_MOVE_DELETE=1, CNK_PIV_FEATURE_RETRY_RESET=2,
+       CNK_PIV_FEATURE_ATTESTATION=4, CNK_PIV_FEATURE_NAMES=8,
+       CNK_PIV_FEATURE_SM2_AGREEMENT=16, CNK_PIV_FEATURE_SM2_STREAMING=32,
+       CNK_PIV_FEATURE_RANDOM=64 };
+typedef struct {
+    uint32_t struct_size,algorithms,unknown_algorithms,features,unknown_features;
+    uint32_t max_ed25519_message,max_streaming_message;
+} cnk_piv_capabilities_v1;
+/* Algorithm masks use 1 << CNK_ALGORITHM_*. This reads the supplied profile only. */
+cnk_status_t cnk_profile_piv_capabilities(const cnk_profile_t *,cnk_piv_capabilities_v1 *);
 enum { CNK_PIV_CREDENTIAL_VERIFY_PIN=1, CNK_PIV_CREDENTIAL_LOGOUT=2,
        CNK_PIV_CREDENTIAL_CHANGE_PIN=3, CNK_PIV_CREDENTIAL_CHANGE_PUK=4, CNK_PIV_CREDENTIAL_UNBLOCK_PIN=5 };
 cnk_status_t cnk_piv_credential_new(const cnk_profile_t *,uint32_t,const uint8_t *,size_t,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
@@ -239,7 +249,10 @@ cnk_status_t cnk_piv_authenticate_management_key_new(const cnk_profile_t *,const
 cnk_status_t cnk_piv_write_object_new(const cnk_profile_t *,const uint8_t *tag,size_t tag_len,const uint8_t *data,size_t data_len,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_write_certificate_new(const cnk_profile_t *,uint32_t slot,const uint8_t *data,size_t data_len,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_delete_certificate_new(const cnk_profile_t *,uint32_t slot,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
-cnk_status_t cnk_piv_set_management_key_new(const cnk_profile_t *,uint32_t algorithm,const uint8_t *key,size_t key_len,uint32_t touch,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+/* NULL/0 entropy: validate already-blocked PIN-managed login. Eight CSPRNG bytes:
+ * authenticate first, then irreversibly block PUK. Result bytes are verified key. */
+cnk_status_t cnk_piv_pin_managed_new(const cnk_profile_t *,const uint8_t *entropy,size_t entropy_len,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_piv_set_management_key_new(const cnk_profile_t *,uint32_t algorithm,const uint8_t *key,size_t key_len,uint32_t touch,uint32_t update_protected,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_operation_mutation_result(const cnk_operation_t *,cnk_mutation_result_v1 *);
 cnk_status_t cnk_operation_start(cnk_operation_t *,cnk_step_kind_t *,cnk_error_v1 *);
 cnk_status_t cnk_operation_advance(cnk_operation_t *,const uint8_t *,size_t,cnk_step_kind_t *,cnk_error_v1 *);

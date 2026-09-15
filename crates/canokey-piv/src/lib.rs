@@ -177,6 +177,12 @@ impl Puk {
         Ok(Self(secret(bytes)?))
     }
 }
+/// Largest classic Ed25519 message accepted by the audited PIV scratch buffer.
+pub const MAX_ED25519_MESSAGE: usize = 512;
+/// Conservative full-message limit, including any SM2 identity bytes.
+/// Leaves room for the PIV envelope within the firmware's 16-bit input length.
+pub const MAX_STREAMING_MESSAGE: usize = 65520;
+
 /// Selection and authentication policy for one high-level operation.
 /// None/Pin/Management variants SELECT first; Existing reuses the caller's
 /// selected transaction. This owns inputs, not a persistent authorization token.

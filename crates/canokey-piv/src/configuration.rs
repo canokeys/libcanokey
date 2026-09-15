@@ -292,13 +292,24 @@ pub(crate) fn prepare_config(
 /// Returns opaque DER bytes without certificate/trust verification. Firmware
 /// requires a generated key and an installed attestation signer; status errors
 /// propagate. No PIN/management credential or attestation trust is inferred.
+/// `select=false` requires a caller-owned transaction with PIV already selected.
 pub fn attest(
     profile: &DeviceProfile,
     slot: Slot,
+    select: bool,
     options: OperationOptions,
 ) -> Result<Operation<SecretBytes>, Error> {
     let target = prepare_attest(profile, slot, options)?;
-    access::with_access(profile, Access::None, target, options)
+    access::with_access(
+        profile,
+        if select {
+            Access::None
+        } else {
+            Access::Existing
+        },
+        target,
+        options,
+    )
 }
 pub(crate) fn prepare_attest(
     profile: &DeviceProfile,

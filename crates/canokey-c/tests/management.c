@@ -47,7 +47,7 @@ int main(void) {
     assert(cnk_piv_write_certificate_new(profile,0x9a,der,sizeof(der),&access,NULL,&write,NULL)==CNK_OK);
     access.pin=NULL;access.pin_len=0;
     assert(cnk_piv_delete_certificate_new(profile,0x9a,&access,NULL,&remove,NULL)==CNK_OK);
-    assert(cnk_piv_set_management_key_new(profile,CNK_MANAGEMENT_AES192,key,sizeof(key),CNK_MANAGEMENT_TOUCH_ALWAYS,&access,NULL,&replace,NULL)==CNK_OK);
+    assert(cnk_piv_set_management_key_new(profile,CNK_MANAGEMENT_AES192,key,sizeof(key),CNK_MANAGEMENT_TOUCH_ALWAYS,0,&access,NULL,&replace,NULL)==CNK_OK);
     assert(cnk_piv_write_object_new(profile,tag,sizeof(tag),der,sizeof(der),&access,NULL,&object,NULL)==CNK_OK);
     cnk_operation_t *metadata=NULL,*signature=NULL,*generate=NULL,*import=NULL,*config=NULL,*decrypt=NULL,*derive=NULL;
     assert(cnk_piv_get_metadata_new(profile,0x80,NULL,NULL,&metadata,NULL)==CNK_OK);

@@ -224,7 +224,12 @@ pub(crate) fn prepare_sign(
         SignInput::Digest(bytes) if curve_len(algorithm).is_some() => {
             digest(algorithm, bytes.as_bytes())?
         }
-        SignInput::Message(bytes) if algorithm == Algorithm::Ed25519 && !bytes.is_empty() => bytes,
+        SignInput::Message(bytes) if algorithm == Algorithm::Ed25519 && !bytes.is_empty() => {
+            if bytes.len() > MAX_ED25519_MESSAGE {
+                return Err(Error::new(ErrorKind::LimitExceeded));
+            }
+            bytes
+        }
         _ => return Err(Error::new(ErrorKind::InvalidArgument)),
     };
     let command = command(profile, slot, algorithm, 0x81, bytes.as_bytes(), options)?;

@@ -99,7 +99,7 @@ pub(crate) fn prepare_sign_streaming(
     } else {
         id
     };
-    if input.input_len() > options.limits.max_input_bytes {
+    if input.input_len() > options.limits.max_input_bytes.min(MAX_STREAMING_MESSAGE) {
         return Err(Error::new(ErrorKind::LimitExceeded));
     }
     let (message, user_id) = match input {

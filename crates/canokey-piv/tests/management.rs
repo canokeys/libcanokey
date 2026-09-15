@@ -414,6 +414,7 @@ fn certificate_deletion_and_management_replacement_are_explicit() {
         &profile(v.version),
         replacement,
         ManagementTouchPolicy::Always,
+        false,
         Access::Management(auth(v, false)),
         Default::default(),
     )
@@ -447,6 +448,52 @@ fn selected_context_management_preserves_firmware_encoding_without_reselect() {
             assert_eq!(authenticate(&mut op, v, mutual), Step::Done);
             op.take_result().unwrap();
             assert!(op.advance(&[0x90, 0]).is_err());
+        }
+    }
+}
+
+#[test]
+fn rotation_preserves_protected_data_and_stops_at_each_irreversible_boundary() {
+    let v = &VECTORS[1];
+    for failure in [0u8, 1, 2, 3] {
+        let key = ManagementKey::from_bytes(v.algorithm, &hex(v.key)).unwrap();
+        let mut op = set_management_key(
+            &profile(v.version),
+            key,
+            ManagementTouchPolicy::Never,
+            true,
+            Access::Existing,
+            Default::default(),
+        )
+        .unwrap();
+        op.start().unwrap();
+        assert_eq!(op.command().unwrap().as_bytes()[1], 0xcb);
+        op.advance(&hex("530580038101039000")).unwrap();
+        let mut printed = hex("531c881a8918");
+        printed.extend(hex(v.key));
+        printed.extend([0x90, 0]);
+        if failure == 1 {
+            assert!(op.advance(&[0x69, 0x82]).is_err());
+            assert!(op.command().is_err());
+            continue; // No replacement without PIN-protected read authorization.
+        }
+        op.advance(&printed).unwrap();
+        assert_eq!(op.command().unwrap().as_bytes()[1], 0xff);
+        if failure == 2 {
+            assert!(op.advance(&[0x6f, 0]).is_err());
+            assert!(op.command().is_err());
+            continue; // Uncertain replacement is never replayed.
+        }
+        op.advance(&[0x90, 0]).unwrap();
+        authenticate(&mut op, v, false);
+        let command = op.command().unwrap().as_bytes();
+        assert_eq!(&command[..11], &hex("00db3fff235c035fc10953"));
+        assert_eq!(&command[11..], &printed[..printed.len() - 2][1..]);
+        if failure == 3 {
+            assert!(op.advance(&[0x6f, 0]).is_err());
+            assert!(op.command().is_err()); // Caller must repair PRINTED with the new key.
+        } else {
+            assert_eq!(op.advance(&[0x90, 0]).unwrap(), Step::Done);
         }
     }
 }

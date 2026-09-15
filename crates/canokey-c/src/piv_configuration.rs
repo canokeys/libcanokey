@@ -239,10 +239,12 @@ pub unsafe extern "C" fn cnk_piv_attest_new(
     error: *mut CnkError,
 ) -> u32 {
     create(out, error, || {
+        let options = piv_options(opts)?;
         piv::attest(
             &profile.as_ref().ok_or(ARG)?.0,
             slot(reference)?,
-            options(opts)?,
+            piv_mutation::select(opts),
+            options,
         )
         .map(Inner::Object)
         .map_err(|e| failure(e, error))
@@ -537,5 +539,104 @@ pub unsafe extern "C" fn cnk_operation_piv_configuration_copy(
             data[index + 1] = config.wire_id(algorithm).unwrap_or(0);
         }
         copy(&data, buffer, len)
+    })
+}
+
+/// Immutable PIV support and buffering limits, matching cnk_piv_capabilities_v1.
+/// Algorithm masks use 1 << CNK_ALGORITHM_*; unknown is distinct from unsupported.
+#[repr(C)]
+pub struct CnkPivCapabilities {
+    /// Caller-provided supported structure size.
+    pub struct_size: u32,
+    /// Algorithms with affirmative card support.
+    pub algorithms: u32,
+    /// Algorithms for which the profile lacks sufficient evidence.
+    pub unknown_algorithms: u32,
+    /// Affirmatively supported CNK_PIV_FEATURE_* bits.
+    pub features: u32,
+    /// Features without sufficient evidence.
+    pub unknown_features: u32,
+    /// Maximum classic Ed25519 message bytes.
+    pub max_ed25519_message: u32,
+    /// Maximum streaming message plus optional identity bytes.
+    pub max_streaming_message: u32,
+}
+/// Project card capabilities from the same profile used by operation factories.
+/// Firmware rules and observed algorithm configuration must both permit a bit;
+/// zero in both supported/unknown masks means explicitly unsupported.
+/// No I/O or cached application state. Null pointers and undersized output
+/// descriptors leave output untouched.
+/// # Safety
+/// profile is live/readable; out is writable with initialized struct_size.
+/// The two ranges do not alias and neither is concurrently mutated or freed.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_profile_piv_capabilities(
+    profile: *const CnkProfile,
+    out: *mut CnkPivCapabilities,
+) -> u32 {
+    guard(|| {
+        let Some(profile) = profile.as_ref() else {
+            return ARG;
+        };
+        if out.is_null() || (*out).struct_size < std::mem::size_of::<CnkPivCapabilities>() as u32 {
+            return ARG;
+        }
+        let mut value = CnkPivCapabilities {
+            struct_size: (*out).struct_size,
+            algorithms: 0,
+            unknown_algorithms: 0,
+            features: 0,
+            unknown_features: 0,
+            max_ed25519_message: piv::MAX_ED25519_MESSAGE as u32,
+            max_streaming_message: piv::MAX_STREAMING_MESSAGE as u32,
+        };
+        let piv_support = profile.0.capability(Capability::Piv).support;
+        let gated = |support| {
+            if piv_support == Support::Supported {
+                support
+            } else {
+                piv_support
+            }
+        };
+        for code in 1..=13 {
+            let Ok(algorithm) = crate::piv_keys::algorithm(code) else {
+                continue;
+            };
+            match gated(profile.0.key_algorithm_support(algorithm).support) {
+                Support::Supported => value.algorithms |= 1 << code,
+                Support::Unknown => value.unknown_algorithms |= 1 << code,
+                Support::Unsupported => {}
+            }
+        }
+        for (bit, feature) in [
+            (1, Capability::KeyMoveDelete),
+            (2, Capability::RetryReset),
+            (4, Capability::Attestation),
+            (8, Capability::ContainerNames),
+            (16, Capability::Sm2Agreement),
+        ] {
+            match gated(profile.0.capability(feature).support) {
+                Support::Supported => value.features |= bit,
+                Support::Unknown => value.unknown_features |= bit,
+                Support::Unsupported => {}
+            }
+        }
+        match gated(
+            profile
+                .0
+                .streaming_signing_support(piv::Algorithm::Sm2)
+                .support,
+        ) {
+            Support::Supported => value.features |= 32,
+            Support::Unknown => value.unknown_features |= 32,
+            Support::Unsupported => {}
+        }
+        match profile.0.info().piv_version() {
+            Some(version) if version.0[0] >= 6 => value.features |= 64,
+            None => value.unknown_features |= 64,
+            _ => {}
+        }
+        ptr::write(out, value);
+        OK
     })
 }

@@ -257,7 +257,10 @@ pub unsafe extern "C" fn cnk_piv_delete_certificate_new(
 }
 /// Construct management-key replacement with explicit current-key authentication.
 /// Copies the new 24-byte key. Algorithm uses CNK_MANAGEMENT_* and touch uses
-/// CNK_MANAGEMENT_TOUCH_*; invalid values fail before SELECT.
+/// CNK_MANAGEMENT_TOUCH_*; invalid values fail before SELECT. update_protected=1
+/// checks ADMIN DATA and, when protected, requires a readable PRINTED object and
+/// updates it after rotation/new-key authentication. The writes are not atomic;
+/// callers retain the new key for recovery. Zero only replaces the key.
 /// # Safety
 /// Follow the crate pointer/aliasing contract. profile is live/non-NULL; optional
 /// auth/nested ranges are readable. key covers key_len bytes. out is writable/
@@ -269,13 +272,14 @@ pub unsafe extern "C" fn cnk_piv_set_management_key_new(
     key: *const u8,
     key_len: usize,
     touch: u32,
+    update_protected: u32,
     auth: *const CnkPivAccess,
     opts: *const CnkOptions,
     out: *mut *mut CnkOperation,
     error: *mut CnkError,
 ) -> u32 {
     create(out, error, || {
-        if key_len != 24 {
+        if key_len != 24 || update_protected > 1 {
             return Err(ARG);
         }
         let key = piv::ManagementKey::from_bytes(algorithm(key_algorithm)?, bytes(key, key_len)?)
@@ -289,6 +293,7 @@ pub unsafe extern "C" fn cnk_piv_set_management_key_new(
             &profile.as_ref().ok_or(ARG)?.0,
             key,
             touch,
+            update_protected != 0,
             piv_access(auth, opts, error)?,
             piv_options(opts)?,
         )
@@ -398,5 +403,39 @@ pub unsafe extern "C" fn cnk_piv_write_object_container_new(
         )
         .map(Inner::Mutation)
         .map_err(|e| failure(e, error))
+    })
+}
+
+/// Authenticate PIN-managed protection, optionally finalizing irreversible PUK blocking.
+/// A NULL/zero entropy range only logs in; eight random bytes explicitly request
+/// finalization. Returns the verified management key through the byte getter.
+/// Honors USE_EXISTING; otherwise Access must supply PIN authentication.
+/// # Safety
+/// Profile is live; input ranges are readable and copied. Optional descriptors
+/// cover initialized prefixes. out is writable/non-NULL; buffers do not alias.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_pin_managed_new(
+    profile: *const CnkProfile,
+    entropy: *const u8,
+    entropy_len: usize,
+    auth: *const CnkPivAccess,
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        let profile = &profile.as_ref().ok_or(ARG)?.0;
+        let options = piv_options(opts)?;
+        let access = piv_access(auth, opts, error)?;
+        let block = if entropy.is_null() && entropy_len == 0 {
+            None
+        } else if entropy_len == 8 {
+            Some(SecretBytes::new(bytes(entropy, entropy_len)?.to_vec()))
+        } else {
+            return Err(ARG);
+        };
+        piv::protection::pin_managed(profile, block, access, options)
+            .map(Inner::Object)
+            .map_err(|e| failure(e, error))
     })
 }

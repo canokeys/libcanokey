@@ -26,6 +26,10 @@ impl ManagementKey {
             bytes: SecretBytes::new(bytes.to_vec()),
         })
     }
+    pub(crate) fn as_bytes(&self) -> &[u8] {
+        self.bytes.as_bytes()
+    }
+
     /// Return the selected algorithm without exposing key bytes.
     pub fn algorithm(&self) -> ManagementKeyAlgorithm {
         self.algorithm

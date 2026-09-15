@@ -84,3 +84,114 @@ fn protected_key_requires_exact_nesting_and_is_owned() {
         ErrorKind::LimitExceeded
     );
 }
+
+use canokey_compat::{DeviceObservations, DeviceProfile, PivApplicationVersion};
+use canokey_piv::{protection::pin_managed, Access};
+use canokey_protocol::{Operation, SecretBytes};
+fn managed_profile() -> DeviceProfile {
+    let mut observed = DeviceObservations::new(b"3.0.3".to_vec());
+    observed.piv_version = Some(PivApplicationVersion([5, 7, 0]));
+    DeviceProfile::from_observations(observed).unwrap()
+}
+fn feed(op: &mut Operation<SecretBytes>, ins: u8, body: &[u8], sw: u16) {
+    assert_eq!(op.command().unwrap().as_bytes()[1], ins);
+    let mut response = body.to_vec();
+    response.extend(sw.to_be_bytes());
+    op.advance(&response).unwrap();
+}
+fn begin_managed(block: bool, remaining: u8) -> Operation<SecretBytes> {
+    let mut op = pin_managed(
+        &managed_profile(),
+        block.then(|| SecretBytes::new(vec![9; 8])),
+        Access::Existing,
+        Default::default(),
+    )
+    .unwrap();
+    op.start().unwrap();
+    feed(&mut op, 0xcb, &[0x53, 5, 0x80, 3, 0x81, 1, 3], 0x9000);
+    feed(&mut op, 0xf7, &[6, 2, 3, remaining], 0x9000);
+    let key = [1u8; 24];
+    feed(
+        &mut op,
+        0xcb,
+        &wrap(0x53, &wrap(0x88, &wrap(0x89, &key))),
+        0x9000,
+    );
+    feed(&mut op, 0xf7, &[1, 1, 3], 0x9000);
+    feed(
+        &mut op,
+        0x87,
+        &[0x7c, 10, 0x81, 8, 0, 0, 0, 0, 0, 0, 0, 0],
+        0x9000,
+    );
+    op
+}
+#[test]
+fn protected_login_and_explicit_finalize_share_one_authorized_transaction() {
+    let mut login = begin_managed(false, 0);
+    feed(&mut login, 0x87, &[], 0x9000);
+    assert_eq!(login.take_result().unwrap().as_bytes(), &[1; 24]);
+    for accidental_match in [false, true] {
+        let mut op = begin_managed(true, 3);
+        feed(&mut op, 0x87, &[], 0x9000);
+        let command = op.command().unwrap().as_bytes();
+        assert_eq!(&command[5..13], b"00000000");
+        if accidental_match {
+            feed(&mut op, 0x24, &[], 0x9000);
+            let command = op.command().unwrap().as_bytes();
+            assert_eq!(&command[5..13], b"09999999");
+            assert_eq!(&command[13..21], b"99999999");
+        }
+        for sw in [0x63c2, 0x63c1, 0x63c0] {
+            feed(&mut op, 0x24, &[], sw);
+        }
+        feed(&mut op, 0xf7, &[6, 2, 3, 0], 0x9000);
+        assert_eq!(op.take_result().unwrap().as_bytes(), &[1; 24]);
+        assert!(op.command().is_err());
+    }
+}
+#[test]
+fn protection_failures_never_reach_puk_mutation_or_publish_a_key() {
+    for response in [vec![0x53, 0, 0x90, 0], vec![0x53, 3, 0x80, 1, 0, 0x90, 0]] {
+        let mut op = pin_managed(
+            &managed_profile(),
+            Some(SecretBytes::new(vec![9; 8])),
+            Access::Existing,
+            Default::default(),
+        )
+        .unwrap();
+        op.start().unwrap();
+        assert!(op.advance(&response).is_err());
+        assert!(op.command().is_err() && op.take_result().is_err());
+    }
+    let mut op = pin_managed(
+        &managed_profile(),
+        None,
+        Access::Existing,
+        Default::default(),
+    )
+    .unwrap();
+    op.start().unwrap();
+    feed(&mut op, 0xcb, &[0x53, 5, 0x80, 3, 0x81, 1, 3], 0x9000);
+    assert_eq!(
+        op.advance(&[6, 2, 3, 3, 0x90, 0]).unwrap_err().kind,
+        ErrorKind::ConditionsNotSatisfied
+    );
+    let mut op = begin_managed(true, 3);
+    assert_eq!(
+        op.advance(&[0x69, 0x82]).unwrap_err().kind,
+        ErrorKind::AuthenticationFailed
+    );
+    assert!(op.command().is_err() && op.take_result().is_err());
+    let mut op = begin_managed(true, 3);
+    feed(&mut op, 0x87, &[], 0x9000);
+    assert_eq!(
+        op.advance(&[0x6f, 0])
+            .unwrap_err()
+            .status_word
+            .unwrap()
+            .raw(),
+        0x6f00
+    );
+    assert!(op.take_result().is_err());
+}

@@ -449,3 +449,35 @@ but exclude Admin operation, OATH and OpenPGP C factories and their erased
 operation variants. This is a link-time API subset: declarations in the common
 header for an excluded applet have no corresponding symbols in that build.
 PIV is the baseline C ABI; these flags do not disable its factories.
+
+## Consumer capability and protection boundaries
+
+`cnk_profile_piv_capabilities` returns immutable algorithm/feature masks and message
+limits from the same profile used by operation factories. Supported and unknown
+masks are separate; a missing supported bit never licenses a caller to substitute
+a raw configuration byte. Consumers may cache the profile with their own binding,
+invalidation generation and TTL, but must resolve it before authentication.
+Classic Ed25519 accepts at most 512 message bytes; streaming modes accept at most
+65520 combined message/identity bytes. Host-only cryptography has its own limits.
+
+`protection::pin_managed` / `cnk_piv_pin_managed_new` validates ADMIN DATA, checks
+live PUK retries, reads PRINTED, resolves management metadata and authenticates
+its recovered key in one transaction. Ordinary login requires zero PUK retries.
+Supplying eight random entropy bytes explicitly requests finalization: authenticate
+first, then exhaust PUK retries with at most 32 CHANGE commands and confirm zero.
+A coincidentally successful guess switches to a provably wrong old PUK. The only
+result is an owned, zeroized management key for the consumer's protected cache;
+no USER/SO state is owned here. Failure does not undo card writes or retry loss.
+
+`set_management_key` takes `update_protected` (`0/1` in C). Enabled mode checks
+ADMIN DATA and requires readable, valid PRINTED before touching a protected key.
+It replaces the key, authenticates the new key and updates PRINTED without SELECT.
+These are separate durable writes. Failure after replacement requires the caller
+to recover with its supplied new key and repair PRINTED; no rollback is claimed.
+Batch's raw management-key replacement retains its explicit low-level semantics.
+
+Attestation accepts the common selection policy (`select=false` in Rust,
+`CNK_PIV_USE_EXISTING` in C); it does not authenticate or verify trust. SM2 agreement
+responses accept definite BER length encodings, including the actual firmware's
+non-minimal two-octet lengths for 128-byte secrets. Exact fields, point validity,
+requested secret length and the common response/depth budgets remain enforced.
