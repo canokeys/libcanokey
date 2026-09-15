@@ -16,6 +16,11 @@
 
 ## Compatibility and adoption
 
+Admin migration now covers keyboard HID keymap and PASS configuration command
+families, including typed keymap boundaries and C ABI request/result mapping.
+Writes require explicit Admin PIN authentication; ordinary Admin operations
+retain their SELECT-first behavior.
+
 - Validate Admin/OATH/OpenPGP/PIV against hardware or usbip on the ckman catalog:
   1.3, 1.5.2, 1.6.1, 1.6.2, 2.0.x, 3.0.x and 3.1.0. Check authentication,
   legacy TLV lengths, pagination boundaries, command chaining and cancellation.
