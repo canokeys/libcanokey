@@ -282,6 +282,10 @@ pub enum Request {
     },
     /// Clear the stored keyboard HID map.
     ClearKeyboardKeymap,
+    /// Read raw PASS applet configuration.
+    PassConfiguration,
+    /// Replace raw PASS applet configuration bytes.
+    SetPassConfiguration(Vec<u8>),
     /// Query Admin verification/retries without submitting a PIN.
     PinStatus,
     /// Verify the separately supplied PIN without another target command.

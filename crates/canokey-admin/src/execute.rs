@@ -166,6 +166,8 @@ pub fn operation(
         Request::KeyboardKeymap => (Some(command::read_keyboard_keymap()), Stage::Read),
         Request::SetKeyboardKeymap { layout_id, keymap } => (Some(command::write_keyboard_keymap(*layout_id, keymap.as_bytes())), Stage::Write(true)),
         Request::ClearKeyboardKeymap => (Some(command::clear_keyboard_keymap()), Stage::Write(true)),
+        Request::PassConfiguration => (Some(command::pass_configuration()), Stage::Read),
+        Request::SetPassConfiguration(data) => (Some(command::write_pass_configuration(data)), Stage::Write(true)),
         Request::PinStatus => (Some(write(0x20, 0, 0, vec![])), Stage::Read),
         Request::VerifyPin => (None, Stage::Read),
         Request::ChangePin(p) => (
@@ -450,6 +452,8 @@ impl Admin {
             }
             Request::KeyboardKeymap => Value::KeyboardKeymap(KeyboardKeymap::from_bytes(raw)?),
             Request::SetKeyboardKeymap { .. } | Request::ClearKeyboardKeymap => Value::None,
+            Request::PassConfiguration => Value::Bytes(raw.to_vec()),
+            Request::SetPassConfiguration(_) => Value::None,
             Request::NfcStatus => {
                 if raw.len() != 1 || raw[0] > 1 {
                     return Err(invalid());
