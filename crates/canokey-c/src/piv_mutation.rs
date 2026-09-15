@@ -20,8 +20,8 @@ pub struct CnkManagement {
     /// Mutual challenge length (8 or 16); must be zero for External.
     pub challenge_len: usize,
 }
-/// Copied PIV access descriptor. NULL means no authentication for read factories.
-/// Mutations require a management descriptor; PIN, if present, follows management.
+/// Copied PIV access descriptor. NULL supplies no implicit authentication.
+/// Mutations require management unless USE_EXISTING reuses card authorization.
 #[repr(C)]
 pub struct CnkPivAccess {
     /// Supported descriptor size in bytes.
@@ -30,7 +30,7 @@ pub struct CnkPivAccess {
     pub pin: *const u8,
     /// PIN length in bytes; nonzero requires a valid PIN range.
     pub pin_len: usize,
-    /// Optional management descriptor; must be present for mutation factories.
+    /// Management descriptor for default-mode writes; NULL for USE_EXISTING.
     pub management: *const CnkManagement,
 }
 // The PIV-only flag must not alter options accepted by other applets.
@@ -164,8 +164,8 @@ pub unsafe extern "C" fn cnk_piv_authenticate_management_key_new(
 /// Copies descriptors and payload; management access is required. Partial card
 /// writes can persist on failure; this operation never retries a mutation.
 /// # Safety
-/// Follow the crate pointer/aliasing contract. profile/access must be readable
-/// and non-NULL, including nested ranges; tag/data must cover declared lengths.
+/// Follow the crate pointer/aliasing contract. profile must be live/non-NULL.
+/// Optional auth/nested ranges are readable; tag/data cover declared lengths.
 /// out must be writable/non-NULL; optional opts/error must be valid structs.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_piv_write_object_new(
@@ -199,8 +199,8 @@ pub unsafe extern "C" fn cnk_piv_write_object_new(
 /// Copies the payload, adds 70/71/FE framing, and performs explicit management
 /// authentication. No certificate syntax/trust validation is performed.
 /// # Safety
-/// Follow the crate pointer/aliasing contract. profile/auth must be readable and
-/// non-NULL, including nested ranges. data must cover data_len bytes; out must
+/// Follow the crate pointer/aliasing contract. profile must be live/non-NULL;
+/// optional auth/nested ranges are readable. data covers data_len bytes; out must
 /// be writable/non-NULL. Optional opts/error must be valid versioned structs.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_piv_write_certificate_new(
@@ -232,8 +232,8 @@ pub unsafe extern "C" fn cnk_piv_write_certificate_new(
 /// Construct explicit certificate deletion, without deleting its private key.
 /// Firmware without evidenced deletion support fails before an operation is exposed.
 /// # Safety
-/// Follow the crate pointer/aliasing contract. profile/auth must be readable and
-/// non-NULL, including nested ranges. out must be writable/non-NULL; optional
+/// Follow the crate pointer/aliasing contract. profile must be live/non-NULL;
+/// optional auth/nested ranges are readable. out is writable/non-NULL; optional
 /// opts/error must be valid versioned structs. Free the resulting handle once.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_piv_delete_certificate_new(
@@ -259,8 +259,8 @@ pub unsafe extern "C" fn cnk_piv_delete_certificate_new(
 /// Copies the new 24-byte key. Algorithm uses CNK_MANAGEMENT_* and touch uses
 /// CNK_MANAGEMENT_TOUCH_*; invalid values fail before SELECT.
 /// # Safety
-/// Follow the crate pointer/aliasing contract. profile/auth and nested ranges
-/// must be readable/non-NULL; key must cover key_len bytes. out must be writable/
+/// Follow the crate pointer/aliasing contract. profile is live/non-NULL; optional
+/// auth/nested ranges are readable. key covers key_len bytes. out is writable/
 /// non-NULL. Optional opts/error must be valid versioned structs.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_piv_set_management_key_new(

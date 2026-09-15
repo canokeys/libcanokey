@@ -151,8 +151,8 @@ pub unsafe extern "C" fn cnk_piv_generate_key_new(
 /// Import copied private components. RSA needs five spans p/q/dP/dQ/qInv with
 /// implicit e=65537; other algorithms need one scalar/seed span. No PKCS#8 parsing.
 /// # Safety
-/// Follow the crate pointer/aliasing contract. profile/params/auth and nested
-/// ranges must be readable/non-NULL; components must cover count valid spans.
+/// Follow the crate pointer/aliasing contract. profile/params are live/non-NULL;
+/// optional auth/nested ranges are readable; components cover count valid spans.
 /// out must be writable/non-NULL; optional opts/error must be valid structs.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_piv_import_key_new(
