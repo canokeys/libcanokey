@@ -94,19 +94,6 @@ impl PivAccessContext {
             state,
         })
     }
-    fn require_selected(&self) -> Result<(), Error> {
-        if matches!(
-            self.state,
-            PivAccessState::Selected
-                | PivAccessState::PinVerified
-                | PivAccessState::ManagementAuthorized
-                | PivAccessState::PinAndManagementAuthorized
-        ) {
-            Ok(())
-        } else {
-            Err(Error::new(ErrorKind::SecurityStatusNotSatisfied))
-        }
-    }
     fn require_management(&self) -> Result<(), Error> {
         if matches!(
             self.state,
@@ -132,7 +119,6 @@ pub fn require_empty_key_slot_in_context(
     slot: Slot,
     options: OperationOptions,
 ) -> Result<Operation<()>, Error> {
-    context.require_selected()?;
     context
         .profile()
         .piv_slot_support(slot.reference())
@@ -171,7 +157,6 @@ pub fn get_metadata_in_context(
     reference: MetadataReference,
     options: OperationOptions,
 ) -> Result<Operation<Metadata>, Error> {
-    context.require_selected()?;
     let sequence = super::metadata::prepare_get_metadata(&context.profile, reference, options)?;
     super::operation_from_sequence(&context.profile, sequence, options)
 }
@@ -188,7 +173,6 @@ pub fn read_certificate_in_context(
     slot: Slot,
     options: OperationOptions,
 ) -> Result<Operation<Certificate>, Error> {
-    context.require_selected()?;
     let limit = options.limits.max_total_response_bytes;
     let sequence = super::prepare_read_object_with(
         &context.profile,
@@ -211,7 +195,6 @@ pub fn read_object_in_context(
     id: ObjectId,
     options: OperationOptions,
 ) -> Result<Operation<SecretBytes>, Error> {
-    context.require_selected()?;
     let sequence = super::prepare_read_object_with(&context.profile, id, options, Ok)?;
     super::operation_from_sequence(&context.profile, sequence, options)
 }
@@ -247,7 +230,6 @@ pub fn read_metadata_directory_in_context(
     context: &PivAccessContext,
     options: OperationOptions,
 ) -> Result<Operation<super::MetadataDirectory>, Error> {
-    context.require_selected()?;
     let sequence = super::directory::prepare_directory(&context.profile, options)?;
     super::operation_from_sequence(&context.profile, sequence, options)
 }
@@ -264,7 +246,6 @@ pub fn read_container_name_in_context(
     slot: impl Into<super::ContainerNameReference>,
     options: OperationOptions,
 ) -> Result<Operation<super::ContainerName>, Error> {
-    context.require_selected()?;
     let sequence = super::configuration::prepare_read_name(&context.profile, slot, options)?;
     super::operation_from_sequence(&context.profile, sequence, options)
 }
@@ -381,7 +362,6 @@ pub fn authenticate_management_in_context(
     auth: ManagementAuthentication,
     options: OperationOptions,
 ) -> Result<Operation<()>, Error> {
-    context.require_selected()?;
     auth.validate(&context.profile, options)?;
     super::access::in_context(&context.profile, ManagementMachine::new(auth), options)
 }
@@ -403,7 +383,6 @@ pub fn sign_in_context(
     input: SignInput,
     options: OperationOptions,
 ) -> Result<Operation<Signature>, Error> {
-    context.require_selected()?;
     let sequence = super::private::prepare_sign(&context.profile, slot, algorithm, input, options)?;
     super::operation_from_sequence(&context.profile, sequence, options)
 }
@@ -422,7 +401,6 @@ pub fn sign_streaming_in_context(
     input: StreamingSignInput,
     options: OperationOptions,
 ) -> Result<Operation<Signature>, Error> {
-    context.require_selected()?;
     let machine = super::streaming::prepare_sign_streaming(&context.profile, slot, input, options)?;
     super::access::in_context(&context.profile, machine, options)
 }
@@ -441,7 +419,6 @@ pub fn decrypt_in_context(
     ciphertext: SecretBytes,
     options: OperationOptions,
 ) -> Result<Operation<SecretBytes>, Error> {
-    context.require_selected()?;
     let sequence =
         super::private::prepare_decrypt(&context.profile, slot, algorithm, ciphertext, options)?;
     super::operation_from_sequence(&context.profile, sequence, options)
@@ -461,7 +438,6 @@ pub fn derive_in_context(
     peer: Vec<u8>,
     options: OperationOptions,
 ) -> Result<Operation<SecretBytes>, Error> {
-    context.require_selected()?;
     let sequence =
         super::private::prepare_derive(&context.profile, slot, algorithm, peer, options)?;
     super::operation_from_sequence(&context.profile, sequence, options)
@@ -480,7 +456,6 @@ pub fn decapsulate_in_context(
     ciphertext: SecretBytes,
     options: OperationOptions,
 ) -> Result<Operation<SecretBytes>, Error> {
-    context.require_selected()?;
     let sequence =
         super::private::prepare_decapsulate(&context.profile, slot, ciphertext, options)?;
     super::operation_from_sequence(&context.profile, sequence, options)
@@ -499,7 +474,6 @@ pub fn read_object_container_in_context(
     id: ObjectId,
     options: OperationOptions,
 ) -> Result<Operation<SecretBytes>, Error> {
-    context.require_selected()?;
     let sequence = super::prepare_read_object_format(&context.profile, id, options, true, Ok)?;
     super::operation_from_sequence(&context.profile, sequence, options)
 }
