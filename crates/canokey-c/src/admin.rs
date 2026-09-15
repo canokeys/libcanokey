@@ -236,6 +236,7 @@ pub unsafe extern "C" fn cnk_operation_admin_outcome(
                 3
             }
             Value::AppletUsage(_) => 4,
+            Value::KeyboardLayout(_) | Value::KeyboardKeymap(_) => 1,
             Value::PinStatus(s) => {
                 value.flags = u32::from(s.verified)
                     | (u32::from(s.blocked) << 1)
@@ -271,6 +272,8 @@ pub(super) fn result_bytes(value: &admin::Value) -> Option<Vec<u8>> {
             })
             .collect(),
         admin::Value::Sm2Configuration(s) => s.to_bytes().to_vec(),
+        admin::Value::KeyboardLayout(id) => vec![*id],
+        admin::Value::KeyboardKeymap(map) => map.as_bytes().to_vec(),
         _ => return None,
     })
 }
