@@ -1,6 +1,17 @@
 use canokey_compat::{AdminConfigurationLayout, DeviceProfile};
 use canokey_protocol::{Error, ErrorKind, SecretBytes};
 
+/// Fixed 128-entry keyboard HID map (modifier/usage pairs).
+#[derive(Clone, PartialEq, Eq)]
+pub struct KeyboardKeymap([u8; 256]);
+impl std::fmt::Debug for KeyboardKeymap { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.debug_tuple("KeyboardKeymap").field(&"<redacted>").finish() } }
+impl KeyboardKeymap {
+    /// Copy exactly 256 mapping bytes.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> { Ok(Self(bytes.try_into().map_err(|_| Error::new(ErrorKind::InvalidArgument))?)) }
+    /// Return the complete modifier/usage table.
+    pub fn as_bytes(&self) -> &[u8; 256] { &self.0 }
+}
+
 /// Owned unpadded Admin PIN, six through 64 bytes. Debug redacts its contents.
 #[derive(Debug)]
 pub struct Pin(pub(crate) SecretBytes);
