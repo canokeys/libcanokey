@@ -45,7 +45,7 @@ unsafe fn request(d: &CnkAdminRequest) -> Result<admin::Request, u32> {
     use admin::Request as R;
     if d.struct_size < std::mem::size_of::<CnkAdminRequest>() as u32
         || d.reserved != [0; 2]
-        || (!matches!(d.kind, 12 | 24) && (!d.data.is_null() || d.data_len != 0))
+        || (!matches!(d.kind, 12 | 24 | 30) && (!d.data.is_null() || d.data_len != 0))
         || (d.kind != 13 && (d.feature_mask != 0 || d.feature_values != 0))
         || (d.kind != 17 && (d.curve_id != 0 || d.algorithm_id != 0))
         || (!matches!(d.kind, 13 | 17 | 23) && d.present != 0)
@@ -122,6 +122,8 @@ unsafe fn request(d: &CnkAdminRequest) -> Result<admin::Request, u32> {
         26 => R::KeyboardKeymap,
         27 => R::SetKeyboardKeymap { layout_id: d.layout_id, keymap: admin::KeyboardKeymap::from_bytes(bytes(d.keymap, d.keymap_len)?).map_err(|_| ARG)? },
         28 => R::ClearKeyboardKeymap,
+        29 => R::PassConfiguration,
+        30 => R::SetPassConfiguration(bytes(d.data, d.data_len)?.to_vec()),
         _ => return Err(ARG),
     })
 }
