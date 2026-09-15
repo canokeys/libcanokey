@@ -240,6 +240,7 @@ void cnk_operation_free(cnk_operation_t *);
 cnk_status_t cnk_probe_device_new(uint32_t mode,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_verify_pin_new(const cnk_profile_t *,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_get_pin_status_new(const cnk_profile_t *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_piv_get_pin_status_selected_new(const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_read_object_new(const cnk_profile_t *,const uint8_t *tag,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 /* Public certificate read; slot is 9A/9C/9D/9E or 82..95.
  * Byte result getter returns unwrapped, bounded-decompressed bytes.

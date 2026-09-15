@@ -394,6 +394,23 @@ pub unsafe extern "C" fn cnk_piv_get_pin_status_new(
             .map_err(|e| failure(e, error))
     })
 }
+
+/// Construct empty VERIFY for an already selected PIV transaction, without a profile.
+///
+/// # Safety
+/// `out` must be writable and `opts`/`error` follow the versioned pointer contract.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_get_pin_status_selected_new(
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        piv::get_pin_status_selected(options(opts)?)
+            .map(Inner::PinStatus)
+            .map_err(|e| failure(e, error))
+    })
+}
 /// Construct an unprotected SELECT/GET DATA read for a complete BER object tag.
 /// Copies tag/options and required profile configuration. Use the byte result
 /// getter after DONE for the normalized object value, excluding its outer tag.
