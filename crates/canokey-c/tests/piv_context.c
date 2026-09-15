@@ -25,6 +25,14 @@ static cnk_profile_t *profile(void) {
   return result;
 }
 int main(void) {
+  const uint8_t missing_flags[] = {0x53, 4, 0x80, 2, 0x82, 0};
+  uint32_t flags = 0xfeed;
+  cnk_error_v1 policy_error = {0};
+  policy_error.struct_size = sizeof(policy_error);
+  assert(cnk_piv_admin_data_flags(missing_flags, sizeof(missing_flags), &flags,
+                                  &policy_error) == CNK_PROTOCOL_ERROR);
+  assert(flags == 0xfeed && policy_error.kind == CNK_ERROR_INVALID_RESPONSE &&
+         policy_error.phase == CNK_PHASE_PARSING);
   cnk_profile_t *p = profile();
   uint32_t version[3] = {99, 99, 99}, serial = 99;
   assert(cnk_profile_firmware_version(p, version) == CNK_OK &&
@@ -48,13 +56,19 @@ int main(void) {
          semantic == 999);
   cnk_error_v1 admission = {0};
   admission.struct_size = sizeof(admission);
-  assert(cnk_profile_piv_require_algorithm(p, CNK_ALGORITHM_RSA3072, &admission) == CNK_OK);
-  assert(cnk_profile_piv_require_algorithm(p, CNK_ALGORITHM_P521, &admission) == CNK_OK);
-  assert(cnk_profile_piv_require_algorithm(p, CNK_ALGORITHM_RSA1024, &admission) == CNK_PROTOCOL_ERROR);
-  assert(admission.kind == CNK_ERROR_UNSUPPORTED_FEATURE && admission.presence_flags == 0);
-  assert(cnk_profile_piv_require_algorithm(p, 0xd1, &admission) == CNK_INVALID_ARGUMENT);
+  assert(cnk_profile_piv_require_algorithm(p, CNK_ALGORITHM_RSA3072,
+                                           &admission) == CNK_OK);
+  assert(cnk_profile_piv_require_algorithm(p, CNK_ALGORITHM_P521, &admission) ==
+         CNK_OK);
+  assert(cnk_profile_piv_require_algorithm(p, CNK_ALGORITHM_RSA1024,
+                                           &admission) == CNK_PROTOCOL_ERROR);
+  assert(admission.kind == CNK_ERROR_UNSUPPORTED_FEATURE &&
+         admission.presence_flags == 0);
+  assert(cnk_profile_piv_require_algorithm(p, 0xd1, &admission) ==
+         CNK_INVALID_ARGUMENT);
   assert(admission.kind == 0);
-  assert(cnk_profile_piv_require_algorithm(NULL, CNK_ALGORITHM_RSA2048, NULL) == CNK_INVALID_ARGUMENT);
+  assert(cnk_profile_piv_require_algorithm(NULL, CNK_ALGORITHM_RSA2048, NULL) ==
+         CNK_INVALID_ARGUMENT);
   cnk_piv_context_t *context = NULL;
   cnk_error_v1 error;
   memset(&error, 0xCC, sizeof(error));

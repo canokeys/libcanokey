@@ -23,6 +23,10 @@ fn absent_policy_is_distinct_from_malformed_or_partly_configured_policy() {
         vec![0x81, 0],
         vec![0x81, 1, 0, 0x81, 1, 3],
         vec![0x84, 0],
+        vec![0x82, 0],
+        vec![0x83, 0],
+        vec![0x82, 0, 0x83, 0],
+        [vec![0x82, 16], vec![0; 16]].concat(),
         vec![0x82, 1, 0],
         vec![0x83, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     ] {
@@ -31,6 +35,13 @@ fn absent_policy_is_distinct_from_malformed_or_partly_configured_policy() {
         assert_eq!(error.kind, ErrorKind::InvalidResponse);
         assert_eq!(error.phase, Phase::Parsing);
     }
+    let with_optional_fields = wrap(0x53, &wrap(0x80, &[0x81, 1, 3, 0x82, 0, 0x83, 0]));
+    assert_eq!(
+        ManagementProtection::from_admin_object(&with_optional_fields)
+            .unwrap()
+            .flags(),
+        3
+    );
     for data in [
         vec![],
         vec![0x53, 1],

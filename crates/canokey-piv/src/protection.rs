@@ -50,6 +50,9 @@ impl ManagementProtection {
             return Ok(Self { flags: 0 });
         }
         let admin = single(outer, 0x80)?;
+        if admin.is_empty() {
+            return Ok(Self { flags: 0 });
+        }
         let mut reader = TlvReader::new_ber(
             admin,
             TlvLimits {
@@ -67,10 +70,10 @@ impl ManagementProtection {
             }
         }
         Ok(Self {
-            flags: flags.unwrap_or(0),
+            flags: flags.ok_or_else(invalid)?,
         })
     }
-    /// Return observed flags, using zero for an omitted bit field.
+    /// Return observed flags, using zero only for an empty policy container.
     pub fn flags(self) -> u8 {
         self.flags
     }
