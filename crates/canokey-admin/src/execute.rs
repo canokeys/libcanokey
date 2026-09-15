@@ -162,6 +162,10 @@ pub fn operation(
         Request::Configuration | Request::Configure(_) => (Some(read(0x42, 0)), Stage::Read),
         Request::FlashUsage => (Some(read(0x41, 0)), Stage::Read),
         Request::AppletUsage => (Some(read(0x41, 1)), Stage::Read),
+        Request::KeyboardLayout => (Some(command::read_keyboard_layout()), Stage::Read),
+        Request::KeyboardKeymap => (Some(command::read_keyboard_keymap()), Stage::Read),
+        Request::SetKeyboardKeymap { layout_id, keymap } => (Some(command::write_keyboard_keymap(*layout_id, keymap.as_bytes())), Stage::Write(true)),
+        Request::ClearKeyboardKeymap => (Some(command::clear_keyboard_keymap()), Stage::Write(true)),
         Request::PinStatus => (Some(write(0x20, 0, 0, vec![])), Stage::Read),
         Request::VerifyPin => (None, Stage::Read),
         Request::ChangePin(p) => (

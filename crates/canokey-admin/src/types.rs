@@ -274,7 +274,12 @@ pub enum Request {
     /// Read the 256-byte keyboard HID map.
     KeyboardKeymap,
     /// Replace the keyboard HID map for a layout.
-    SetKeyboardKeymap { layout_id: u8, keymap: KeyboardKeymap },
+    SetKeyboardKeymap {
+        /// Host-defined layout identifier.
+        layout_id: u8,
+        /// Complete 256-byte HID mapping.
+        keymap: KeyboardKeymap,
+    },
     /// Clear the stored keyboard HID map.
     ClearKeyboardKeymap,
     /// Query Admin verification/retries without submitting a PIN.
