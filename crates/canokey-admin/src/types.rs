@@ -269,6 +269,14 @@ pub enum Request {
     FlashUsage,
     /// Read eight logical applet usage records.
     AppletUsage,
+    /// Read the configured keyboard layout identifier.
+    KeyboardLayout,
+    /// Read the 256-byte keyboard HID map.
+    KeyboardKeymap,
+    /// Replace the keyboard HID map for a layout.
+    SetKeyboardKeymap { layout_id: u8, keymap: KeyboardKeymap },
+    /// Clear the stored keyboard HID map.
+    ClearKeyboardKeymap,
     /// Query Admin verification/retries without submitting a PIN.
     PinStatus,
     /// Verify the separately supplied PIN without another target command.
