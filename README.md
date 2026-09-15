@@ -70,6 +70,8 @@ protocol state.
 - PIV selection, PIN status/verification/logout, PIN/PUK changes and unblock.
 - External/Mutual 3DES or AES-192 management authentication, explicit caller-supplied
   mutual challenges; authenticated object/certificate writes and management-key replacement.
+  PIN-managed protection validation/finalization owns policy parsing, recovered-key
+  authentication and explicit PUK blocking. Key rotation can maintain PRINTED.
 - Object/certificate reads, bounded gzip decoding, certificate deletion, metadata
   and algorithm-configuration reads; compact directory with entry diagnostics,
   UTF-16 container names, key move/delete, explicit PIN/PUK retry reset, algorithm
@@ -87,7 +89,8 @@ protocol state.
 
 Firmware compatibility covers audited 1.3–3.1.0 layouts with per-operation gates.
 Legacy OATH commands, OpenPGP DO framing and Admin configuration fields are selected
-from actual Admin firmware; unknown/development versions do not enable mutations.
+from actual Admin firmware; unknown base versions do not enable mutations; development builds follow their
+declared numeric base version while preserving the original version text.
 See [compatibility contracts](docs/api-design.md#profiles-and-probing) for the model
 and each applet's historical restrictions. Every factory checks required evidence. PIV `sign_streaming`
 handles ML-DSA and empty Ed25519 messages explicitly; SM2 initiators require PIN

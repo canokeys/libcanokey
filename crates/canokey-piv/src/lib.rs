@@ -47,6 +47,15 @@
 //!
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
+/// Strict parsing of host-managed PIV management-protection objects.
+pub mod protection;
+pub use protection::{protected_management_key_from_object, ManagementProtection};
+/// Explicit credential commands inside a caller-selected PIV transaction.
+pub mod credentials;
+pub use credentials::{credential, CredentialAction};
+/// Explicit version/configuration/RNG operations in an already selected applet.
+pub mod discovery;
+pub use discovery::{random_selected, read_configuration_selected, read_version_selected};
 mod access;
 /// SM2 agreement with explicitly pre-exchanged peer keys.
 pub mod sm2_agreement;
@@ -58,7 +67,7 @@ pub use directory::{read_metadata_directory, DirectoryEntry, DirectoryIssue, Met
 pub mod configuration;
 pub use configuration::{
     attest, delete_key, move_key, read_container_name, reset_pin_puk_retries, reset_piv,
-    set_algorithm_config, set_container_name, ContainerName,
+    set_algorithm_config, set_container_name, ContainerName, ContainerNameReference,
 };
 /// Explicit firmware streaming signature modes.
 pub mod streaming;
@@ -71,7 +80,9 @@ pub mod private;
 pub use private::{decapsulate, decrypt, derive, sign, SignInput, Signature, SignatureEncoding};
 /// Key generation, import material and policies.
 pub mod keys;
-pub use keys::{generate_key, import_key, KeyParameters, PrivateKeyMaterial};
+pub use keys::{
+    generate_key, import_key, require_empty_key_slot, KeyParameters, PrivateKeyMaterial,
+};
 /// Owned metadata records and key policy values.
 pub mod metadata;
 pub use metadata::{
@@ -84,7 +95,8 @@ pub use public_key::PublicKey;
 /// Authenticated object/certificate writes and management-key replacement.
 pub mod write;
 pub use write::{
-    delete_certificate, set_management_key, write_certificate, write_object, ManagementTouchPolicy,
+    delete_certificate, set_management_key, write_certificate, write_object,
+    write_object_container, ManagementTouchPolicy,
 };
 /// Management-key types and explicit External/Mutual authentication.
 pub mod management;
@@ -119,7 +131,23 @@ fn secret(bytes: &[u8]) -> Result<SecretBytes, Error> {
     }
     Ok(SecretBytes::new(bytes.to_vec()))
 }
+fn legacy_secret(bytes: &[u8]) -> Result<SecretBytes, Error> {
+    if !(1..=8).contains(&bytes.len()) {
+        return Err(Error::new(ErrorKind::InvalidPin));
+    }
+    Ok(SecretBytes::new(bytes.to_vec()))
+}
 impl Pin {
+    /// Copy the legacy PKCS#11 raw credential form: 1..=8 bytes, including FF.
+    /// This explicitly preserves byte-oriented callers; applications choosing a
+    /// new credential should prefer the stricter `from_bytes` constructor.
+    /// Short inputs are FF-padded only when encoding a command.
+    /// # Errors
+    /// Empty or longer-than-eight-byte inputs return InvalidPin.
+    pub fn from_legacy_bytes(bytes: &[u8]) -> Result<Self, Error> {
+        Ok(Self(legacy_secret(bytes)?))
+    }
+
     /// Validate and copy raw credential bytes without string conversion.
     ///
     /// # Errors
@@ -130,6 +158,16 @@ impl Pin {
     }
 }
 impl Puk {
+    /// Copy the legacy PKCS#11 raw credential form: 1..=8 bytes, including FF.
+    /// This explicitly preserves byte-oriented callers; applications choosing a
+    /// new credential should prefer the stricter `from_bytes` constructor.
+    /// Short inputs are FF-padded only when encoding a command.
+    /// # Errors
+    /// Empty or longer-than-eight-byte inputs return InvalidPin.
+    pub fn from_legacy_bytes(bytes: &[u8]) -> Result<Self, Error> {
+        Ok(Self(legacy_secret(bytes)?))
+    }
+
     /// Validate and copy raw credential bytes without string conversion.
     ///
     /// # Errors
@@ -139,10 +177,22 @@ impl Puk {
         Ok(Self(secret(bytes)?))
     }
 }
-/// Authentication to perform after SELECT within one high-level operation.
-/// This is an owned input, not a persistent authorization token.
+/// Largest classic Ed25519 message accepted by the audited PIV scratch buffer.
+pub const MAX_ED25519_MESSAGE: usize = 512;
+/// Conservative full-message limit, including any SM2 identity bytes.
+/// Leaves room for the PIV envelope within the firmware's 16-bit input length.
+pub const MAX_STREAMING_MESSAGE: usize = 65520;
+
+/// Selection and authentication policy for one high-level operation.
+/// None/Pin/Management variants SELECT first; Existing reuses the caller's
+/// selected transaction. This owns inputs, not a persistent authorization token.
 #[derive(Clone, Debug)]
 pub enum Access {
+    /// Reuse the caller's selected PIV transaction and existing card authorization.
+    /// No SELECT or implicit authentication is sent. The caller must retain the
+    /// transaction through completion; the card enforces authorization for writes.
+    /// This is an execution policy, not proof of live authentication.
+    Existing,
     /// Perform no explicit authentication; the card may still reject access.
     None,
     /// Verify the supplied PIN immediately before the target command.
@@ -427,6 +477,7 @@ fn make<T: 'static>(
         options,
     )
 }
+
 fn request(command: LogicalCommand, phase: Phase, reference: Option<SecretReference>) -> Request {
     Request {
         command,
@@ -440,6 +491,22 @@ fn selected(command: LogicalCommand) -> Vec<Request> {
         request(command, Phase::Command, None),
     ]
 }
+/// Select PIV before a device profile exists, returning owned raw selection data.
+/// Uses the standard five-byte PIV AID with explicit Le=256, which also covers
+/// legacy readers. Callers own the transaction; SELECT may clear authentication.
+/// This does not infer firmware capabilities or authorize subsequent operations.
+/// # Errors
+/// Invalid options/command budgets fail before I/O. Missing applets and other
+/// card status failures retain Select phase; transport/response limits are terminal.
+pub fn select_application(options: OperationOptions) -> Result<Operation<SecretBytes>, Error> {
+    let mut command = command::select();
+    command.le = canokey_protocol::ExpectedLength::Exact(256);
+    discovery::single(command, Phase::Select, options, |response| {
+        response.ensure_success(Phase::Select)?;
+        Ok(response.data)
+    })
+}
+
 /// Construct a standalone SELECT PIV operation returning raw selection data.
 ///
 /// # Errors
@@ -680,6 +747,16 @@ pub(crate) fn prepare_read_object_with<T: 'static>(
     options: OperationOptions,
     parse: impl FnOnce(ObjectData) -> Result<T, Error> + Send + 'static,
 ) -> Result<Sequence<T>, Error> {
+    prepare_read_object_format(profile, id, options, false, parse)
+}
+
+pub(crate) fn prepare_read_object_format<T: 'static>(
+    profile: &DeviceProfile,
+    id: ObjectId,
+    options: OperationOptions,
+    preserve_container: bool,
+    parse: impl FnOnce(ObjectData) -> Result<T, Error> + Send + 'static,
+) -> Result<Sequence<T>, Error> {
     require(profile)?;
     let legacy = profile.legacy_unwrapped_objects();
     let limit = options.limits.max_total_response_bytes;
@@ -701,12 +778,34 @@ pub(crate) fn prepare_read_object_with<T: 'static>(
         );
         let tlv = reader
             .next()?
-            .ok_or_else(|| Error::new(ErrorKind::InvalidResponse))?;
+            .ok_or_else(|| Error::new(ErrorKind::InvalidResponse).at(Phase::Parsing))?;
         if tlv.tag.value() != if id.0.value() == 0x7e { 0x7e } else { 0x53 }
             || reader.next()?.is_some()
         {
-            return Err(Error::new(ErrorKind::InvalidResponse));
+            return Err(Error::new(ErrorKind::InvalidResponse).at(Phase::Parsing));
         }
-        parse(SecretBytes::new(tlv.value.to_vec()))
+        if preserve_container {
+            parse(r.data)
+        } else {
+            parse(SecretBytes::new(tlv.value.to_vec()))
+        }
     })
+}
+
+/// Read a validated PIV object while retaining its complete 53/7E container.
+/// This compatibility form preserves device bytes for existing raw-object APIs;
+/// new value consumers should use [`read_object`]. The result owns and
+/// zeroizes its bytes; Existing omits SELECT and implicit authentication.
+///
+/// # Errors
+/// Profile, options, status, framing and response-limit errors are the same as
+/// [`read_object`]. Malformed containers never become successful reads.
+pub fn read_object_container(
+    profile: &DeviceProfile,
+    id: ObjectId,
+    access: Access,
+    options: OperationOptions,
+) -> Result<Operation<SecretBytes>, Error> {
+    let sequence = prepare_read_object_format(profile, id, options, true, Ok)?;
+    crate::access::with_access(profile, access, sequence, options)
 }

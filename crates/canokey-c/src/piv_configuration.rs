@@ -1,6 +1,42 @@
 //! C factories for PIV configuration, names, directory and key lifecycle.
 use super::*;
-use piv_mutation::{access, slot};
+use piv_mutation::{piv_access, piv_options, slot};
+pub(super) fn name_reference(value: u32) -> Result<piv::ContainerNameReference, u32> {
+    if value == 0xf9 {
+        Ok(piv::ContainerNameReference::Attestation)
+    } else {
+        slot(value).map(piv::ContainerNameReference::Key)
+    }
+}
+/// Validate copied UTF-16LE name bytes without a profile, credential or card call.
+/// Empty input clears a name; lengths over 78, odd lengths, NUL and unpaired
+/// surrogates are rejected. No handle or input pointer survives the call.
+/// # Safety
+/// data must cover len readable bytes; NULL requires zero length. Optional error
+/// must be aligned/writable with initialized struct_size and must not alias data.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_container_name_validate(
+    data: *const u8,
+    len: usize,
+    error: *mut CnkError,
+) -> u32 {
+    guard(|| {
+        if let Err(code) = clear_error(error) {
+            return code;
+        }
+        if len > 78 {
+            return ARG;
+        }
+        let input = match bytes(data, len) {
+            Ok(input) => input,
+            Err(code) => return code,
+        };
+        match piv::ContainerName::from_utf16le(input) {
+            Ok(_) => OK,
+            Err(e) => failure(e, error),
+        }
+    })
+}
 /// Read the compact directory; original bytes and typed indexed entries are available.
 /// # Safety
 /// Follow the crate pointer/aliasing contract. profile must be live/non-NULL;
@@ -17,8 +53,8 @@ pub unsafe extern "C" fn cnk_piv_read_metadata_directory_new(
     create(out, error, || {
         piv::read_metadata_directory(
             &profile.as_ref().ok_or(ARG)?.0,
-            access(auth, error)?,
-            options(opts)?,
+            piv_access(auth, opts, error)?,
+            piv_options(opts)?,
         )
         .map(Inner::Directory)
         .map_err(|e| failure(e, error))
@@ -41,9 +77,9 @@ pub unsafe extern "C" fn cnk_piv_read_container_name_new(
     create(out, error, || {
         piv::read_container_name(
             &profile.as_ref().ok_or(ARG)?.0,
-            slot(reference)?,
-            access(auth, error)?,
-            options(opts)?,
+            name_reference(reference)?,
+            piv_access(auth, opts, error)?,
+            piv_options(opts)?,
         )
         .map(Inner::ContainerName)
         .map_err(|e| failure(e, error))
@@ -71,10 +107,10 @@ pub unsafe extern "C" fn cnk_piv_set_container_name_new(
         }
         piv::set_container_name(
             &profile.as_ref().ok_or(ARG)?.0,
-            slot(reference)?,
+            name_reference(reference)?,
             piv::ContainerName::from_utf16le(bytes(data, len)?).map_err(|e| failure(e, error))?,
-            access(auth, error)?,
-            options(opts)?,
+            piv_access(auth, opts, error)?,
+            piv_options(opts)?,
         )
         .map(Inner::Mutation)
         .map_err(|e| failure(e, error))
@@ -100,8 +136,8 @@ pub unsafe extern "C" fn cnk_piv_move_key_new(
             &profile.as_ref().ok_or(ARG)?.0,
             slot(source)?,
             slot(target)?,
-            access(auth, error)?,
-            options(opts)?,
+            piv_access(auth, opts, error)?,
+            piv_options(opts)?,
         )
         .map(Inner::Mutation)
         .map_err(|e| failure(e, error))
@@ -125,8 +161,8 @@ pub unsafe extern "C" fn cnk_piv_delete_key_new(
         piv::delete_key(
             &profile.as_ref().ok_or(ARG)?.0,
             slot(reference)?,
-            access(auth, error)?,
-            options(opts)?,
+            piv_access(auth, opts, error)?,
+            piv_options(opts)?,
         )
         .map(Inner::Mutation)
         .map_err(|e| failure(e, error))
@@ -152,8 +188,8 @@ pub unsafe extern "C" fn cnk_piv_reset_pin_puk_retries_new(
             &profile.as_ref().ok_or(ARG)?.0,
             u8::try_from(pin_retries).map_err(|_| ARG)?,
             u8::try_from(puk_retries).map_err(|_| ARG)?,
-            access(auth, error)?,
-            options(opts)?,
+            piv_access(auth, opts, error)?,
+            piv_options(opts)?,
         )
         .map(Inner::Mutation)
         .map_err(|e| failure(e, error))
@@ -182,8 +218,8 @@ pub unsafe extern "C" fn cnk_piv_set_algorithm_config_new(
             &profile.as_ref().ok_or(ARG)?.0,
             canokey::compatibility::AlgorithmConfig::parse(bytes(data, len)?)
                 .map_err(|e| failure(e, error))?,
-            access(auth, error)?,
-            options(opts)?,
+            piv_access(auth, opts, error)?,
+            piv_options(opts)?,
         )
         .map(Inner::Mutation)
         .map_err(|e| failure(e, error))
@@ -203,10 +239,12 @@ pub unsafe extern "C" fn cnk_piv_attest_new(
     error: *mut CnkError,
 ) -> u32 {
     create(out, error, || {
+        let options = piv_options(opts)?;
         piv::attest(
             &profile.as_ref().ok_or(ARG)?.0,
             slot(reference)?,
-            options(opts)?,
+            piv_mutation::select(opts),
+            options,
         )
         .map(Inner::Object)
         .map_err(|e| failure(e, error))
@@ -403,5 +441,202 @@ pub unsafe extern "C" fn cnk_operation_batch_item_directory_entry(
     guard(|| match directory(op, Some(item_index)) {
         Ok(d) => directory_entry(d, entry_index, out),
         Err(code) => code,
+    })
+}
+
+/// Probe the selected PIV version, with no SELECT or retained caller pointer.
+/// # Safety
+/// out is non-NULL/writable; optional options/error have valid initialized
+/// prefixes and do not alias output. Caller owns the selected transaction.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_read_version_selected_new(
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        piv::read_version_selected(options(opts)?)
+            .map(Inner::Object)
+            .map_err(|e| failure(e, error))
+    })
+}
+/// Probe selected PIV algorithm configuration without selecting/authenticating.
+/// Caller must establish that attempting this public probe is appropriate.
+/// # Safety
+/// out is non-NULL/writable; optional options/error have valid initialized
+/// prefixes and do not alias output. Caller owns the selected transaction.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_read_configuration_selected_new(
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        piv::read_configuration_selected(options(opts)?)
+            .map(Inner::AlgorithmConfig)
+            .map_err(|e| failure(e, error))
+    })
+}
+/// Read selected PIV RNG after an explicit live version gate, without SELECT.
+/// Output and exchange budgets apply before allocation; output is owned/zeroized.
+/// # Safety
+/// out is non-NULL/writable; optional options/error have valid initialized
+/// prefixes and do not alias output. Caller owns the selected transaction.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_random_selected_new(
+    length: usize,
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        piv::random_selected(length, options(opts)?)
+            .map(Inner::Object)
+            .map_err(|e| failure(e, error))
+    })
+}
+/// Copy a ten-byte configuration projection: enabled, Ed25519, RSA3072,
+/// RSA4096, X25519, secp256k1, P521, SM2, MLDSA65, MLKEM768. Zero means absent
+/// or disabled; the raw byte getter retains the original observed format.
+/// # Safety
+/// op is live without concurrent mutation/free. len is initialized/writable;
+/// a non-NULL buffer covers its capacity. Output ranges do not alias handles.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_operation_piv_configuration_copy(
+    op: *const CnkOperation,
+    buffer: *mut u8,
+    len: *mut usize,
+) -> u32 {
+    guard(|| {
+        let Some(op) = op.as_ref() else {
+            return ARG;
+        };
+        if op.poisoned {
+            return STATE;
+        }
+        let Inner::AlgorithmConfig(config) = &op.inner else {
+            return TYPE;
+        };
+        let Ok(config) = config.result() else {
+            return STATE;
+        };
+        let mut data = [0; 10];
+        data[0] = u8::from(config.enabled());
+        for (index, algorithm) in [
+            piv::Algorithm::Ed25519,
+            piv::Algorithm::Rsa3072,
+            piv::Algorithm::Rsa4096,
+            piv::Algorithm::X25519,
+            piv::Algorithm::Secp256k1,
+            piv::Algorithm::EccP521,
+            piv::Algorithm::Sm2,
+            piv::Algorithm::MlDsa65,
+            piv::Algorithm::MlKem768,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            data[index + 1] = config.wire_id(algorithm).unwrap_or(0);
+        }
+        copy(&data, buffer, len)
+    })
+}
+
+/// Immutable PIV support and buffering limits, matching cnk_piv_capabilities_v1.
+/// Algorithm masks use 1 << CNK_ALGORITHM_*; unknown is distinct from unsupported.
+#[repr(C)]
+pub struct CnkPivCapabilities {
+    /// Caller-provided supported structure size.
+    pub struct_size: u32,
+    /// Algorithms with affirmative card support.
+    pub algorithms: u32,
+    /// Algorithms for which the profile lacks sufficient evidence.
+    pub unknown_algorithms: u32,
+    /// Affirmatively supported CNK_PIV_FEATURE_* bits.
+    pub features: u32,
+    /// Features without sufficient evidence.
+    pub unknown_features: u32,
+    /// Maximum classic Ed25519 message bytes.
+    pub max_ed25519_message: u32,
+    /// Maximum streaming message plus optional identity bytes.
+    pub max_streaming_message: u32,
+}
+/// Project card capabilities from the same profile used by operation factories.
+/// Firmware rules and observed algorithm configuration must both permit a bit;
+/// zero in both supported/unknown masks means explicitly unsupported.
+/// No I/O or cached application state. Null pointers and undersized output
+/// descriptors leave output untouched.
+/// # Safety
+/// profile is live/readable; out is writable with initialized struct_size.
+/// The two ranges do not alias and neither is concurrently mutated or freed.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_profile_piv_capabilities(
+    profile: *const CnkProfile,
+    out: *mut CnkPivCapabilities,
+) -> u32 {
+    guard(|| {
+        let Some(profile) = profile.as_ref() else {
+            return ARG;
+        };
+        if out.is_null() || (*out).struct_size < std::mem::size_of::<CnkPivCapabilities>() as u32 {
+            return ARG;
+        }
+        let mut value = CnkPivCapabilities {
+            struct_size: (*out).struct_size,
+            algorithms: 0,
+            unknown_algorithms: 0,
+            features: 0,
+            unknown_features: 0,
+            max_ed25519_message: piv::MAX_ED25519_MESSAGE as u32,
+            max_streaming_message: piv::MAX_STREAMING_MESSAGE as u32,
+        };
+        let piv_support = profile.0.capability(Capability::Piv).support;
+        let gated = |support| {
+            if piv_support == Support::Supported {
+                support
+            } else {
+                piv_support
+            }
+        };
+        for code in 1..=13 {
+            let Ok(algorithm) = crate::piv_keys::algorithm(code) else {
+                continue;
+            };
+            match gated(profile.0.key_algorithm_support(algorithm).support) {
+                Support::Supported => value.algorithms |= 1 << code,
+                Support::Unknown => value.unknown_algorithms |= 1 << code,
+                Support::Unsupported => {}
+            }
+        }
+        for (bit, feature) in [
+            (1, Capability::KeyMoveDelete),
+            (2, Capability::RetryReset),
+            (4, Capability::Attestation),
+            (8, Capability::ContainerNames),
+            (16, Capability::Sm2Agreement),
+        ] {
+            match gated(profile.0.capability(feature).support) {
+                Support::Supported => value.features |= bit,
+                Support::Unknown => value.unknown_features |= bit,
+                Support::Unsupported => {}
+            }
+        }
+        match gated(
+            profile
+                .0
+                .streaming_signing_support(piv::Algorithm::Sm2)
+                .support,
+        ) {
+            Support::Supported => value.features |= 32,
+            Support::Unknown => value.unknown_features |= 32,
+            Support::Unsupported => {}
+        }
+        match profile.0.info().piv_version() {
+            Some(version) if version.0[0] >= 6 => value.features |= 64,
+            None => value.unknown_features |= 64,
+            _ => {}
+        }
+        ptr::write(out, value);
+        OK
     })
 }

@@ -6,13 +6,21 @@
 //! library, accessed without concurrent mutation, and freed exactly once.
 //! A non-null versioned struct must contain at least its declared supported prefix.
 #![deny(missing_docs)]
+mod piv_protection;
+pub use piv_protection::*;
 mod piv_credentials;
 pub use piv_credentials::*;
+#[cfg(feature = "openpgp")]
 mod openpgp;
+#[cfg(feature = "openpgp")]
 pub use openpgp::*;
+#[cfg(feature = "oath")]
 mod oath;
+#[cfg(feature = "oath")]
 pub use oath::*;
+#[cfg(feature = "admin")]
 mod admin;
+#[cfg(feature = "admin")]
 pub use admin::*;
 mod piv_sm2;
 pub use piv_sm2::*;
@@ -57,11 +65,12 @@ pub struct CnkError {
 /// Caller-owned `cnk_operation_options_v1`; constructors copy these limits.
 /// NULL options selects Rust defaults. Zero explicit budgets are invalid.
 /// The logical-command input limit currently remains the Rust default.
+#[derive(Clone, Copy)]
 #[repr(C)]
 pub struct CnkOptions {
     /// Caller-supplied size in bytes; must include the entire supported struct prefix.
     pub struct_size: u32,
-    /// CNK_ALLOW_EXTENDED or zero; other input flag bits are rejected.
+    /// CNK_ALLOW_EXTENDED; PIV factories also accept CNK_PIV_USE_EXISTING.
     pub flags: u32,
     /// Maximum physical command bytes, including header and Lc/Le.
     pub max_command_bytes: u32,
@@ -83,8 +92,11 @@ pub struct CnkOperation {
     poisoned: bool,
 }
 enum Inner {
+    #[cfg(feature = "openpgp")]
     OpenPgp(Operation<canokey::openpgp::Outcome>),
+    #[cfg(feature = "oath")]
     Oath(Operation<canokey::oath::Outcome>),
+    #[cfg(feature = "admin")]
     Admin(Operation<canokey::admin::Outcome>),
     Sm2Agreement(Operation<piv::Sm2Agreement>),
     Directory(Operation<piv::MetadataDirectory>),
@@ -104,8 +116,11 @@ enum Inner {
 macro_rules! dispatch {
     ($value:expr, $op:ident => $body:expr) => {
         match $value {
+            #[cfg(feature = "openpgp")]
             Inner::OpenPgp($op) => $body,
+            #[cfg(feature = "oath")]
             Inner::Oath($op) => $body,
+            #[cfg(feature = "admin")]
             Inner::Admin($op) => $body,
             Inner::Sm2Agreement($op) => $body,
             Inner::Directory($op) => $body,
@@ -401,8 +416,8 @@ pub unsafe extern "C" fn cnk_piv_read_object_new(
         piv::read_object(
             &profile.as_ref().ok_or(ARG)?.0,
             id,
-            piv::Access::None,
-            options(opts)?,
+            piv_mutation::piv_access(ptr::null(), opts, error)?,
+            piv_mutation::piv_options(opts)?,
         )
         .map(Inner::Object)
         .map_err(|e| failure(e, error))
@@ -438,8 +453,8 @@ pub unsafe extern "C" fn cnk_piv_read_certificate_new(
         piv::read_certificate(
             &profile.as_ref().ok_or(ARG)?.0,
             slot,
-            piv::Access::None,
-            options(opts)?,
+            piv_mutation::piv_access(ptr::null(), opts, error)?,
+            piv_mutation::piv_options(opts)?,
         )
         .map(Inner::Certificate)
         .map_err(|e| failure(e, error))
@@ -617,6 +632,7 @@ pub unsafe extern "C" fn cnk_operation_result_copy_bytes(
             return STATE;
         }
         match &op.inner {
+            #[cfg(feature = "openpgp")]
             Inner::OpenPgp(p) => match p.result() {
                 Ok(
                     canokey::openpgp::Outcome::Bytes(b)
@@ -625,6 +641,7 @@ pub unsafe extern "C" fn cnk_operation_result_copy_bytes(
                 Ok(_) => TYPE,
                 Err(_) => STATE,
             },
+            #[cfg(feature = "admin")]
             Inner::Admin(p) => match p.result() {
                 Ok(v) => match admin::result_bytes(&v.value) {
                     Some(b) => copy(&b, buffer, len),
@@ -708,6 +725,7 @@ pub unsafe extern "C" fn cnk_operation_pin_status(
             return STATE;
         }
         match &op.inner {
+            #[cfg(feature = "openpgp")]
             Inner::OpenPgp(p) => match p.result() {
                 Ok(canokey::openpgp::Outcome::PinStatus(s)) => {
                     ptr::write(
@@ -769,6 +787,79 @@ pub unsafe extern "C" fn cnk_profile_firmware_text(
         None => ARG,
     })
 }
+/// Copy parsed firmware major/minor/patch into three u32 values. Unrecognized
+/// firmware returns CNK_RESULT_TYPE_MISMATCH and leaves output untouched.
+/// # Safety
+/// profile is live without mutation/free; version covers three aligned writable
+/// u32 values and does not alias the profile. No pointer is retained.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_profile_firmware_version(
+    profile: *const CnkProfile,
+    version: *mut u32,
+) -> u32 {
+    guard(|| {
+        if version.is_null() {
+            return ARG;
+        }
+        let Some(profile) = profile.as_ref() else {
+            return ARG;
+        };
+        let Some(firmware) = profile.0.info().firmware() else {
+            return TYPE;
+        };
+        let (major, minor, patch) = (firmware.major, firmware.minor, firmware.patch);
+        *version = major as u32;
+        *version.add(1) = minor as u32;
+        *version.add(2) = patch as u32;
+        OK
+    })
+}
+/// Copy model UTF-8 without a NUL terminator, with normal size-query semantics.
+/// An absent model returns CNK_RESULT_TYPE_MISMATCH, distinct from empty text.
+/// # Safety
+/// profile is live without mutation/free; len is initialized/writable and a
+/// non-NULL buffer covers its capacity. Outputs do not alias input or each other.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_profile_model_copy(
+    profile: *const CnkProfile,
+    buffer: *mut u8,
+    len: *mut usize,
+) -> u32 {
+    guard(|| {
+        let Some(profile) = profile.as_ref() else {
+            return ARG;
+        };
+        let Some(model) = profile.0.info().model() else {
+            return TYPE;
+        };
+        copy(model.as_bytes(), buffer, len)
+    })
+}
+/// Decode the observed four-byte big-endian serial into a u32. Missing serial
+/// returns CNK_RESULT_TYPE_MISMATCH and never invents an identifier.
+/// # Safety
+/// profile is live without mutation/free; out is aligned/writable/non-NULL and
+/// does not alias the profile. Output is unchanged on failure.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_profile_serial_u32(profile: *const CnkProfile, out: *mut u32) -> u32 {
+    guard(|| {
+        if out.is_null() {
+            return ARG;
+        }
+        let Some(profile) = profile.as_ref() else {
+            return ARG;
+        };
+        let Some(serial) = profile.0.info().serial() else {
+            return TYPE;
+        };
+        let Ok(bytes) = <[u8; 4]>::try_from(serial) else {
+            return TYPE;
+        };
+        *out = u32::from_be_bytes(bytes);
+        OK
+    })
+}
+
 /// Write CNK_SUPPORT_UNKNOWN/SUPPORTED/UNSUPPORTED for observed PIV availability.
 /// This is a local snapshot query, not a card probe.
 ///
@@ -792,6 +883,74 @@ pub unsafe extern "C" fn cnk_profile_piv_support(profile: *const CnkProfile, out
         OK
     })
 }
+/// Resolve an observed PIV wire identifier to a CNK_ALGORITHM_* semantic code.
+/// This consults the immutable profile's configuration and legacy IDs; it does
+/// not authorize key use. Factories still enforce capability and input policy.
+/// Unknown/out-of-range IDs return CNK_INVALID_ARGUMENT and leave out unchanged.
+/// # Safety
+/// profile must be live/readable with no concurrent mutation or free. out must
+/// be non-NULL, aligned/writable and not alias the profile. No pointer is retained.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_profile_piv_algorithm_from_wire(
+    profile: *const CnkProfile,
+    wire: u32,
+    out: *mut u32,
+) -> u32 {
+    guard(|| {
+        if out.is_null() || wire > u8::MAX as u32 {
+            return ARG;
+        }
+        let Some(profile) = profile.as_ref() else {
+            return ARG;
+        };
+        match profile.0.algorithm_from_wire_id(wire as u8) {
+            Some(algorithm) => {
+                *out = piv_keys::algorithm_code(algorithm);
+                OK
+            }
+            None => ARG,
+        }
+    })
+}
+
+/// Require observed PIV and key-algorithm support without I/O or retained state.
+/// `algorithm` is a CNK_ALGORITHM_* semantic code, never a configurable wire ID.
+/// Unsupported and unknown capabilities return distinct typed protocol errors;
+/// invalid codes/pointers return INVALID_ARGUMENT. This does not authenticate,
+/// reserve a slot, or replace an operation factory's policy and input checks.
+///
+/// # Safety
+/// profile must be live/readable without concurrent mutation or free. Optional
+/// error must be writable with initialized struct_size and must not alias profile.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_profile_piv_require_algorithm(
+    profile: *const CnkProfile,
+    algorithm: u32,
+    error: *mut CnkError,
+) -> u32 {
+    guard(|| {
+        if let Err(code) = clear_error(error) {
+            return code;
+        }
+        let Some(profile) = profile.as_ref() else {
+            return ARG;
+        };
+        let algorithm = match piv_keys::algorithm(algorithm) {
+            Ok(algorithm) => algorithm,
+            Err(code) => return code,
+        };
+        match profile
+            .0
+            .capability(Capability::Piv)
+            .require()
+            .and_then(|()| profile.0.key_algorithm_support(algorithm).require())
+        {
+            Ok(()) => OK,
+            Err(e) => failure(e, error),
+        }
+    })
+}
+
 /// Discard active operation state locally; terminal states are unchanged.
 /// No APDU or transport cancellation occurs. Drain or isolate in-flight I/O
 /// before reusing the application connection. The handle still needs free.
@@ -884,8 +1043,11 @@ pub unsafe extern "C" fn cnk_operation_result_kind(op: *const CnkOperation, out:
             return STATE;
         }
         *out = match &op.inner {
+            #[cfg(feature = "openpgp")]
             Inner::OpenPgp(_) => 17,
+            #[cfg(feature = "oath")]
             Inner::Oath(_) => 16,
+            #[cfg(feature = "admin")]
             Inner::Admin(_) => 15,
             Inner::Probe(_) => 1,
             Inner::Unit(_) => 2,

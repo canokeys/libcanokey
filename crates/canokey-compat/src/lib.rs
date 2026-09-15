@@ -79,7 +79,7 @@ pub enum Support {
 pub enum Evidence {
     /// A directly observed response or recorded discovery outcome.
     Observed,
-    /// A rule for a recognized firmware range.
+    /// A rule for a recognized numeric firmware range, including development builds.
     FirmwareMatrix,
     /// Conservative stable behavior for firmware outside the recognized matrix.
     LatestKnownFallback,
@@ -404,8 +404,10 @@ impl DeviceObservations {
 pub enum CompatibilityWarning {
     /// Firmware text could not be parsed; raw bytes remain available.
     UnrecognizedFirmware,
-    /// Firmware is newer or has a development suffix; conservative fallback applies.
+    /// Firmware is newer than the known matrix; conservative fallback applies.
     LatestKnownFallback,
+    /// A development/build suffix is retained; compatibility uses its numeric base version.
+    DeclaredBaseVersion,
     /// The named optional probe command reported an unsupported status.
     OptionalCommandUnsupported(&'static str),
     /// The named optional probe command requires authentication; no default was tried.
@@ -426,7 +428,9 @@ pub struct DeviceProfile {
 impl DeviceProfile {
     /// Normalize owned observations without contacting a device.
     ///
-    /// Unknown firmware remains usable under conservative capability decisions;
+    /// Development/build suffixes retain their identity but use the declared
+    /// numeric base version for compatibility. Unknown base versions remain
+    /// usable under conservative capability decisions;
     /// this does not attest that supplied observations came from the same device.
     ///
     /// # Errors
@@ -458,13 +462,14 @@ impl DeviceProfile {
             observations
                 .warnings
                 .push(CompatibilityWarning::UnrecognizedFirmware);
-        } else if firmware
-            .as_ref()
-            .is_some_and(|f| f.tuple() > (3, 1, 0) || f.suffix.is_some())
-        {
+        } else if firmware.as_ref().is_some_and(|f| f.tuple() > (3, 1, 0)) {
             observations
                 .warnings
                 .push(CompatibilityWarning::LatestKnownFallback);
+        } else if firmware.as_ref().is_some_and(|f| f.suffix.is_some()) {
+            observations
+                .warnings
+                .push(CompatibilityWarning::DeclaredBaseVersion);
         }
         Ok(Self {
             info: DeviceInfo {
@@ -622,7 +627,7 @@ impl DeviceProfile {
             _ => (2, 0, 0),
         };
         if let Some(version) = self.info.firmware.as_ref() {
-            if version.suffix.is_none() && ((1, 3, 0)..=(3, 1, 0)).contains(&version.tuple()) {
+            if ((1, 3, 0)..=(3, 1, 0)).contains(&version.tuple()) {
                 return CapabilityStatus {
                     support: if version.tuple() >= threshold {
                         Supported
@@ -644,7 +649,8 @@ impl DeviceProfile {
     }
     /// Resolve management-key algorithm support for both External and Mutual modes.
     /// Firmware 1.3..=3.0.3 uses 3DES; 3.1.0 uses AES-192. Unrecognized,
-    /// development and newer firmware remain Unknown; no algorithm is tried implicitly.
+    /// and newer base versions remain Unknown. Development builds use their declared
+    /// numeric base version; no algorithm is tried implicitly.
     pub fn management_key_support(&self, algorithm: ManagementKeyAlgorithm) -> CapabilityStatus {
         match algorithm {
             ManagementKeyAlgorithm::Tdes => self.firmware_range((1, 3, 0), (3, 0, 3)),
@@ -654,9 +660,7 @@ impl DeviceProfile {
     fn firmware_range(&self, first: (u16, u16, u16), last: (u16, u16, u16)) -> CapabilityStatus {
         if let Some(version) = &self.info.firmware {
             let v = version.tuple();
-            if version.suffix.is_none()
-                && (v == (1, 3, 0) || ((1, 5, 2)..=(3, 0, 3)).contains(&v) || v == (3, 1, 0))
-            {
+            if v == (1, 3, 0) || ((1, 5, 2)..=(3, 0, 3)).contains(&v) || v == (3, 1, 0) {
                 return CapabilityStatus {
                     support: if (first..=last).contains(&v) {
                         Support::Supported
@@ -704,7 +708,7 @@ impl DeviceProfile {
         };
         self.firmware_range(first, (3, 1, 0))
     }
-    /// Select READ CONFIG framing, failing for unknown/development firmware.
+    /// Select READ CONFIG framing from the numeric base version, failing when unknown.
     pub fn admin_configuration_layout(&self) -> Result<AdminConfigurationLayout, Error> {
         self.capability(Capability::Admin).require()?;
         let v = self
@@ -902,7 +906,7 @@ impl DeviceProfile {
         self.info
             .firmware
             .as_ref()
-            .is_some_and(|v| v.suffix.is_none() && ((2, 0, 0)..(3, 0, 0)).contains(&v.tuple()))
+            .is_some_and(|v| ((2, 0, 0)..(3, 0, 0)).contains(&v.tuple()))
     }
     /// Whether the evidenced SM2 signature response is fixed-width r || s.
     /// Known 3.1.0 uses this encoding; earlier supported releases use DER.
@@ -912,7 +916,7 @@ impl DeviceProfile {
         self.info
             .firmware
             .as_ref()
-            .is_some_and(|v| v.suffix.is_none() && v.tuple() == (3, 1, 0))
+            .is_some_and(|v| v.tuple() == (3, 1, 0))
     }
     /// Whether proven legacy firmware returns unwrapped CCC/CHUID objects.
     /// Applet code applies this narrowly to those object types; callers should prefer
@@ -921,6 +925,6 @@ impl DeviceProfile {
         self.info
             .firmware
             .as_ref()
-            .is_some_and(|f| ((1, 3, 0)..(1, 6, 1)).contains(&f.tuple()) && f.suffix.is_none())
+            .is_some_and(|f| ((1, 3, 0)..(1, 6, 1)).contains(&f.tuple()))
     }
 }

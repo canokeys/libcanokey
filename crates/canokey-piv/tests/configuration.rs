@@ -136,7 +136,7 @@ fn names_preserve_utf16_and_mutations_do_not_touch_certificates() {
                 Default::default(),
             )
             .unwrap(),
-            hex("00f5019c"),
+            hex("00f5019c00"),
         ),
     ] {
         authenticate(&mut op);
@@ -191,7 +191,7 @@ fn retry_reset_is_dually_authenticated_and_config_changes_require_reprobe() {
         ErrorKind::SecurityStatusNotSatisfied
     );
     assert!(op.command().is_err()); // Never manufacture PIN failures to enable reset.
-    let mut op = attest(&profile("3.1.0"), Slot::Signature, Default::default()).unwrap();
+    let mut op = attest(&profile("3.1.0"), Slot::Signature, true, Default::default()).unwrap();
     selected(&mut op);
     assert_eq!(op.command().unwrap().as_bytes(), hex("00f99c0000"));
     assert!(op.advance(&[0x6c, 0x40]).is_err());
@@ -269,4 +269,65 @@ fn batch_authentication_and_profile_invalidation_are_explicit() {
         Default::default()
     )
     .is_err());
+}
+
+#[test]
+fn selected_names_include_attestation_and_never_replay_writes() {
+    let p = profile("3.1.0");
+    let selected = (p).clone();
+    assert_eq!(
+        set_container_name(
+            &selected,
+            Slot::Signature,
+            ContainerName::from_text("key").unwrap(),
+            Access::None,
+            Default::default()
+        )
+        .unwrap_err()
+        .kind,
+        ErrorKind::InvalidArgument
+    );
+    let management = (p).clone();
+    let mut write = set_container_name(
+        &management,
+        ContainerNameReference::Attestation,
+        ContainerName::from_text("K").unwrap(),
+        Access::Existing,
+        Default::default(),
+    )
+    .unwrap();
+    let mut clear = set_container_name(
+        &management,
+        Slot::Signature,
+        ContainerName::from_text("").unwrap(),
+        Access::Existing,
+        Default::default(),
+    )
+    .unwrap();
+    let mut read = read_container_name(
+        &selected,
+        ContainerNameReference::Attestation,
+        Access::Existing,
+        Default::default(),
+    )
+    .unwrap();
+    drop(p);
+    drop(selected);
+    drop(management);
+    assert_eq!(write.start().unwrap(), Step::Exchange);
+    assert_eq!(write.command().unwrap().as_bytes(), hex("00f501f9024b00"));
+    assert_eq!(
+        write.advance(&hex("019000")).unwrap_err().kind,
+        ErrorKind::InvalidResponse
+    );
+    assert!(write.command().is_err());
+    assert_eq!(clear.start().unwrap(), Step::Exchange);
+    assert_eq!(clear.command().unwrap().as_bytes(), hex("00f5019c00"));
+    assert!(clear.advance(&hex("6c10")).is_err());
+    assert!(clear.command().is_err());
+    assert_eq!(read.start().unwrap(), Step::Exchange);
+    assert_eq!(read.command().unwrap().as_bytes(), hex("00f500f900"));
+    let error = read.advance(&hex("6a88")).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::NotFound);
+    assert!(read.result().is_err());
 }

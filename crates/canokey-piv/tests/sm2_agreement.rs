@@ -179,3 +179,45 @@ fn malformed_points_ids_results_and_short_channels_fail() {
     )
     .is_err());
 }
+
+#[test]
+fn firmware_two_octet_ber_lengths_preserve_full_128_byte_agreements() {
+    for role in [Sm2Role::Initiator, Sm2Role::Responder] {
+        let mut parameters = input(role);
+        parameters.key_len = 128;
+        let mut op = agree_sm2(
+            &profile("3.1.0"),
+            Slot::KeyManagement,
+            parameters,
+            Access::Existing,
+            Default::default(),
+        )
+        .unwrap();
+        op.start().unwrap();
+        if role == Sm2Role::Initiator {
+            op.advance(&hex("010155020202019000")).unwrap();
+            op.advance(&public_reply()).unwrap();
+        }
+        let mut inner = Vec::new();
+        if role == Sm2Role::Responder {
+            inner.extend([0x82, 65]);
+            inner.extend(hex(POINT));
+        }
+        inner.extend([
+            if role == Sm2Role::Initiator {
+                0x82
+            } else {
+                0x85
+            },
+            0x82,
+            0,
+            0x80,
+        ]);
+        inner.extend([0x5a; 128]);
+        let mut response = vec![0x7c, 0x82, 0, inner.len() as u8];
+        response.extend(inner);
+        response.extend([0x90, 0]);
+        assert_eq!(op.advance(&response).unwrap(), Step::Done);
+        assert_eq!(op.take_result().unwrap().key.as_bytes(), &[0x5a; 128]);
+    }
+}

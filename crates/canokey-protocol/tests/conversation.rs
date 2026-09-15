@@ -262,10 +262,11 @@ fn no_progress_response_budget_and_none_policy() {
     let mut op = conversation(logical(), limits).unwrap();
     op.start().unwrap();
     op.advance(&[1, 2, 0x61, 1]).unwrap();
-    assert_eq!(
-        op.advance(&[3, 0x90, 0]).unwrap_err().kind,
-        ErrorKind::LimitExceeded
-    );
+    let error = op.advance(&[3, 0x90, 0]).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::LimitExceeded);
+    assert_eq!(error.phase, Phase::Conversation);
+    assert_eq!(op.state(), OperationState::Failed);
+    assert_eq!(op.error().unwrap().phase, Phase::Conversation);
     let mut cmd = logical();
     cmd.continuation = Continuation::None;
     let mut op = conversation(cmd, OperationOptions::default()).unwrap();
@@ -283,10 +284,15 @@ fn smaller_channels_and_invalid_inputs_are_preflighted() {
     let mut op = conversation(cmd, opts).unwrap();
     op.start().unwrap();
     assert_eq!(op.command().unwrap().as_bytes().last(), Some(&16));
-    assert_eq!(
-        op.advance(&[0x6c, 0]).unwrap_err().kind,
-        ErrorKind::LimitExceeded
-    );
+    let error = op.advance(&[0x6c, 0]).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::LimitExceeded);
+    assert_eq!(error.phase, Phase::Conversation);
+    let mut oversized = conversation(logical(), OperationOptions::default()).unwrap();
+    oversized.start().unwrap();
+    let error = oversized.advance(&[0; 259]).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::LimitExceeded);
+    assert_eq!(error.phase, Phase::Conversation);
+    assert!(oversized.command().is_err() && oversized.result().is_err());
     let mut opts = OperationOptions::default();
     opts.exchange.max_command_bytes = 5;
     assert!(conversation(logical(), opts).is_err());

@@ -79,9 +79,15 @@ observations; ordinary key/certificate changes invalidate application caches.
 
 The historical matrix follows ckman's pinned firmware changelog and executable
 feature rules, cross-checked against core sources. It recognizes 1.3 and the existing
-1.5.2–3.0.3/3.1.0 ranges; missing, unrecognized, development-suffixed and newer
-versions cannot authorize historical layouts. Applet-reported version numbers never
-select a dialect. See each applet's historical subsection for command boundaries.
+1.5.2–3.0.3/3.1.0 ranges; missing, unrecognized and newer base versions cannot authorize historical layouts.
+Development/build suffixes are retained in identity observations and use their
+declared numeric base version by default. Suffix-bearing parsed versions no newer
+than the latest known base receive a DeclaredBaseVersion warning; recognition of
+the base still determines feature support. Parsed newer bases,
+including 3.2.0-dev, receive LatestKnownFallback instead; the newer-version branch
+takes precedence and does not authorize historical layouts. Applet-reported
+versions never select a dialect. See each applet's historical subsection for
+command boundaries.
 
 PIV baseline slots, 3DES management, key/object operations and blocked-credential
 reset extend to 1.3. Explicit generation policies require 2.0. PIV SELECT preserves
@@ -100,7 +106,7 @@ evidence. Ed/X private-operation fix gates remain separate from the switch.
 
 ## Authentication and PIV values
 
-Standalone operations select once, then apply `Access::None`, `Pin`, `Management`
+By default operations select once, then apply `Access::None`, `Pin`, `Management`
 or `PinAndManagement` before their target. None does not assert an authenticated
 session. Management precedes PIN so VERIFY stays next to PIN-always operations.
 Verify success is not an authorization object surviving SELECT or reconnect.
@@ -350,14 +356,66 @@ these boundaries. Package reuse does not establish device support.
 
 ## Bindings
 
-The C ABI has only `cnk_profile_t` and `cnk_operation_t` opaque handles. Inputs are
-copied versioned descriptors; errors are caller-owned POD; results use query-size/copy.
+Selected version/configuration probes do not invent a profile or authenticate.
+RNG checks the live PIV version before bounded generation and owns zeroizing
+output. Configuration projections use zero for disabled/unobserved IDs while raw
+observations remain available. Firmware/model/serial accessors read immutable
+probe results. Empty-slot checks accept only explicit absence and never decode
+an occupied key into permission to replace it.
+
+Bootstrap PIV selection is available before a profile exists; it uses a fixed
+AID and explicit Le without fabricating capability evidence.
+Selected credential actions verify, log out, replace PIN/PUK, or unblock PIN
+without another SELECT. Their owned inputs and encoded copies are zeroized;
+callers retain transaction, credential-cache and uncertain-mutation responsibility.
+The explicit legacy-byte constructors preserve the C consumer's 1..=8-byte raw
+form, including FF. Default Rust credential constructors retain stricter policy.
+
+`ManagementProtection` parses bounded ADMIN DATA and preserves stored flags.
+Empty policy is distinct from malformed data; a blocked-PUK flag is a claim that
+callers must verify against live retries. The PRINTED decoder requires exact
+53/88/89 nesting and returns owned, zeroizing key bytes without authenticating
+them. C callers use the same parsers with output atomicity and size-query rules.
+
+Container names use `ContainerNameReference`: ordinary key slots or attestation
+reference F9. This does not widen ordinary key-operation slots. Name reads and
+writes use the same factories for standalone and caller-selected transactions.
+Name clearing uses the five-byte F5 form without enabling 6C replay. The pure
+C name validator supports caller-side preflight; UTF-16 validation stays in PIV.
+
+The C ABI exposes only `cnk_profile_t` and `cnk_operation_t` opaque handles.
+Rust callers use `Access::Existing` to omit SELECT and reuse the caller's live
+card authorization. C callers set `CNK_PIV_USE_EXISTING` in operation options;
+access descriptors must then be empty. Explicit credential and management-auth
+operations still send their requested authentication, but omit SELECT. Other
+applets and standalone probe/bootstrap/selected-only factories reject the flag.
+Default/null options retain previous behavior. Read APIs with no C access
+argument also honor this flag for public object and certificate reads.
+
+This policy is not proof of authentication: firmware authorizes the actual
+command, and the host retains session policy and reservation checks. Hold one
+PC/SC transaction from SELECT through authentication and dependent operations.
+For concurrent profile refresh, hold the profile lock only during synchronous
+factory construction; factories copy their inputs before releasing it. No
+profile lock may survive into card I/O. Failed unlock discards the provisional
+operation before execution. There is no separate selected-context allocation.
+Inputs are copied versioned descriptors; errors are caller-owned POD; results
+use query-size/copy. Freeing the source profile cannot invalidate an operation.
 There is no init/finalize, result/error/key handle, borrowed internal pointer or
-thread-local last_error. Semantic integer enums are distinct from wire IDs.
+thread-local last_error. Semantic integer enums are distinct from wire IDs. Use
+`cnk_profile_piv_algorithm_from_wire` for profile-aware conversion; resolution
+does not replace the operation factory's capability checks.
+`cnk_profile_piv_require_algorithm` checks observed PIV and semantic key support
+locally, preserving Unsupported versus Unknown errors without authenticating or
+retaining state. Factories still revalidate their complete operation policy.
 
 - POD begins with struct_size; reject unknown input enums/flags. NULL options means
   defaults; explicit zero budgets are invalid. ABI stability is not frozen yet.
 - Constructors initialize output handles to NULL and leave no partial handle on failure.
+- Context mutation factories check the input-byte budget before copying object or
+  certificate payloads. Selected and standalone streaming signing share the same
+  input validation: SM2 user IDs are absent (NULL/0) or 1..=32 bytes; other modes
+  reject a supplied user ID. Invalid inputs expose no operation and perform no I/O.
 - NULL copy buffers query size. Short buffers update length without partial copying.
   Text has no NUL terminator. Getters never execute the operation.
 - Probe profile transfer succeeds once and survives free(op). Other results are copied.
@@ -371,3 +429,55 @@ hold a private enum of concrete Operation types and Option for idempotent close,
 but must not duplicate protocol state. Dart owns async execution; Python bindings
 would follow the same model with a caller-owned synchronous loop. Binding examples:
 [Console](console-integration.md), [PKCS#11](pkcs11-integration.md).
+
+CanoKey private RSA, ECDH/X25519 and ML-KEM operations may use every ordinary
+asymmetric slot evidenced by the profile. PIV slot names do not impose host
+key-usage policy; consumers such as PKCS#11/cardmod retain their own mapping and
+operation admission rules. Algorithm/peer/ciphertext validation and card PIN
+policy continue to apply, including on authentication and signature slots.
+
+For raw PIV-object compatibility APIs, raw-container factories
+validate and preserve the complete 53/7E read response and accept one complete
+53 container for writes. Normalized value factories remain unchanged. This
+keeps ADMIN DATA/PRINTED and certificate write framing consistent without
+reintroducing TLV parsing into consumers; malformed/trailing containers fail
+before a write operation is exposed.
+
+The C ABI builds all applet factories by default. Embedders that set
+`default-features = false, features = ["piv"]` retain PIV and device probing,
+but exclude Admin operation, OATH and OpenPGP C factories and their erased
+operation variants. This is a link-time API subset: declarations in the common
+header for an excluded applet have no corresponding symbols in that build.
+PIV is the baseline C ABI; these flags do not disable its factories.
+
+## Consumer capability and protection boundaries
+
+`cnk_profile_piv_capabilities` returns immutable algorithm/feature masks and message
+limits from the same profile used by operation factories. Supported and unknown
+masks are separate; a missing supported bit never licenses a caller to substitute
+a raw configuration byte. Consumers may cache the profile with their own binding,
+invalidation generation and TTL, but must resolve it before authentication.
+Classic Ed25519 accepts at most 512 message bytes; streaming modes accept at most
+65520 combined message/identity bytes. Host-only cryptography has its own limits.
+
+`protection::pin_managed` / `cnk_piv_pin_managed_new` validates ADMIN DATA, checks
+live PUK retries, reads PRINTED, resolves management metadata and authenticates
+its recovered key in one transaction. Ordinary login requires zero PUK retries.
+Supplying eight random entropy bytes explicitly requests finalization: authenticate
+first, then exhaust PUK retries with at most 32 CHANGE commands and confirm zero.
+A coincidentally successful guess switches to a provably wrong old PUK. The only
+result is an owned, zeroized management key for the consumer's protected cache;
+no USER/SO state is owned here. Failure does not undo card writes or retry loss.
+
+`set_management_key` takes `update_protected` (`0/1` in C). Enabled mode checks
+ADMIN DATA and requires readable, valid PRINTED before touching a protected key.
+It replaces the key, authenticates the new key and updates PRINTED without SELECT.
+These are separate durable writes. Failure after replacement requires the caller
+to recover with its supplied new key and repair PRINTED; no rollback is claimed.
+Batch's raw management-key replacement retains its explicit low-level semantics.
+
+Attestation accepts the common selection policy (`select=false` in Rust,
+`CNK_PIV_USE_EXISTING` in C); it does not authenticate or verify trust. SM2 agreement
+responses accept definite BER length encodings, including the actual firmware's
+non-minimal two-octet lengths for 128-byte secrets. Exact fields, point validity,
+requested secret length and the common response/depth budgets remain enforced.

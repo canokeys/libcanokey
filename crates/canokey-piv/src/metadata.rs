@@ -169,7 +169,7 @@ fn touch(value: u8) -> KnownOrUnknown<TouchPolicy> {
         v => KnownOrUnknown::Unknown(v),
     }
 }
-fn decode(
+pub(crate) fn decode(
     profile: &DeviceProfile,
     reference: MetadataReference,
     data: SecretBytes,

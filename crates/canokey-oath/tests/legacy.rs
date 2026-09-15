@@ -148,7 +148,7 @@ fn firmware_boundaries_fail_before_any_colliding_or_downgraded_command() {
             ErrorKind::UnsupportedFeature
         );
     }
-    for version in ["1.4.0", "3.2.0", "3.1.0-dev", "nonsense"] {
+    for version in ["1.4.0", "3.2.0", "3.2.0-dev", "nonsense"] {
         assert_eq!(
             operation(&profile(version), Request::List, None, Default::default())
                 .unwrap_err()

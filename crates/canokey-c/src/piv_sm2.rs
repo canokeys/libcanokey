@@ -1,6 +1,6 @@
 //! Copied SM2 peer descriptors and result getters, without persistent sessions.
 use super::*;
-use piv_mutation::{access, slot};
+use piv_mutation::{piv_access, piv_options, slot};
 /// Copied SM2 agreement parameters. All public points are uncompressed 65-byte
 /// SEC1 on SM2; optional identities are NULL/0 or 1..=32 bytes.
 #[repr(C)]
@@ -72,8 +72,8 @@ pub unsafe extern "C" fn cnk_piv_agree_sm2_new(
             &profile.as_ref().ok_or(ARG)?.0,
             slot(reference)?,
             input(parameters)?,
-            access(auth, error)?,
-            options(opts)?,
+            piv_access(auth, opts, error)?,
+            piv_options(opts)?,
         )
         .map(Inner::Sm2Agreement)
         .map_err(|e| failure(e, error))

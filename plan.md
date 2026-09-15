@@ -25,9 +25,16 @@
 - Split PIV Ed/X read/generate/import/private-operation evidence if enabling more
   pre-3.0.1 operations. Keep known signing/import bug gates until independently tested.
 
-Consumer integration, FIDO/CTAP operations and Python bindings require separate
-scope. Integrate PKCS#11 first, then Console/ckman, with one connection lease and
-transport continuation/retries disabled. Freeze the C ABI after consumer validation.
+The companion PKCS#11 migration now validates the PIV C ABI through native
+Windows hardware, transaction/failure contracts and the Windows minidriver.
+It covers PIN/PUK recovery, management protection, supported key variants and
+six-container certificate propagation. Native ARM64 runtime is excluded from
+that acceptance; cross-builds are checked. See the companion
+[migration acceptance](https://github.com/canokeys/canokey-pkcs11/blob/codex/libcanokey/docs/libcanokey-piv-migration-plan.md).
+
+Console/ckman, FIDO/CTAP operations and general Python bindings remain separate
+scope. Consumers must retain one connection lease per operation and disable
+transport continuation/retries. The C ABI remains experimental.
 
 Follow [AGENTS.md](AGENTS.md) for implementation checks and staged commits. Retain
 existing APIs and extend bindings/examples with future protocol additions.
