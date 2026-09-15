@@ -81,8 +81,13 @@ The historical matrix follows ckman's pinned firmware changelog and executable
 feature rules, cross-checked against core sources. It recognizes 1.3 and the existing
 1.5.2–3.0.3/3.1.0 ranges; missing, unrecognized and newer base versions cannot authorize historical layouts.
 Development/build suffixes are retained in identity observations and use their
-declared numeric base version by default, with a DeclaredBaseVersion warning. Applet-reported version numbers never
-select a dialect. See each applet's historical subsection for command boundaries.
+declared numeric base version by default. Suffix-bearing parsed versions no newer
+than the latest known base receive a DeclaredBaseVersion warning; recognition of
+the base still determines feature support. Parsed newer bases,
+including 3.2.0-dev, receive LatestKnownFallback instead; the newer-version branch
+takes precedence and does not authorize historical layouts. Applet-reported
+versions never select a dialect. See each applet's historical subsection for
+command boundaries.
 
 PIV baseline slots, 3DES management, key/object operations and blocked-credential
 reset extend to 1.3. Explicit generation policies require 2.0. PIV SELECT preserves
