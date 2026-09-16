@@ -280,7 +280,9 @@ cnk_status_t cnk_operation_cancel(cnk_operation_t *);
 cnk_status_t cnk_operation_state(const cnk_operation_t *,uint32_t *);
 cnk_status_t cnk_operation_error(const cnk_operation_t *,cnk_error_v1 *);
 cnk_status_t cnk_operation_result_kind(const cnk_operation_t *,uint32_t *);
-/* Admin requests (11 reserved). Inputs unused by a request must be zero/NULL. */
+/* Admin requests (11 reserved). Inputs unused by a request must be zero/NULL.
+ * PASS_SLOTS (31) is the typed counterpart of PASS_CONFIGURATION (29): same
+ * card dump, parsed into value_kind 10; raw bytes via result_copy_bytes. */
 enum { CNK_ADMIN_FIRMWARE=1, CNK_ADMIN_MODEL=2, CNK_ADMIN_SERIAL=3,
   CNK_ADMIN_CHIP_ID=4, CNK_ADMIN_CORE_COMMIT=5, CNK_ADMIN_CONFIGURATION=6,
   CNK_ADMIN_FLASH_USAGE=7, CNK_ADMIN_APPLET_USAGE=8, CNK_ADMIN_PIN_STATUS=9,
@@ -292,7 +294,8 @@ enum { CNK_ADMIN_FIRMWARE=1, CNK_ADMIN_MODEL=2, CNK_ADMIN_SERIAL=3,
   CNK_ADMIN_WRITE_LEGACY_SM2=24, CNK_ADMIN_KEYBOARD_LAYOUT=25,
   CNK_ADMIN_KEYBOARD_KEYMAP=26, CNK_ADMIN_SET_KEYBOARD_KEYMAP=27,
   CNK_ADMIN_CLEAR_KEYBOARD_KEYMAP=28, CNK_ADMIN_PASS_CONFIGURATION=29,
-  CNK_ADMIN_SET_PASS_CONFIGURATION=30, CNK_RESULT_ADMIN=15 };
+  CNK_ADMIN_SET_PASS_CONFIGURATION=30, CNK_ADMIN_PASS_SLOTS=31,
+  CNK_RESULT_ADMIN=15 };
 typedef struct {
   uint32_t struct_size, kind;
   const uint8_t *pin; size_t pin_len;

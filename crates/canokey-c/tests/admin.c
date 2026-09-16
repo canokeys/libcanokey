@@ -59,5 +59,17 @@ int main(void) {
     size_t len=0;assert(cnk_operation_result_copy_bytes(op,NULL,&len)==CNK_OK&&len==6);
     uint8_t output[6]={0};len=5;assert(cnk_operation_result_copy_bytes(op,output,&len)==CNK_BUFFER_TOO_SMALL&&len==6&&output[0]==0);
     assert(cnk_operation_result_copy_bytes(op,output,&len)==CNK_OK&&memcmp(output,config,6)==0);
+    cnk_operation_free(op);
+    p=profile();d.struct_size=sizeof(d);d.kind=CNK_ADMIN_PASS_SLOTS;
+    assert(cnk_admin_new(p,&d,NULL,&op,NULL)==CNK_OK);cnk_profile_free(p);
+    assert(cnk_operation_start(op,&step,NULL)==CNK_OK);
+    expect(op,select,sizeof(select));feed(op,ok,2);
+    const uint8_t slots_read[]={0,0x43,0,0,0};expect(op,slots_read,sizeof(slots_read));
+    const uint8_t dump[]={0x02,0x01,0x01,0x03,'a','b','c',0x00,0x90,0};feed(op,dump,sizeof(dump));
+    assert(cnk_operation_result_kind(op,&step)==CNK_OK&&step==CNK_RESULT_ADMIN);
+    result.value_kind=0;
+    assert(cnk_operation_admin_outcome(op,&result)==CNK_OK&&result.value_kind==10);
+    len=0;assert(cnk_operation_result_copy_bytes(op,NULL,&len)==CNK_OK&&len==8);
+    uint8_t slots_bytes[8]={0};assert(cnk_operation_result_copy_bytes(op,slots_bytes,&len)==CNK_OK&&len==8&&memcmp(slots_bytes,dump,8)==0);
     cnk_operation_free(op);return 0;
 }

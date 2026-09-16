@@ -6,7 +6,7 @@ use canokey::admin;
 pub struct CnkAdminRequest {
     /// Size of the complete supported descriptor.
     pub struct_size: u32,
-    /// CNK_ADMIN_* request identifier, 1..24 (11 is reserved).
+    /// CNK_ADMIN_* request identifier, 1..31 (11 is reserved).
     pub kind: u32,
     /// Optional explicit current PIN; NULL/zero omits verification.
     pub pin: *const u8,
@@ -128,6 +128,7 @@ unsafe fn request(d: &CnkAdminRequest) -> Result<admin::Request, u32> {
         28 => R::ClearKeyboardKeymap,
         29 => R::PassConfiguration,
         30 => R::SetPassConfiguration(bytes(d.data, d.data_len)?.to_vec()),
+        31 => R::PassSlots,
         _ => return Err(ARG),
     })
 }
@@ -168,7 +169,8 @@ pub struct CnkAdminOutcome {
     /// Initialized supported structure size.
     pub struct_size: u32,
     /// 0 none, 1 bytes, 2 configuration, 3 flash, 4 applet usage, 5 PIN, 6 NFC,
-    /// 7 SM2, 8 legacy configuration, 9 legacy SM2 (flags bit 0: enabled).
+    /// 7 SM2, 8 legacy configuration, 9 legacy SM2 (flags bit 0: enabled),
+    /// 10 PASS slots (raw two-slot dump via result_copy_bytes).
     pub value_kind: u32,
     /// Number of writes confirmed by empty 9000 responses.
     pub confirmed_writes: usize,
