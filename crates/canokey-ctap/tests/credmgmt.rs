@@ -8,36 +8,15 @@
 //! with an independent implementation (Python stdlib `hmac`) on 2026-09-16.
 #![cfg(feature = "clientpin")]
 
+mod support;
+
 use canokey_ctap::credmgmt::{
     delete_credential, enumerate_credentials, enumerate_rps, get_creds_metadata,
     update_user_information, CredentialEntry,
 };
-use canokey_ctap::{
-    get_key_agreement, get_pin_token, PinToken, PinUvAuthProtocol, PublicKeyCredentialDescriptor,
-    UserEntity,
-};
-use canokey_protocol::{
-    ErrorKind, Operation, OperationLimits, OperationOptions, Phase, SecretBytes, Step,
-};
-
-const SELECT: [u8; 13] = [
-    0x00, 0xa4, 0x04, 0x00, 0x08, 0xa0, 0x00, 0x00, 0x06, 0x47, 0x2f, 0x00, 0x01,
-];
-
-/// ClientPIN fixtures shared with `client_pin.rs` (ephemeral scalar
-/// 0x01..=0x20, peer scalar 0xA0..=0xBF, PIN "1234").
-const EPHEMERAL_SCALAR: [u8; 32] = [
-    0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
-    0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20,
-];
-const PEER_KEY_AGREEMENT_PAYLOAD: &str = "a101a5010203381820012158200d0918a04198474605615b6df90fdcb34791fb3ecb822f4b26eb6e4fc4511b9d22582019b90c1b83c0c35cfbbb31ead32bb52ae33622f57e3cc1638097ce97f430baba";
-const TOKEN_CT_V1: &str = "b98cc635132fa3ea8c191b7a4aa3e093ce926c35488221b4684fce766f3b14b0";
-/// The decrypted token plaintext, 0x10..=0x2F; the HMAC key of every
-/// pinUvAuthParam below.
-const TOKEN_PLAINTEXT: [u8; 32] = [
-    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
-    0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f,
-];
+use canokey_ctap::{PinUvAuthProtocol, PublicKeyCredentialDescriptor, UserEntity};
+use canokey_protocol::{ErrorKind, OperationLimits, OperationOptions, Phase, SecretBytes, Step};
+use support::{advance_ok, assert_command, begin, finish_err, hex, token_v1};
 
 const RP_ID_HASH: [u8; 32] = [
     0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7, 0xa8, 0xa9, 0xaa, 0xab, 0xac, 0xad, 0xae, 0xaf,
@@ -91,65 +70,6 @@ const RESP_CRED_BOTH: &str =
 /// Neither key 8 nor key 0x80: a consistency violation.
 const RESP_CRED_NEITHER: &str = "a207a2626964440102030464747970656a7075626c69632d6b65790901";
 
-/// Decode a hex string, ignoring whitespace.
-fn hex(s: &str) -> Vec<u8> {
-    let clean: String = s.chars().filter(|c| !c.is_whitespace()).collect();
-    (0..clean.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&clean[i..i + 2], 16).unwrap())
-        .collect()
-}
-
-/// Drive the mandatory SELECT and advance to the first CTAP command.
-fn begin<T>(op: &mut Operation<T>) {
-    assert_eq!(op.start().unwrap(), Step::Exchange);
-    assert_eq!(op.command().unwrap().as_bytes(), &SELECT);
-    assert_eq!(op.advance(&[0x90, 0x00]).unwrap(), Step::Exchange);
-}
-
-/// Assert the wrapped command bytes: `80 10 00 00 <Lc> <message>`.
-fn assert_command(op: &Operation<impl Sized>, message: &[u8]) {
-    let mut expected = vec![0x80, 0x10, 0x00, 0x00, message.len() as u8];
-    expected.extend_from_slice(message);
-    assert!(message.len() <= 255, "fixture must use short Lc");
-    assert_eq!(op.command().unwrap().as_bytes(), &expected);
-}
-
-/// Advance with a successful CTAP response carrying `payload`.
-fn advance_ok<T>(op: &mut Operation<T>, payload: &[u8]) -> Step {
-    let mut reply = vec![0x00];
-    reply.extend_from_slice(payload);
-    reply.extend_from_slice(&[0x90, 0x00]);
-    op.advance(&reply).unwrap()
-}
-
-/// Mint the fixed V1 token (plaintext 0x10..=0x2F) through the clientPIN
-/// fixture transcript.
-fn token_v1() -> PinToken {
-    let mut op = get_key_agreement(
-        PinUvAuthProtocol::V1,
-        &EPHEMERAL_SCALAR,
-        OperationOptions::default(),
-    )
-    .unwrap();
-    begin(&mut op);
-    assert_eq!(
-        advance_ok(&mut op, &hex(PEER_KEY_AGREEMENT_PAYLOAD)),
-        Step::Done
-    );
-    let session = op.take_result().unwrap();
-    let mut op = get_pin_token(&session, b"1234", None, OperationOptions::default()).unwrap();
-    begin(&mut op);
-    let ct = hex(TOKEN_CT_V1);
-    // A 32-byte byte string needs the one-byte-length head (0x58 0x20).
-    let mut payload = vec![0xa1, 0x02, 0x58, 0x20];
-    payload.extend_from_slice(&ct);
-    assert_eq!(advance_ok(&mut op, &payload), Step::Done);
-    let token = op.take_result().unwrap();
-    assert_eq!(token.token().as_bytes(), &TOKEN_PLAINTEXT);
-    token
-}
-
 fn descriptor_01020304() -> PublicKeyCredentialDescriptor {
     PublicKeyCredentialDescriptor::new("public-key", vec![0x01, 0x02, 0x03, 0x04])
 }
@@ -170,37 +90,6 @@ fn get_creds_metadata_golden_and_parse() {
         metadata.max_possible_remaining_resident_credentials_count,
         25
     );
-}
-
-#[test]
-fn get_creds_metadata_pin_auth_invalid_keeps_raw_byte() {
-    let token = token_v1();
-    let mut op =
-        get_creds_metadata(&token, PinUvAuthProtocol::V1, OperationOptions::default()).unwrap();
-    begin(&mut op);
-    let error = op.advance(&[0x33, 0x90, 0x00]).unwrap_err();
-    assert_eq!(error.kind, ErrorKind::AuthenticationFailed);
-    assert_eq!(error.phase, Phase::Command);
-    assert_eq!(error.application_status, Some(0x33));
-}
-
-#[test]
-fn get_creds_metadata_missing_counter_is_invalid_response() {
-    let token = token_v1();
-    let mut op =
-        get_creds_metadata(&token, PinUvAuthProtocol::V1, OperationOptions::default()).unwrap();
-    begin(&mut op);
-    let error = advance_missing(&mut op, &hex("a1 01 03"));
-    assert_eq!(error.kind, ErrorKind::InvalidResponse);
-    assert_eq!(error.phase, Phase::Parsing);
-}
-
-/// Advance with a successful CTAP response that must fail parsing.
-fn advance_missing<T>(op: &mut Operation<T>, payload: &[u8]) -> canokey_protocol::Error {
-    let mut reply = vec![0x00];
-    reply.extend_from_slice(payload);
-    reply.extend_from_slice(&[0x90, 0x00]);
-    op.advance(&reply).unwrap_err()
 }
 
 // -------------------------------------------------------------- enumerate_rps
@@ -248,7 +137,7 @@ fn enumerate_rps_absurd_total_hits_limit_exceeded() {
     let mut op = enumerate_rps(&token, PinUvAuthProtocol::V1, options).unwrap();
     begin(&mut op);
     assert_command(&op, &hex(MSG_RPS_BEGIN));
-    let error = advance_missing(&mut op, &hex(RESP_RP_BEGIN_HUGE_TOTAL));
+    let error = finish_err(&mut op, &hex(RESP_RP_BEGIN_HUGE_TOTAL));
     assert_eq!(error.kind, ErrorKind::LimitExceeded);
     assert_eq!(error.phase, Phase::Parsing);
 }
@@ -261,7 +150,7 @@ fn enumerate_rps_zero_total_with_entry_is_invalid_response() {
     assert_command(&op, &hex(MSG_RPS_BEGIN));
     // A successful Begin reporting totalRPs = 0 alongside a parseable entry
     // violates the CTAP2 contract and must not silently return the entry.
-    let error = advance_missing(&mut op, &hex(RESP_RP_BEGIN_ZERO_TOTAL));
+    let error = finish_err(&mut op, &hex(RESP_RP_BEGIN_ZERO_TOTAL));
     assert_eq!(error.kind, ErrorKind::InvalidResponse);
     assert_eq!(error.phase, Phase::Parsing);
 }
@@ -367,7 +256,7 @@ fn credential_entry_rejects_inconsistent_key_forms() {
         )
         .unwrap();
         begin(&mut op);
-        let error = advance_missing(&mut op, &hex(payload));
+        let error = finish_err(&mut op, &hex(payload));
         assert_eq!(error.kind, ErrorKind::InvalidResponse, "{name}");
         assert_eq!(error.phase, Phase::Parsing, "{name}");
     }

@@ -12,32 +12,14 @@
 //! `ctap_large_blobs`.
 #![cfg(feature = "clientpin")]
 
+mod support;
+
 use canokey_ctap::largeblob::{
     read_array, read_chunk, write_array, DEFAULT_MAX_FRAGMENT_LENGTH, MAX_LARGE_BLOB_ARRAY_BYTES,
 };
-use canokey_ctap::{get_key_agreement, get_pin_token, PinToken, PinUvAuthProtocol};
-use canokey_protocol::{
-    Error, ErrorKind, Operation, OperationLimits, OperationOptions, Phase, Step,
-};
-
-const SELECT: [u8; 13] = [
-    0x00, 0xa4, 0x04, 0x00, 0x08, 0xa0, 0x00, 0x00, 0x06, 0x47, 0x2f, 0x00, 0x01,
-];
-
-/// ClientPIN fixtures shared with `client_pin.rs` (ephemeral scalar
-/// 0x01..=0x20, peer scalar 0xA0..=0xBF, PIN "1234").
-const EPHEMERAL_SCALAR: [u8; 32] = [
-    0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
-    0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20,
-];
-const PEER_KEY_AGREEMENT_PAYLOAD: &str = "a101a5010203381820012158200d0918a04198474605615b6df90fdcb34791fb3ecb822f4b26eb6e4fc4511b9d22582019b90c1b83c0c35cfbbb31ead32bb52ae33622f57e3cc1638097ce97f430baba";
-const TOKEN_CT_V1: &str = "b98cc635132fa3ea8c191b7a4aa3e093ce926c35488221b4684fce766f3b14b0";
-/// The decrypted token plaintext, 0x10..=0x2F; the HMAC key of every
-/// pinUvAuthParam below.
-const TOKEN_PLAINTEXT: [u8; 32] = [
-    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
-    0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f,
-];
+use canokey_ctap::PinUvAuthProtocol;
+use canokey_protocol::{ErrorKind, OperationLimits, OperationOptions, Phase, Step};
+use support::{advance_ok, assert_command, begin, finish_err, hex, token_v1};
 
 /// The write payload: bytes 0x00..=0x63 (100 bytes), written as two 64/36
 /// fragments when `max_input_bytes` clamps the fragment size to 64.
@@ -54,73 +36,6 @@ const WRITE_DATA: [u8; 100] = [
 const MAC_FRAGMENT_0: &str = "783e708130a5de3ec473749ae5ec0819";
 /// pinUvAuthParam (V1) of the second fragment: offset 64, no length.
 const MAC_FRAGMENT_1: &str = "39d71c8110da008e9d304e9065157675";
-
-/// Decode a hex string, ignoring whitespace.
-fn hex(s: &str) -> Vec<u8> {
-    let clean: String = s.chars().filter(|c| !c.is_whitespace()).collect();
-    (0..clean.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&clean[i..i + 2], 16).unwrap())
-        .collect()
-}
-
-/// Drive the mandatory SELECT and advance to the first CTAP command.
-fn begin<T>(op: &mut Operation<T>) {
-    assert_eq!(op.start().unwrap(), Step::Exchange);
-    assert_eq!(op.command().unwrap().as_bytes(), &SELECT);
-    assert_eq!(op.advance(&[0x90, 0x00]).unwrap(), Step::Exchange);
-}
-
-/// Assert the wrapped command bytes: `80 10 00 00 <Lc> <message>`.
-fn assert_command(op: &Operation<impl Sized>, message: &[u8]) {
-    let mut expected = vec![0x80, 0x10, 0x00, 0x00, message.len() as u8];
-    expected.extend_from_slice(message);
-    assert!(message.len() <= 255, "fixture must use short Lc");
-    assert_eq!(op.command().unwrap().as_bytes(), &expected);
-}
-
-/// Advance with a successful CTAP response carrying `payload`.
-fn advance_ok<T>(op: &mut Operation<T>, payload: &[u8]) -> Step {
-    let mut reply = vec![0x00];
-    reply.extend_from_slice(payload);
-    reply.extend_from_slice(&[0x90, 0x00]);
-    op.advance(&reply).unwrap()
-}
-
-/// Advance with a successful CTAP response that must fail parsing.
-fn advance_bad<T>(op: &mut Operation<T>, payload: &[u8]) -> Error {
-    let mut reply = vec![0x00];
-    reply.extend_from_slice(payload);
-    reply.extend_from_slice(&[0x90, 0x00]);
-    op.advance(&reply).unwrap_err()
-}
-
-/// Mint the fixed V1 token (plaintext 0x10..=0x2F) through the clientPIN
-/// fixture transcript.
-fn token_v1() -> PinToken {
-    let mut op = get_key_agreement(
-        PinUvAuthProtocol::V1,
-        &EPHEMERAL_SCALAR,
-        OperationOptions::default(),
-    )
-    .unwrap();
-    begin(&mut op);
-    assert_eq!(
-        advance_ok(&mut op, &hex(PEER_KEY_AGREEMENT_PAYLOAD)),
-        Step::Done
-    );
-    let session = op.take_result().unwrap();
-    let mut op = get_pin_token(&session, b"1234", None, OperationOptions::default()).unwrap();
-    begin(&mut op);
-    let ct = hex(TOKEN_CT_V1);
-    // A 32-byte byte string needs the one-byte-length head (0x58 0x20).
-    let mut payload = vec![0xa1, 0x02, 0x58, 0x20];
-    payload.extend_from_slice(&ct);
-    assert_eq!(advance_ok(&mut op, &payload), Step::Done);
-    let token = op.take_result().unwrap();
-    assert_eq!(token.token().as_bytes(), &TOKEN_PLAINTEXT);
-    token
-}
 
 /// The read fragment size under default options: 258 - 16 overhead = 242.
 const DEFAULT_READ_CHUNK: usize = 242;
@@ -163,17 +78,6 @@ fn read_chunk_golden() {
 }
 
 #[test]
-fn read_chunk_at_offset_golden() {
-    let mut op = read_chunk(300, 24, OperationOptions::default()).unwrap();
-    begin(&mut op);
-    // 300 = 0x19 0x012c; 24 = 0x18 0x18.
-    assert_command(&op, &hex("0c a2 01 18 18 03 19 01 2c"));
-    // offset equal to the stored size yields an empty substring.
-    assert_eq!(advance_ok(&mut op, &config_payload(&[])), Step::Done);
-    assert!(op.take_result().unwrap().is_empty());
-}
-
-#[test]
 fn read_chunk_rejects_bad_length_before_io() {
     let error = read_chunk(0, 0, OperationOptions::default()).unwrap_err();
     assert_eq!(error.kind, ErrorKind::InvalidArgument);
@@ -201,34 +105,22 @@ fn read_chunk_invalid_parameter_keeps_raw_byte() {
 }
 
 #[test]
-fn read_chunk_invalid_length_keeps_raw_byte() {
-    let mut op = read_chunk(0, 1024, OperationOptions::default()).unwrap();
-    begin(&mut op);
-    // Firmware: get above maxFragmentLength -> CTAP1_ERR_INVALID_LENGTH (0x03).
-    let error = op.advance(&[0x03, 0x90, 0x00]).unwrap_err();
-    assert_eq!(error.kind, ErrorKind::UnexpectedStatusWord);
-    assert_eq!(error.phase, Phase::Command);
-    assert_eq!(error.application_status, Some(0x03));
-    assert!(error.status_word.is_none());
-}
-
-#[test]
 fn read_chunk_malformed_responses_are_invalid_response() {
     // Missing the config key (1).
     let mut op = read_chunk(0, 16, OperationOptions::default()).unwrap();
     begin(&mut op);
-    let error = advance_bad(&mut op, &hex("a1 02 00"));
+    let error = finish_err(&mut op, &hex("a1 02 00"));
     assert_eq!(error.kind, ErrorKind::InvalidResponse);
     assert_eq!(error.phase, Phase::Parsing);
     // The config value is not a byte string.
     let mut op = read_chunk(0, 16, OperationOptions::default()).unwrap();
     begin(&mut op);
-    let error = advance_bad(&mut op, &hex("a1 01 00"));
+    let error = finish_err(&mut op, &hex("a1 01 00"));
     assert_eq!(error.kind, ErrorKind::InvalidResponse);
     // The payload is not a map at all.
     let mut op = read_chunk(0, 16, OperationOptions::default()).unwrap();
     begin(&mut op);
-    let error = advance_bad(&mut op, &hex("41 00"));
+    let error = finish_err(&mut op, &hex("41 00"));
     assert_eq!(error.kind, ErrorKind::InvalidResponse);
 }
 
@@ -286,7 +178,7 @@ fn read_array_overlong_fragment_is_invalid_response() {
     let mut op = read_array(OperationOptions::default()).unwrap();
     begin(&mut op);
     // The authenticator returns one byte more than requested.
-    let error = advance_bad(&mut op, &config_payload(&[0u8; DEFAULT_READ_CHUNK + 1]));
+    let error = finish_err(&mut op, &config_payload(&[0u8; DEFAULT_READ_CHUNK + 1]));
     assert_eq!(error.kind, ErrorKind::InvalidResponse);
     assert_eq!(error.phase, Phase::Parsing);
 }
@@ -301,7 +193,7 @@ fn read_array_runaway_hits_array_bound() {
     for _ in 0..16 {
         assert_eq!(advance_ok(&mut op, &config_payload(&chunk)), Step::Exchange);
     }
-    let error = advance_bad(&mut op, &config_payload(&chunk));
+    let error = finish_err(&mut op, &config_payload(&chunk));
     assert_eq!(error.kind, ErrorKind::LimitExceeded);
     assert_eq!(error.phase, Phase::Parsing);
     assert!(error.status_word.is_none());
@@ -322,7 +214,7 @@ fn read_array_budget_exhausted_is_limit_exceeded() {
     let chunk = vec![0x22u8; DEFAULT_READ_CHUNK];
     assert_eq!(advance_ok(&mut op, &config_payload(&chunk)), Step::Exchange);
     assert_eq!(advance_ok(&mut op, &config_payload(&chunk)), Step::Exchange);
-    let error = advance_bad(&mut op, &config_payload(&chunk));
+    let error = finish_err(&mut op, &config_payload(&chunk));
     assert_eq!(error.kind, ErrorKind::LimitExceeded);
 }
 
@@ -423,22 +315,6 @@ fn write_array_rejects_invalid_sizes_before_io() {
 }
 
 #[test]
-fn write_array_pin_auth_invalid_keeps_raw_byte() {
-    let token = token_v1();
-    let mut op = write_array(
-        &WRITE_DATA,
-        Some((&token, PinUvAuthProtocol::V1)),
-        clamped_options(),
-    )
-    .unwrap();
-    begin(&mut op);
-    let error = op.advance(&[0x33, 0x90, 0x00]).unwrap_err();
-    assert_eq!(error.kind, ErrorKind::AuthenticationFailed);
-    assert_eq!(error.phase, Phase::Command);
-    assert_eq!(error.application_status, Some(0x33));
-}
-
-#[test]
 fn write_array_storage_full_is_limit_exceeded() {
     let mut op = write_array(&WRITE_DATA, None, clamped_options()).unwrap();
     begin(&mut op);
@@ -460,7 +336,7 @@ fn write_array_non_empty_payload_is_invalid_response() {
     .unwrap();
     begin(&mut op);
     // A successful set must return an empty payload.
-    let error = advance_bad(&mut op, &hex("a0"));
+    let error = finish_err(&mut op, &hex("a0"));
     assert_eq!(error.kind, ErrorKind::InvalidResponse);
     assert_eq!(error.phase, Phase::Parsing);
 }

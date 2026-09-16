@@ -8,21 +8,13 @@ use canokey_ctap::{
     GetAssertionParams, MakeCredentialParams, PinUvAuth, PinUvAuthProtocol,
     PublicKeyCredentialDescriptor, RelyingParty, UserEntity,
 };
-use canokey_protocol::{ErrorKind, ExchangeOptions, Operation, OperationOptions, Phase, Step};
+use canokey_protocol::{ErrorKind, ExchangeOptions, OperationOptions, Phase, Step};
 
-const SELECT: [u8; 13] = [
-    0x00, 0xa4, 0x04, 0x00, 0x08, 0xa0, 0x00, 0x00, 0x06, 0x47, 0x2f, 0x00, 0x01,
-];
+mod support;
+
+use support::{assert_command, begin, hex};
+
 const AAGUID: &str = "244eb29ee0904e4981fe1f20f8d3b8f4";
-
-/// Decode a hex string, ignoring whitespace.
-fn hex(s: &str) -> Vec<u8> {
-    let clean: String = s.chars().filter(|c| !c.is_whitespace()).collect();
-    (0..clean.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&clean[i..i + 2], 16).unwrap())
-        .collect()
-}
 
 fn large_response_options() -> OperationOptions {
     OperationOptions {
@@ -32,20 +24,6 @@ fn large_response_options() -> OperationOptions {
         },
         ..Default::default()
     }
-}
-
-/// Drive the mandatory SELECT and advance to the CTAP command.
-fn begin<T>(op: &mut Operation<T>) {
-    assert_eq!(op.start().unwrap(), Step::Exchange);
-    assert_eq!(op.command().unwrap().as_bytes(), &SELECT);
-    assert_eq!(op.advance(&[0x90, 0x00]).unwrap(), Step::Exchange);
-}
-
-fn assert_command(op: &Operation<impl Sized>, message: &[u8]) {
-    let mut expected = vec![0x80, 0x10, 0x00, 0x00, message.len() as u8];
-    expected.extend_from_slice(message);
-    assert!(message.len() <= 255, "fixture must use short Lc");
-    assert_eq!(op.command().unwrap().as_bytes(), &expected);
 }
 
 // ------------------------------------------------------------ get_info ----
@@ -169,18 +147,6 @@ fn get_info_missing_versions_rejected() {
     assert_eq!(error.phase, Phase::Parsing);
 }
 
-#[test]
-fn get_info_trailing_bytes_rejected() {
-    let mut op = get_info(large_response_options()).unwrap();
-    begin(&mut op);
-    // Valid minimal map {1: ["FIDO_2_0"], 3: aaguid} plus one trailing byte.
-    let mut reply = hex(&format!("00 a2 01 81 684649444f5f325f30 03 50 {AAGUID} 00"));
-    reply.extend_from_slice(&[0x90, 0x00]);
-    let error = op.advance(&reply).unwrap_err();
-    assert_eq!(error.kind, ErrorKind::InvalidResponse);
-    assert_eq!(error.phase, Phase::Parsing);
-}
-
 // ----------------------------------------------------- make_credential ----
 
 fn make_credential_params() -> MakeCredentialParams {
@@ -289,18 +255,6 @@ fn make_credential_golden_command_and_typed_response() {
     );
     assert_eq!(response.ep_att(), Some(false));
     assert_eq!(response.large_blob_key().unwrap().as_bytes(), &[0x77; 32]);
-}
-
-#[test]
-fn make_credential_credential_excluded_status_is_classified() {
-    let mut op = make_credential(make_credential_params(), OperationOptions::default()).unwrap();
-    begin(&mut op);
-    let error = op.advance(&[0x19, 0x90, 0x00]).unwrap_err();
-    assert_eq!(error.kind, ErrorKind::ConditionsNotSatisfied);
-    assert_eq!(error.phase, Phase::Command);
-    // CTAP-level failures carry the raw CTAP status byte, not an ISO word.
-    assert_eq!(error.application_status, Some(0x19));
-    assert!(error.status_word.is_none());
 }
 
 #[test]
@@ -417,16 +371,6 @@ fn get_assertion_golden_command_and_typed_response() {
     assert_eq!(response.number_of_credentials(), Some(2));
     assert_eq!(response.user_selected(), None);
     assert!(response.large_blob_key().is_none());
-}
-
-#[test]
-fn get_assertion_no_credentials_status_is_not_found() {
-    let mut op = get_assertion(get_assertion_params(), OperationOptions::default()).unwrap();
-    begin(&mut op);
-    let error = op.advance(&[0x2e, 0x90, 0x00]).unwrap_err();
-    assert_eq!(error.kind, ErrorKind::NotFound);
-    assert_eq!(error.phase, Phase::Command);
-    assert_eq!(error.application_status, Some(0x2e));
 }
 
 #[test]

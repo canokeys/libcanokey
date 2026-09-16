@@ -36,8 +36,8 @@
 
 use crate::cbor::{self, Value};
 use crate::pin::PinToken;
-use crate::{select_then, CtapResponse, PinUvAuthProtocol};
-use canokey_protocol::{Error, ErrorKind, Operation, OperationOptions, Phase};
+use crate::{empty_payload, select_then, typed, PinUvAuthProtocol};
+use canokey_protocol::{Error, ErrorKind, Operation, OperationOptions};
 
 const COMMAND_CONFIG: u8 = 0x0d;
 const SUBCOMMAND_TOGGLE_ALWAYS_UV: u8 = 0x02;
@@ -59,35 +59,11 @@ pub const MIN_MIN_PIN_LENGTH: u8 = 4;
 /// (`CTAP_MAX_RPIDS_FOR_SET_MIN_PIN_LENGTH`).
 pub const MAX_MIN_PIN_LENGTH_RP_IDS: usize = 4;
 
-fn invalid() -> Error {
-    Error::new(ErrorKind::InvalidResponse).at(Phase::Parsing)
-}
 fn invalid_argument() -> Error {
     Error::new(ErrorKind::InvalidArgument)
 }
 fn uint(value: u64) -> Value {
     Value::Unsigned(value)
-}
-
-/// Classify the CTAP status byte, then parse the response payload.
-fn typed<T>(
-    response: CtapResponse,
-    parse: impl FnOnce(&[u8]) -> Result<T, Error>,
-) -> Result<T, Error> {
-    if let Some(error) = response.status().into_error(Phase::Command) {
-        return Err(error);
-    }
-    parse(response.payload())
-}
-
-/// Require an empty response payload, as CTAP2 specifies for config
-/// subcommands; a payload would be a protocol violation by the authenticator.
-fn empty_payload(bytes: &[u8]) -> Result<(), Error> {
-    if bytes.is_empty() {
-        Ok(())
-    } else {
-        Err(invalid())
-    }
 }
 
 /// Build the complete config message: the 0x0D command byte followed by the
@@ -139,7 +115,7 @@ fn message(
 /// A non-success CTAP status byte is classified in the Command phase (0x33
 /// PIN_AUTH_INVALID maps to [`ErrorKind::AuthenticationFailed`], 0x36
 /// PUAT_REQUIRED to [`ErrorKind::SecurityStatusNotSatisfied`]). A non-empty
-/// successful payload is [`ErrorKind::InvalidResponse`] in [`Phase::Parsing`].
+/// successful payload is [`ErrorKind::InvalidResponse`] in [`Phase::Parsing`](canokey_protocol::Phase::Parsing).
 pub fn toggle_always_uv(
     token: &PinToken,
     protocol: PinUvAuthProtocol,

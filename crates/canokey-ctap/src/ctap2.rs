@@ -7,7 +7,7 @@
 //! the Command phase, with the raw byte retained in `Error::application_status`;
 //! response CBOR is parsed strictly (canonical form, no tags, no duplicate
 //! keys, no trailing bytes) and structural violations fail as
-//! [`ErrorKind::InvalidResponse`] in [`Phase::Parsing`].
+//! [`ErrorKind::InvalidResponse`] in [`Phase::Parsing`](canokey_protocol::Phase::Parsing).
 //!
 //! All factories are profile-free: they enforce the CTAP2 specification, not
 //! any authenticator's advertised capabilities. Card-controlled allocation is
@@ -19,8 +19,8 @@ use crate::cose::CoseAlgorithm;
 use crate::hmacsecret;
 #[cfg(feature = "clientpin")]
 use crate::hmacsecret::HmacSecretInput;
-use crate::{select_then, CtapResponse};
-use canokey_protocol::{Error, ErrorKind, Operation, OperationOptions, Phase, SecretBytes};
+use crate::{empty_payload, invalid, required, select_then, typed};
+use canokey_protocol::{Error, ErrorKind, Operation, OperationOptions, SecretBytes};
 
 const COMMAND_MAKE_CREDENTIAL: u8 = 0x01;
 const COMMAND_GET_ASSERTION: u8 = 0x02;
@@ -38,14 +38,8 @@ pub(crate) const EXT_HMAC_SECRET_MC: &str = "hmac-secret-mc";
 /// Maximum byte length of a user ID in makeCredential/getAssertion (CTAP2).
 pub const MAX_USER_ID_LEN: usize = 64;
 
-fn invalid() -> Error {
-    Error::new(ErrorKind::InvalidResponse).at(Phase::Parsing)
-}
 fn invalid_argument() -> Error {
     Error::new(ErrorKind::InvalidArgument)
-}
-fn required(value: Option<&Value>) -> Result<&Value, Error> {
-    value.ok_or_else(invalid)
 }
 
 /// A pin/UV auth protocol version as advertised by authenticatorGetInfo.
@@ -254,7 +248,7 @@ impl PublicKeyCredentialParameters {
 ///
 /// Only `versions` and `aaguid` are required by the CTAP2 specification; a
 /// response missing either fails as [`ErrorKind::InvalidResponse`] in
-/// [`Phase::Parsing`]. Every other member is optional and typed. Unknown or
+/// [`Phase::Parsing`](canokey_protocol::Phase::Parsing). Every other member is optional and typed. Unknown or
 /// unlisted keys are preserved in [`Self::raw`]; optionality is the
 /// authenticator's, so absent members are `None` rather than errors.
 #[derive(Clone, Debug)]
@@ -613,19 +607,6 @@ impl GetAssertionResponse {
     }
 }
 
-/// Classify the CTAP status byte, then parse the response payload.
-/// Transport and ISO 7816 status-word failures are surfaced unchanged by the
-/// envelope below this layer.
-fn typed<T>(
-    response: CtapResponse,
-    parse: impl FnOnce(&[u8]) -> Result<T, Error>,
-) -> Result<T, Error> {
-    if let Some(error) = response.status().into_error(Phase::Command) {
-        return Err(error);
-    }
-    parse(response.payload())
-}
-
 fn text_array(value: &Value) -> Result<Vec<String>, Error> {
     value
         .as_array()
@@ -819,16 +800,6 @@ fn parse_get_assertion(
     })
 }
 
-/// Require an empty response payload, as CTAP2 specifies for reset and
-/// selection; a payload would be a protocol violation by the authenticator.
-fn empty_payload(bytes: &[u8]) -> Result<(), Error> {
-    if bytes.is_empty() {
-        Ok(())
-    } else {
-        Err(invalid())
-    }
-}
-
 fn extension_map(entries: &[(String, Value)]) -> Value {
     Value::Map(
         entries
@@ -859,7 +830,7 @@ fn option_map(entries: &[(String, bool)]) -> Value {
 /// A non-success CTAP status byte is classified in the Command phase with
 /// the raw byte retained in `Error::application_status`. A response missing
 /// `versions` or `aaguid`, mistyped members, or malformed CBOR fails as
-/// [`ErrorKind::InvalidResponse`] in [`Phase::Parsing`].
+/// [`ErrorKind::InvalidResponse`] in [`Phase::Parsing`](canokey_protocol::Phase::Parsing).
 pub fn get_info(options: OperationOptions) -> Result<Operation<AuthenticatorInfo>, Error> {
     select_then(&[COMMAND_GET_INFO], options, |response| {
         typed(response, parse_get_info)
@@ -892,7 +863,7 @@ pub fn get_info(options: OperationOptions) -> Result<Operation<AuthenticatorInfo
 /// `"hmac-secret-mc"`), or `hmac_secret_mc` is set without `hmac_secret`.
 /// Response failures follow [`get_info`]; a response missing `fmt`,
 /// `authData` or a text-keyed `attStmt` is [`ErrorKind::InvalidResponse`] in
-/// [`Phase::Parsing`]. When the hmac-secret-mc exchange was requested, a
+/// [`Phase::Parsing`](canokey_protocol::Phase::Parsing). When the hmac-secret-mc exchange was requested, a
 /// response whose authData lacks the encrypted `"hmac-secret-mc"` output is
 /// likewise [`ErrorKind::InvalidResponse`].
 pub fn make_credential(
@@ -1021,7 +992,7 @@ pub fn make_credential(
 /// when `rp_id` is empty or a raw `extensions` entry repeats
 /// `"hmac-secret"` while the typed `hmac_secret` field is also set.
 /// Response failures follow [`get_info`]; a response missing `authData` or
-/// `signature` is [`ErrorKind::InvalidResponse`] in [`Phase::Parsing`]. When
+/// `signature` is [`ErrorKind::InvalidResponse`] in [`Phase::Parsing`](canokey_protocol::Phase::Parsing). When
 /// the hmac-secret exchange was requested, a response whose authData lacks
 /// the encrypted `"hmac-secret"` output is likewise
 /// [`ErrorKind::InvalidResponse`].
@@ -1140,7 +1111,7 @@ pub fn get_next_assertion(
 ///
 /// # Errors
 /// See [`get_info`]; a non-empty successful payload is
-/// [`ErrorKind::InvalidResponse`] in [`Phase::Parsing`].
+/// [`ErrorKind::InvalidResponse`] in [`Phase::Parsing`](canokey_protocol::Phase::Parsing).
 pub fn reset(options: OperationOptions) -> Result<Operation<()>, Error> {
     select_then(&[COMMAND_RESET], options, |response| {
         typed(response, empty_payload)

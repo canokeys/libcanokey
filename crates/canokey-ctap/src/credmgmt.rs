@@ -56,7 +56,7 @@ use crate::cose::CoseKey;
 use crate::ctap2::{PublicKeyCredentialDescriptor, RelyingParty, UserEntity, MAX_USER_ID_LEN};
 use crate::pin::PinToken;
 use crate::status::CtapStatus;
-use crate::{command, select_then, CtapResponse, PinUvAuthProtocol};
+use crate::{command, empty_payload, invalid, required, select_then, typed, PinUvAuthProtocol};
 use canokey_protocol::operation::engine::{Action, Machine};
 use canokey_protocol::operation::{validate_command, ResponseData};
 use canokey_protocol::{Error, ErrorKind, Operation, OperationOptions, Phase, SecretBytes};
@@ -108,38 +108,11 @@ const RESPONSE_COSE_ALGORITHM: i64 = 0x80;
 /// CTAP2_ERR_NO_CREDENTIALS: an empty enumeration, not an error.
 const STATUS_NO_CREDENTIALS: u8 = 0x2e;
 
-fn invalid() -> Error {
-    Error::new(ErrorKind::InvalidResponse).at(Phase::Parsing)
-}
 fn invalid_argument() -> Error {
     Error::new(ErrorKind::InvalidArgument)
 }
-fn required(value: Option<&Value>) -> Result<&Value, Error> {
-    value.ok_or_else(invalid)
-}
 fn uint(value: u64) -> Value {
     Value::Unsigned(value)
-}
-
-/// Classify the CTAP status byte, then parse the response payload.
-fn typed<T>(
-    response: CtapResponse,
-    parse: impl FnOnce(&[u8]) -> Result<T, Error>,
-) -> Result<T, Error> {
-    if let Some(error) = response.status().into_error(Phase::Command) {
-        return Err(error);
-    }
-    parse(response.payload())
-}
-
-/// Require an empty response payload, as CTAP2 specifies for
-/// deleteCredential and updateUserInformation.
-fn empty_payload(bytes: &[u8]) -> Result<(), Error> {
-    if bytes.is_empty() {
-        Ok(())
-    } else {
-        Err(invalid())
-    }
 }
 
 fn opt<T>(

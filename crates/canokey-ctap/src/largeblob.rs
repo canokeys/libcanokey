@@ -64,7 +64,7 @@
 use crate::cbor::{self, Value};
 use crate::pin::PinToken;
 use crate::status::CtapStatus;
-use crate::{command, select_then, CtapResponse, PinUvAuthProtocol};
+use crate::{command, invalid, select_then, typed, PinUvAuthProtocol};
 use canokey_protocol::operation::engine::{Action, Machine};
 use canokey_protocol::operation::{validate_command, ResponseData};
 use canokey_protocol::{Error, ErrorKind, Operation, OperationOptions, Phase};
@@ -114,25 +114,11 @@ const READ_RESPONSE_OVERHEAD: usize = 16;
 /// and the pinUvAuthParam/pinUvAuthProtocol entries.
 const WRITE_MESSAGE_OVERHEAD: usize = 64;
 
-fn invalid() -> Error {
-    Error::new(ErrorKind::InvalidResponse).at(Phase::Parsing)
-}
 fn invalid_argument() -> Error {
     Error::new(ErrorKind::InvalidArgument)
 }
 fn uint(value: u64) -> Value {
     Value::Unsigned(value)
-}
-
-/// Classify the CTAP status byte, then parse the response payload.
-fn typed<T>(
-    response: CtapResponse,
-    parse: impl FnOnce(&[u8]) -> Result<T, Error>,
-) -> Result<T, Error> {
-    if let Some(error) = response.status().into_error(Phase::Command) {
-        return Err(error);
-    }
-    parse(response.payload())
 }
 
 /// Split the reassembled CTAP response into its status byte and payload.

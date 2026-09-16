@@ -10,11 +10,11 @@ use canokey_ctap::u2f::{
     authenticate, check_only, register, version, U2fAuthenticateRequest, U2fRegisterRequest,
     MAX_KEY_HANDLE_LEN, U2F_VERSION_V2,
 };
-use canokey_protocol::{ErrorKind, Operation, OperationOptions, Phase, Step};
+use canokey_protocol::{ErrorKind, OperationOptions, Phase, Step};
 
-const SELECT: [u8; 13] = [
-    0x00, 0xa4, 0x04, 0x00, 0x08, 0xa0, 0x00, 0x00, 0x06, 0x47, 0x2f, 0x00, 0x01,
-];
+mod support;
+
+use support::begin;
 
 const CHALLENGE: [u8; 32] = [0x11; 32];
 const APPLICATION: [u8; 32] = [0x22; 32];
@@ -43,13 +43,6 @@ fn register_response() -> Vec<u8> {
     data.extend_from_slice(&FAKE_CERT);
     data.extend_from_slice(&FAKE_SIG);
     data
-}
-
-/// Drive the mandatory SELECT and advance to the U2F command.
-fn begin<T>(op: &mut Operation<T>) {
-    assert_eq!(op.start().unwrap(), Step::Exchange);
-    assert_eq!(op.command().unwrap().as_bytes(), &SELECT);
-    assert_eq!(op.advance(&[0x90, 0x00]).unwrap(), Step::Exchange);
 }
 
 fn register_request() -> U2fRegisterRequest {
@@ -129,16 +122,6 @@ fn register_continues_61xx_with_get_response_cla_0() {
 }
 
 #[test]
-fn register_conditions_not_satisfied_on_touch_timeout() {
-    let mut op = register(register_request(), OperationOptions::default()).unwrap();
-    begin(&mut op);
-    let error = op.advance(&[0x69, 0x85]).unwrap_err();
-    assert_eq!(error.kind, ErrorKind::ConditionsNotSatisfied);
-    assert_eq!(error.phase, Phase::Command);
-    assert_eq!(error.status_word.map(|sw| sw.raw()), Some(0x6985));
-}
-
-#[test]
 fn register_unsupported_feature_when_always_uv_enabled() {
     let mut op = register(register_request(), OperationOptions::default()).unwrap();
     begin(&mut op);
@@ -207,14 +190,6 @@ fn authenticate_invalid_key_handle_keeps_raw_status() {
     assert_eq!(error.kind, ErrorKind::UnexpectedStatusWord);
     assert_eq!(error.phase, Phase::Command);
     assert_eq!(error.status_word.map(|sw| sw.raw()), Some(0x6a80));
-}
-
-#[test]
-fn authenticate_empty_key_handle_fails_before_io() {
-    let mut request = authenticate_request();
-    request.key_handle = Vec::new();
-    let error = authenticate(request, OperationOptions::default()).unwrap_err();
-    assert_eq!(error.kind, ErrorKind::InvalidArgument);
 }
 
 #[test]

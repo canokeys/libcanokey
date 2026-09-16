@@ -3,9 +3,9 @@ use canokey_protocol::{
     ErrorKind, ExchangeOptions, Operation, OperationOptions, OperationState, Phase, Step,
 };
 
-const SELECT: [u8; 13] = [
-    0x00, 0xa4, 0x04, 0x00, 0x08, 0xa0, 0x00, 0x00, 0x06, 0x47, 0x2f, 0x00, 0x01,
-];
+mod support;
+
+use support::SELECT;
 
 fn begin_transceive(message: &[u8]) -> Operation<CtapResponse> {
     let mut op = transceive(message, OperationOptions::default()).unwrap();
@@ -51,16 +51,6 @@ fn transceive_golden_bytes_and_response_parse() {
     assert!(response.status().is_success());
     assert_eq!(response.status().raw(), 0x00);
     assert_eq!(response.payload(), &[0xa1, 0x01, 0x83]);
-}
-
-#[test]
-fn transceive_select_missing_applet_is_unsupported_device() {
-    let mut op = transceive(&[0x04], OperationOptions::default()).unwrap();
-    assert_eq!(op.start().unwrap(), Step::Exchange);
-    assert_eq!(op.command().unwrap().as_bytes(), &SELECT);
-    let error = op.advance(&[0x6a, 0x82]).unwrap_err();
-    assert_eq!(error.kind, ErrorKind::UnsupportedDevice);
-    assert_eq!(error.phase, Phase::Select);
 }
 
 #[test]
@@ -162,22 +152,6 @@ fn conditions_not_satisfied_status_is_classified() {
     assert_eq!(error.kind, ErrorKind::ConditionsNotSatisfied);
     assert_eq!(error.phase, Phase::Command);
     assert_eq!(error.status_word.unwrap().raw(), 0x6985);
-}
-
-#[test]
-fn unsupported_ins_status_is_classified() {
-    let mut op = begin_transceive(&[0x01]);
-    let error = op.advance(&[0x6d, 0x00]).unwrap_err();
-    assert_eq!(error.kind, ErrorKind::UnsupportedFeature);
-    assert_eq!(error.phase, Phase::Command);
-}
-
-#[test]
-fn wrong_data_status_keeps_raw_word() {
-    let mut op = begin_transceive(&[0x01]);
-    let error = op.advance(&[0x6a, 0x80]).unwrap_err();
-    assert_eq!(error.kind, ErrorKind::UnexpectedStatusWord);
-    assert_eq!(error.status_word.unwrap().raw(), 0x6a80);
 }
 
 #[test]

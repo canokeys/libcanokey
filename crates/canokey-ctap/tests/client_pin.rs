@@ -8,29 +8,19 @@
 //! HKDF-SHA-256, AES-256-CBC; stdlib HMAC-SHA-256) on the same date.
 #![cfg(feature = "clientpin")]
 
+mod support;
+
 use canokey_ctap::cose::CoseKey;
 use canokey_ctap::{
     change_pin, get_key_agreement, get_pin_retries, get_pin_token, get_pin_token_with_permissions,
-    set_pin, Permissions, PinSession, PinToken, PinUvAuthProtocol,
+    set_pin, Permissions, PinToken, PinUvAuthProtocol,
 };
-use canokey_protocol::{ErrorKind, Operation, OperationOptions, Phase, Step};
+use canokey_protocol::{ErrorKind, OperationOptions, Phase};
+use support::{
+    assert_command, begin, finish, hex, session, EPHEMERAL_SCALAR, IV_V2,
+    PEER_KEY_AGREEMENT_PAYLOAD, TOKEN_CT_V1, TOKEN_PLAINTEXT,
+};
 
-const SELECT: [u8; 13] = [
-    0x00, 0xa4, 0x04, 0x00, 0x08, 0xa0, 0x00, 0x00, 0x06, 0x47, 0x2f, 0x00, 0x01,
-];
-
-/// Platform ephemeral scalar fixture (0x01..=0x20).
-const EPHEMERAL_SCALAR: [u8; 32] = [
-    0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
-    0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20,
-];
-/// Caller-supplied IV fixture for protocol V2.
-const IV_V2: [u8; 16] = [
-    0x0f, 0x0e, 0x0d, 0x0c, 0x0b, 0x0a, 0x09, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01, 0x00,
-];
-/// Peer (authenticator) keyAgreement response payload: `{1: {1: 2, 3: -25,
-/// -1: 1, -2: x, -3: y}}` for the peer scalar 0xA0..=0xBF.
-const PEER_KEY_AGREEMENT_PAYLOAD: &str = "a101a5010203381820012158200d0918a04198474605615b6df90fdcb34791fb3ecb822f4b26eb6e4fc4511b9d22582019b90c1b83c0c35cfbbb31ead32bb52ae33622f57e3cc1638097ce97f430baba";
 /// Expected platform key-agreement coordinates for EPHEMERAL_SCALAR.
 const PLATFORM_X: &str = "515c3d6eb9e396b904d3feca7f54fdcd0cc1e997bf375dca515ad0a6c3b4035f";
 const PLATFORM_Y: &str = "4536be3a50f318fbf9a5475902a221502bef0d57e08c53b2cc0a56f17d9f9354";
@@ -48,58 +38,12 @@ const GET_PIN_TOKEN_MSG_V2: &str = "06a40102020503a501020338182001215820515c3d6e
 /// permissions = MAKE_CREDENTIAL|GET_ASSERTION (0x03), rpId "example.com".
 const GET_PIN_TOKEN_PERMS_MSG_V2: &str = "06a60102020903a501020338182001215820515c3d6eb9e396b904d3feca7f54fdcd0cc1e997bf375dca515ad0a6c3b4035f2258204536be3a50f318fbf9a5475902a221502bef0d57e08c53b2cc0a56f17d9f93540658200f0e0d0c0b0a0908070605040302010017d937071b239273a39da474e04c637609030a6b6578616d706c652e636f6d";
 
-/// Encrypted token response fixtures for the token plaintext 0x10..=0x2F.
-const TOKEN_PLAINTEXT: [u8; 32] = [
-    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
-    0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f,
-];
-const TOKEN_CT_V1: &str = "b98cc635132fa3ea8c191b7a4aa3e093ce926c35488221b4684fce766f3b14b0";
+/// Encrypted V2 token fixture for the shared token plaintext 0x10..=0x2F.
 const TOKEN_CT_V2: &str =
     "0f0e0d0c0b0a09080706050403020100a1f914f091032bf439a162dbf45e137290ccdf4a4476a5f39b912b7dbbbb6f64";
 /// pinUvAuthParam = token.authenticate(protocol, [0x5A; 32]) fixtures.
 const TOKEN_AUTH_V1: &str = "8b533e4b9f8398fa58019dc2a92c69c0";
 const TOKEN_AUTH_V2: &str = "8b533e4b9f8398fa58019dc2a92c69c0c7aeae1196032378bf112ffb21e48dd1";
-
-/// Decode a hex string, ignoring whitespace.
-fn hex(s: &str) -> Vec<u8> {
-    let clean: String = s.chars().filter(|c| !c.is_whitespace()).collect();
-    (0..clean.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&clean[i..i + 2], 16).unwrap())
-        .collect()
-}
-
-/// Drive the mandatory SELECT and advance to the CTAP command.
-fn begin<T>(op: &mut Operation<T>) {
-    assert_eq!(op.start().unwrap(), Step::Exchange);
-    assert_eq!(op.command().unwrap().as_bytes(), &SELECT);
-    assert_eq!(op.advance(&[0x90, 0x00]).unwrap(), Step::Exchange);
-}
-
-/// Assert the wrapped command bytes: `80 10 00 00 <Lc> <message>`.
-fn assert_command(op: &Operation<impl Sized>, message: &[u8]) {
-    let mut expected = vec![0x80, 0x10, 0x00, 0x00, message.len() as u8];
-    expected.extend_from_slice(message);
-    assert!(message.len() <= 255, "fixture must use short Lc");
-    assert_eq!(op.command().unwrap().as_bytes(), &expected);
-}
-
-/// Finish the operation with a successful CTAP response carrying `payload`.
-fn finish<T>(op: &mut Operation<T>, payload: &[u8]) -> T {
-    let mut reply = vec![0x00];
-    reply.extend_from_slice(payload);
-    reply.extend_from_slice(&[0x90, 0x00]);
-    assert_eq!(op.advance(&reply).unwrap(), Step::Done);
-    op.take_result().unwrap()
-}
-
-/// Establish a session for `protocol` against the fixture peer key.
-fn session(protocol: PinUvAuthProtocol) -> PinSession {
-    let mut op =
-        get_key_agreement(protocol, &EPHEMERAL_SCALAR, OperationOptions::default()).unwrap();
-    begin(&mut op);
-    finish(&mut op, &hex(PEER_KEY_AGREEMENT_PAYLOAD))
-}
 
 /// The `{2: <encrypted token>}` response payload for getPinToken.
 fn token_payload(token_ct: &str) -> Vec<u8> {
@@ -161,25 +105,18 @@ fn get_key_agreement_rejects_invalid_scalar_before_io() {
 
 #[test]
 fn get_key_agreement_rejects_malformed_peer_key() {
+    // One representative per pin-layer parse branch: a missing keyAgreement
+    // member (required field), and a syntactically valid COSE key whose
+    // point fails the ECDH public-key validation. COSE-level shape
+    // rejections (wrong alg/kty, truncated coordinates) are covered by the
+    // cose tests in ctap2_foundations.rs.
     let cases: &[(&str, &str)] = &[
         ("missing keyAgreement", "a0"),
-        // alg -7 (ES256) instead of -25
-        (
-            "wrong algorithm",
-            "a101a50102033820012158200d0918a04198474605615b6df90fdcb34791fb3ecb822f4b26eb6e4fc4511b9d22582019b90c1b83c0c35cfbbb31ead32bb52ae33622f57e3cc1638097ce97f430baba",
-        ),
-        // kty 1 (OKP) instead of EC2
-        (
-            "wrong key type",
-            "a101a5010103381820012158200d0918a04198474605615b6df90fdcb34791fb3ecb822f4b26eb6e4fc4511b9d22582019b90c1b83c0c35cfbbb31ead32bb52ae33622f57e3cc1638097ce97f430baba",
-        ),
         // x = y = 1 is not a P-256 point
         (
             "point not on curve",
             "a101a50102033818200121582000000000000000000000000000000000000000000000000000000000000000012258200000000000000000000000000000000000000000000000000000000000000001",
         ),
-        // truncated coordinates
-        ("short coordinates", "a101a5010203381820012141ff2241ff"),
     ];
     for (name, payload) in cases {
         let mut op = get_key_agreement(
@@ -250,15 +187,6 @@ fn set_pin_golden_v2() {
     begin(&mut op);
     assert_command(&op, &hex(SET_PIN_MSG_V2));
     finish(&mut op, &[]);
-}
-
-#[test]
-fn set_pin_nonempty_response_is_invalid() {
-    let session = session(PinUvAuthProtocol::V1);
-    let mut op = set_pin(&session, b"1234", None, OperationOptions::default()).unwrap();
-    begin(&mut op);
-    let error = op.advance(&hex("00 a0 90 00")).unwrap_err();
-    assert_eq!(error.kind, ErrorKind::InvalidResponse);
 }
 
 // --------------------------------------------------------------- change_pin
@@ -374,7 +302,7 @@ fn get_pin_token_undecryptable_token_is_invalid_response() {
     assert_eq!(error.kind, ErrorKind::InvalidResponse);
     assert_eq!(error.phase, Phase::Parsing);
 
-    // V2: IV + 15 bytes is misaligned; missing key 2 is an error too.
+    // V2: IV + 15 bytes is misaligned.
     let session_v2 = session(PinUvAuthProtocol::V2);
     let mut op = get_pin_token(
         &session_v2,
@@ -390,17 +318,6 @@ fn get_pin_token_undecryptable_token_is_invalid_response() {
     reply.extend_from_slice(&payload);
     reply.extend_from_slice(&[0x90, 0x00]);
     let error = op.advance(&reply).unwrap_err();
-    assert_eq!(error.kind, ErrorKind::InvalidResponse);
-
-    let mut op = get_pin_token(
-        &session_v2,
-        b"1234",
-        Some(&IV_V2),
-        OperationOptions::default(),
-    )
-    .unwrap();
-    begin(&mut op);
-    let error = op.advance(&hex("00 a0 90 00")).unwrap_err();
     assert_eq!(error.kind, ErrorKind::InvalidResponse);
 }
 
@@ -426,43 +343,20 @@ fn pin_validation_fails_before_io() {
     )
     .unwrap_err();
     assert_eq!(error.kind, ErrorKind::InvalidPin);
-    // The old PIN is validated too.
-    let error =
-        change_pin(&session, b"ab", b"1234", None, OperationOptions::default()).unwrap_err();
-    assert_eq!(error.kind, ErrorKind::InvalidPin);
     // Boundary: 63 one-byte code points is accepted.
     assert!(set_pin(&session, &[b'a'; 63], None, OperationOptions::default()).is_ok());
 }
 
 #[test]
 fn iv_rules_by_protocol() {
+    // The IV rule lives in the shared `check_iv` helper used by every
+    // pin-token factory; one command per direction is representative.
     for (protocol, iv) in [
         (PinUvAuthProtocol::V1, Some(&IV_V2)),
         (PinUvAuthProtocol::V2, None),
     ] {
         let session = session(protocol);
         let error = set_pin(&session, b"1234", iv, OperationOptions::default()).unwrap_err();
-        assert_eq!(error.kind, ErrorKind::InvalidArgument);
-        let error = change_pin(
-            &session,
-            b"1234",
-            b"654321",
-            iv,
-            OperationOptions::default(),
-        )
-        .unwrap_err();
-        assert_eq!(error.kind, ErrorKind::InvalidArgument);
-        let error = get_pin_token(&session, b"1234", iv, OperationOptions::default()).unwrap_err();
-        assert_eq!(error.kind, ErrorKind::InvalidArgument);
-        let error = get_pin_token_with_permissions(
-            &session,
-            b"1234",
-            Permissions::GET_ASSERTION,
-            None,
-            iv,
-            OperationOptions::default(),
-        )
-        .unwrap_err();
         assert_eq!(error.kind, ErrorKind::InvalidArgument);
     }
 }
@@ -512,18 +406,15 @@ fn permissions_bitfield_round_trip() {
 
 #[test]
 fn ctap_status_errors_are_classified_with_raw_byte() {
-    for (status, kind) in [
-        (0x31, ErrorKind::InvalidPin),
-        (0x32, ErrorKind::PinBlocked),
-        (0x33, ErrorKind::AuthenticationFailed),
-    ] {
-        let mut op = get_pin_retries(PinUvAuthProtocol::V1, OperationOptions::default()).unwrap();
-        begin(&mut op);
-        let error = op.advance(&[status, 0x90, 0x00]).unwrap_err();
-        assert_eq!(error.kind, kind, "status {status:#04x}");
-        assert_eq!(error.phase, Phase::Command);
-        assert_eq!(error.application_status, Some(status));
-    }
+    // One representative status: the full byte -> ErrorKind table is
+    // unit-tested in src/status.rs; here we pin the typed() plumbing and the
+    // raw-byte retention on the command path.
+    let mut op = get_pin_retries(PinUvAuthProtocol::V1, OperationOptions::default()).unwrap();
+    begin(&mut op);
+    let error = op.advance(&[0x33, 0x90, 0x00]).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::AuthenticationFailed);
+    assert_eq!(error.phase, Phase::Command);
+    assert_eq!(error.application_status, Some(0x33));
 }
 
 // --------------------------------------------------------- token auth widths

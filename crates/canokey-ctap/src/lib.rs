@@ -322,6 +322,37 @@ fn parse_response(response: ResponseData) -> Result<CtapResponse, Error> {
     })
 }
 
+/// InvalidResponse in the Parsing phase, for malformed card-controlled data.
+pub(crate) fn invalid() -> Error {
+    Error::new(ErrorKind::InvalidResponse).at(Phase::Parsing)
+}
+
+/// Require a present CBOR value, mapping `None` to a parse failure.
+pub(crate) fn required(value: Option<&cbor::Value>) -> Result<&cbor::Value, Error> {
+    value.ok_or_else(invalid)
+}
+
+/// Classify the CTAP status byte, then parse the response payload.
+pub(crate) fn typed<T>(
+    response: CtapResponse,
+    parse: impl FnOnce(&[u8]) -> Result<T, Error>,
+) -> Result<T, Error> {
+    if let Some(error) = response.status().into_error(Phase::Command) {
+        return Err(error);
+    }
+    parse(response.payload())
+}
+
+/// Require an empty response payload, as CTAP2 specifies for mutating
+/// commands; a payload would be a protocol violation by the authenticator.
+pub(crate) fn empty_payload(bytes: &[u8]) -> Result<(), Error> {
+    if bytes.is_empty() {
+        Ok(())
+    } else {
+        Err(invalid())
+    }
+}
+
 /// Select the FIDO2 applet, returning no result beyond successful selection.
 ///
 /// This profile-free form emits only `00 A4 04 00 08 <FIDO2 AID>`; the caller

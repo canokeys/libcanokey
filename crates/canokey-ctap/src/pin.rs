@@ -35,9 +35,9 @@
 
 use crate::cbor::{self, Value};
 use crate::cose::{CoseAlgorithm, CoseKey};
-use crate::{select_then, CtapResponse, PinUvAuthProtocol};
+use crate::{empty_payload, invalid, required, select_then, typed, PinUvAuthProtocol};
 use aes::Aes256;
-use canokey_protocol::{Error, ErrorKind, Operation, OperationOptions, Phase, SecretBytes};
+use canokey_protocol::{Error, ErrorKind, Operation, OperationOptions, SecretBytes};
 use cbc::cipher::block_padding::NoPadding;
 use cbc::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use hkdf::Hkdf;
@@ -72,38 +72,11 @@ const HKDF_INFO_AES: &[u8] = b"CTAP2 AES key";
 type Aes256CbcEnc = cbc::Encryptor<Aes256>;
 type Aes256CbcDec = cbc::Decryptor<Aes256>;
 
-fn invalid() -> Error {
-    Error::new(ErrorKind::InvalidResponse).at(Phase::Parsing)
-}
 fn invalid_argument() -> Error {
     Error::new(ErrorKind::InvalidArgument)
 }
 fn invalid_pin() -> Error {
     Error::new(ErrorKind::InvalidPin)
-}
-fn required(value: Option<&Value>) -> Result<&Value, Error> {
-    value.ok_or_else(invalid)
-}
-
-/// Classify the CTAP status byte, then parse the response payload.
-fn typed<T>(
-    response: CtapResponse,
-    parse: impl FnOnce(&[u8]) -> Result<T, Error>,
-) -> Result<T, Error> {
-    if let Some(error) = response.status().into_error(Phase::Command) {
-        return Err(error);
-    }
-    parse(response.payload())
-}
-
-/// Require an empty response payload, as CTAP2 specifies for setPIN and
-/// changePIN.
-fn empty_payload(bytes: &[u8]) -> Result<(), Error> {
-    if bytes.is_empty() {
-        Ok(())
-    } else {
-        Err(invalid())
-    }
 }
 
 /// A pinUvAuthToken permission bitfield (CTAP2 `permissions` parameter).
@@ -392,7 +365,7 @@ fn protocol_entry(protocol: PinUvAuthProtocol) -> (Value, Value) {
 /// An invalid scalar fails as [`ErrorKind::InvalidArgument`]. A response
 /// missing key 1, with a non-EC2/ECDH/P-256 key, or with a point that is
 /// not a valid P-256 public key fails as [`ErrorKind::InvalidResponse`] in
-/// [`Phase::Parsing`]. A non-success CTAP status is classified in the
+/// [`Phase::Parsing`](canokey_protocol::Phase::Parsing). A non-success CTAP status is classified in the
 /// Command phase.
 pub fn get_key_agreement(
     protocol: PinUvAuthProtocol,
@@ -457,7 +430,7 @@ pub fn get_key_agreement(
 ///
 /// # Errors
 /// A response missing key 3 or with mistyped members fails as
-/// [`ErrorKind::InvalidResponse`] in [`Phase::Parsing`].
+/// [`ErrorKind::InvalidResponse`] in [`Phase::Parsing`](canokey_protocol::Phase::Parsing).
 pub fn get_pin_retries(
     protocol: PinUvAuthProtocol,
     options: OperationOptions,
@@ -654,7 +627,7 @@ fn pin_token_operation(
 /// # Errors
 /// PIN validation and IV rules match [`set_pin`]. A wrong PIN surfaces as
 /// 0x31 PIN_INVALID ([`ErrorKind::InvalidPin`]); a missing or undecryptable
-/// token field fails as [`ErrorKind::InvalidResponse`] in [`Phase::Parsing`].
+/// token field fails as [`ErrorKind::InvalidResponse`] in [`Phase::Parsing`](canokey_protocol::Phase::Parsing).
 pub fn get_pin_token(
     session: &PinSession,
     pin: &[u8],
