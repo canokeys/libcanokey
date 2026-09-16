@@ -299,7 +299,8 @@ fn make_credential_credential_excluded_status_is_classified() {
     assert_eq!(error.kind, ErrorKind::ConditionsNotSatisfied);
     assert_eq!(error.phase, Phase::Command);
     // CTAP-level failures carry the raw CTAP status byte, not an ISO word.
-    assert_eq!(error.status_word.unwrap().raw(), 0x19);
+    assert_eq!(error.application_status, Some(0x19));
+    assert!(error.status_word.is_none());
 }
 
 #[test]
@@ -425,7 +426,7 @@ fn get_assertion_no_credentials_status_is_not_found() {
     let error = op.advance(&[0x2e, 0x90, 0x00]).unwrap_err();
     assert_eq!(error.kind, ErrorKind::NotFound);
     assert_eq!(error.phase, Phase::Command);
-    assert_eq!(error.status_word.unwrap().raw(), 0x2e);
+    assert_eq!(error.application_status, Some(0x2e));
 }
 
 #[test]

@@ -3,10 +3,10 @@
 //! Every successful CTAP exchange returns a response whose first byte is a
 //! CTAP status code. This module types that byte and classifies failures into
 //! [`canokey_protocol`] errors. Note the crate-wide convention: for CTAP-level
-//! failures [`Error::status_word`] carries the raw CTAP status byte (widened
-//! to `u16`), not an ISO 7816 status word.
+//! failures [`Error::application_status`] carries the raw CTAP status byte,
+//! while [`Error::status_word`] is reserved for ISO 7816 status words.
 
-use canokey_protocol::{Error, ErrorKind, Phase, StatusWord};
+use canokey_protocol::{Error, ErrorKind, Phase};
 
 /// One-byte CTAP status from the start of a successful CTAP response.
 ///
@@ -42,7 +42,8 @@ impl CtapStatus {
         CtapErrorCode::from_byte(self.0)
     }
     /// Classify a non-success status into a protocol error, preserving the
-    /// raw CTAP status byte in [`Error::status_word`] (not an ISO 7816 word).
+    /// raw CTAP status byte in [`Error::application_status`]; the ISO 7816
+    /// [`Error::status_word`] remains unset.
     pub(crate) fn into_error(self, phase: Phase) -> Option<Error> {
         if self.is_success() {
             return None;
@@ -73,7 +74,7 @@ impl CtapStatus {
             _ => ErrorKind::UnexpectedStatusWord,
         };
         let mut error = Error::new(kind).at(phase);
-        error.status_word = Some(StatusWord::new(u16::from(self.0)));
+        error.application_status = Some(self.0);
         Some(error)
     }
 }
@@ -359,7 +360,8 @@ mod tests {
             assert_eq!(error.kind, kind, "byte {byte:#04x}");
             assert_eq!(error.phase, Phase::Command);
             // CTAP-level failures carry the raw CTAP status byte here.
-            assert_eq!(error.status_word.map(|sw| sw.raw()), Some(u16::from(byte)));
+            assert_eq!(error.application_status, Some(byte));
+            assert_eq!(error.status_word, None);
         }
     }
 }

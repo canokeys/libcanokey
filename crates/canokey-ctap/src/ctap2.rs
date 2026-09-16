@@ -4,7 +4,7 @@
 //! application and then one wrapped CTAP message (`80 10 00 00`). The explicit
 //! re-SELECT is idempotent for FIDO and does not invalidate pinUvAuthTokens.
 //! A non-success CTAP status byte is classified through the status table in
-//! the Command phase, with the raw byte retained in `Error::status_word`;
+//! the Command phase, with the raw byte retained in `Error::application_status`;
 //! response CBOR is parsed strictly (canonical form, no tags, no duplicate
 //! keys, no trailing bytes) and structural violations fail as
 //! [`ErrorKind::InvalidResponse`] in [`Phase::Parsing`].
@@ -857,7 +857,7 @@ fn option_map(entries: &[(String, bool)]) -> Value {
 ///
 /// # Errors
 /// A non-success CTAP status byte is classified in the Command phase with
-/// the raw byte retained in `Error::status_word`. A response missing
+/// the raw byte retained in `Error::application_status`. A response missing
 /// `versions` or `aaguid`, mistyped members, or malformed CBOR fails as
 /// [`ErrorKind::InvalidResponse`] in [`Phase::Parsing`].
 pub fn get_info(options: OperationOptions) -> Result<Operation<AuthenticatorInfo>, Error> {

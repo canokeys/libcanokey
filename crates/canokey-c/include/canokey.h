@@ -37,7 +37,7 @@ enum { CNK_PHASE_CONSTRUCTION=0, CNK_PHASE_SELECT=1, CNK_PHASE_COMMAND=2,
 enum { CNK_REFERENCE_NONE=0, CNK_REFERENCE_PIN=1, CNK_REFERENCE_PUK=2,
        CNK_REFERENCE_MANAGEMENT_KEY=3, CNK_REFERENCE_ADMIN_PIN=4, CNK_REFERENCE_OATH_ACCESS=5, CNK_REFERENCE_PW1_SIGN=6,
        CNK_REFERENCE_PW1_OTHER=7, CNK_REFERENCE_PW3=8, CNK_REFERENCE_RESET_CODE=9 };
-enum { CNK_ERROR_HAS_SW=1, CNK_ERROR_HAS_RETRIES=2 };
+enum { CNK_ERROR_HAS_SW=1, CNK_ERROR_HAS_RETRIES=2, CNK_ERROR_HAS_APP_STATUS=4 };
 enum { CNK_RESULT_PROFILE=1, CNK_RESULT_UNIT=2, CNK_RESULT_PIN_STATUS=3,
        CNK_RESULT_OBJECT=4, CNK_RESULT_CERTIFICATE=5, CNK_RESULT_MUTATION=6,
        CNK_RESULT_METADATA=7, CNK_RESULT_PUBLIC_KEY=8, CNK_RESULT_SIGNATURE=9,
@@ -59,7 +59,10 @@ enum { CNK_PIN_HAS_VERIFIED=1, CNK_PIN_HAS_REMAINING=2, CNK_PIN_HAS_TOTAL=4 };
 typedef struct {
     uint32_t struct_size,kind,phase,reference,presence_flags;
     uint16_t status_word;
-    uint8_t retries_remaining,reserved;
+    /* retries_remaining: CNK_ERROR_HAS_RETRIES. application_status: applet-level
+     * non-ISO status byte (e.g. the CTAP status byte) when CNK_ERROR_HAS_APP_STATUS
+     * is set; written as zero otherwise. */
+    uint8_t retries_remaining,application_status;
 } cnk_error_v1;
 typedef struct {
     uint32_t struct_size,flags,max_command_bytes,max_response_bytes,

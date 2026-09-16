@@ -4,7 +4,7 @@
 //! Each factory returns an [`Operation`] that sends the explicit SELECT of
 //! the FIDO2 application followed by one wrapped `0x0D` message. A
 //! non-success CTAP status byte is classified in the Command phase with the
-//! raw byte retained in `Error::status_word`; a successful response must have
+//! raw byte retained in `Error::application_status`; a successful response must have
 //! an empty payload (any payload is [`ErrorKind::InvalidResponse`]).
 //!
 //! # Authentication

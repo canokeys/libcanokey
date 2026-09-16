@@ -129,7 +129,7 @@ fn toggle_always_uv_pin_auth_invalid_keeps_raw_byte() {
     let error = op.advance(&[0x33, 0x90, 0x00]).unwrap_err();
     assert_eq!(error.kind, ErrorKind::AuthenticationFailed);
     assert_eq!(error.phase, Phase::Command);
-    assert_eq!(error.status_word.map(|sw| sw.raw()), Some(0x33));
+    assert_eq!(error.application_status, Some(0x33));
 }
 
 #[test]
@@ -225,7 +225,7 @@ fn set_min_pin_length_pin_policy_violation_keeps_raw_byte() {
     let error = op.advance(&[0x37, 0x90, 0x00]).unwrap_err();
     assert_eq!(error.kind, ErrorKind::InvalidPin);
     assert_eq!(error.phase, Phase::Command);
-    assert_eq!(error.status_word.map(|sw| sw.raw()), Some(0x37));
+    assert_eq!(error.application_status, Some(0x37));
 }
 
 // -------------------------------------------------- enable_long_touch_for_reset

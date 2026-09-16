@@ -196,7 +196,8 @@ fn read_chunk_invalid_parameter_keeps_raw_byte() {
     let error = op.advance(&[0x02, 0x90, 0x00]).unwrap_err();
     assert_eq!(error.kind, ErrorKind::UnexpectedStatusWord);
     assert_eq!(error.phase, Phase::Command);
-    assert_eq!(error.status_word.map(|sw| sw.raw()), Some(0x02));
+    assert_eq!(error.application_status, Some(0x02));
+    assert!(error.status_word.is_none());
 }
 
 #[test]
@@ -207,7 +208,8 @@ fn read_chunk_invalid_length_keeps_raw_byte() {
     let error = op.advance(&[0x03, 0x90, 0x00]).unwrap_err();
     assert_eq!(error.kind, ErrorKind::UnexpectedStatusWord);
     assert_eq!(error.phase, Phase::Command);
-    assert_eq!(error.status_word.map(|sw| sw.raw()), Some(0x03));
+    assert_eq!(error.application_status, Some(0x03));
+    assert!(error.status_word.is_none());
 }
 
 #[test]
@@ -433,7 +435,7 @@ fn write_array_pin_auth_invalid_keeps_raw_byte() {
     let error = op.advance(&[0x33, 0x90, 0x00]).unwrap_err();
     assert_eq!(error.kind, ErrorKind::AuthenticationFailed);
     assert_eq!(error.phase, Phase::Command);
-    assert_eq!(error.status_word.map(|sw| sw.raw()), Some(0x33));
+    assert_eq!(error.application_status, Some(0x33));
 }
 
 #[test]
@@ -444,7 +446,7 @@ fn write_array_storage_full_is_limit_exceeded() {
     let error = op.advance(&[0x18, 0x90, 0x00]).unwrap_err();
     assert_eq!(error.kind, ErrorKind::LimitExceeded);
     assert_eq!(error.phase, Phase::Command);
-    assert_eq!(error.status_word.map(|sw| sw.raw()), Some(0x18));
+    assert_eq!(error.application_status, Some(0x18));
 }
 
 #[test]

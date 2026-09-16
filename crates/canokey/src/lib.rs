@@ -7,6 +7,9 @@
 //! directly. No layer here owns a transport, runtime, or mutable global state.
 //! The optional `x509` feature adds owned DER/PEM certificate inspection; `serde`
 //! additionally enables serialization of its results. Neither is enabled by default.
+//! The `clientpin` feature (also not default) enables the ClientPIN-dependent CTAP
+//! modules (`ctap::pin`, `ctap::credmgmt`, `ctap::config`, `ctap::largeblob` and
+//! the hmac-secret salt exchange) and their RustCrypto dependencies.
 //!
 //! # Quick start: offline probe
 //!

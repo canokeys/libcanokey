@@ -136,7 +136,7 @@ fn error() -> CnkError {
         presence_flags: 0,
         status_word: 0,
         retries_remaining: 0,
-        reserved: 0,
+        application_status: 0,
     }
 }
 fn observed(f: impl FnOnce() -> u32) -> (u32, usize) {

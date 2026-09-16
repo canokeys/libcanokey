@@ -61,9 +61,11 @@ int main(void) {
     assert(cnk_operation_result_copy_bytes(op,output,&len)==CNK_OK&&memcmp(output,config,6)==0);
     cnk_operation_free(op);
     p=profile();d.struct_size=sizeof(d);d.kind=CNK_ADMIN_PASS_SLOTS;
+    memcpy(pin,"654321",6);d.pin=pin;d.pin_len=6;
     assert(cnk_admin_new(p,&d,NULL,&op,NULL)==CNK_OK);cnk_profile_free(p);
     assert(cnk_operation_start(op,&step,NULL)==CNK_OK);
     expect(op,select,sizeof(select));feed(op,ok,2);
+    const uint8_t verify2[]={0,0x20,0,0,6,'6','5','4','3','2','1'};expect(op,verify2,sizeof(verify2));feed(op,ok,2);
     const uint8_t slots_read[]={0,0x43,0,0,0};expect(op,slots_read,sizeof(slots_read));
     const uint8_t dump[]={0x02,0x01,0x01,0x03,'a','b','c',0x00,0x90,0};feed(op,dump,sizeof(dump));
     assert(cnk_operation_result_kind(op,&step)==CNK_OK&&step==CNK_RESULT_ADMIN);

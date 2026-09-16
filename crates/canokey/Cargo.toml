@@ -24,3 +24,4 @@ x509-info = { workspace = true, optional = true }
 [features]
 x509 = ["dep:x509-info"]
 serde = ["x509", "x509-info/serde"]
+clientpin = ["canokey-ctap/clientpin"]

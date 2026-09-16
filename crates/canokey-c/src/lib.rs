@@ -53,14 +53,16 @@ pub struct CnkError {
     pub phase: u32,
     /// CNK_REFERENCE_* credential reference; never credential bytes.
     pub reference: u32,
-    /// CNK_ERROR_HAS_SW and CNK_ERROR_HAS_RETRIES bitmap for optional fields.
+    /// CNK_ERROR_HAS_SW, CNK_ERROR_HAS_RETRIES and CNK_ERROR_HAS_APP_STATUS
+    /// bitmap for optional fields.
     pub presence_flags: u32,
     /// Original SW1/SW2 when CNK_ERROR_HAS_SW is set.
     pub status_word: u16,
     /// Authentication retries when CNK_ERROR_HAS_RETRIES is set.
     pub retries_remaining: u8,
-    /// Reserved output byte, written as zero.
-    pub reserved: u8,
+    /// Applet-level non-ISO status byte (for example the CTAP status byte)
+    /// when CNK_ERROR_HAS_APP_STATUS is set; written as zero otherwise.
+    pub application_status: u8,
 }
 /// Caller-owned `cnk_operation_options_v1`; constructors copy these limits.
 /// NULL options selects Rust defaults. Zero explicit budgets are invalid.
@@ -193,7 +195,7 @@ unsafe fn clear_error(p: *mut CnkError) -> Result<(), u32> {
                 presence_flags: 0,
                 status_word: 0,
                 retries_remaining: 0,
-                reserved: 0,
+                application_status: 0,
             },
         );
     }
@@ -247,6 +249,10 @@ unsafe fn failure(error: Error, out: *mut CnkError) -> u32 {
         if let Some(n) = error.retries_remaining {
             (*out).presence_flags |= 2;
             (*out).retries_remaining = n;
+        }
+        if let Some(byte) = error.application_status {
+            (*out).presence_flags |= 4;
+            (*out).application_status = byte;
         }
     }
     match error.kind {

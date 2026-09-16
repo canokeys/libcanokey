@@ -4,7 +4,7 @@
 //! Each factory returns an [`Operation`] that sends the explicit SELECT of
 //! the FIDO2 application followed by one or more wrapped `0x0A` messages.
 //! A non-success CTAP status byte is classified in the Command phase with
-//! the raw byte retained in `Error::status_word`, with one exception: a
+//! the raw byte retained in `Error::application_status`, with one exception: a
 //! 0x2E NO_CREDENTIALS status on an enumeration Begin subcommand means "no
 //! credentials/RPs at all" and yields an empty result vector rather than an
 //! error.

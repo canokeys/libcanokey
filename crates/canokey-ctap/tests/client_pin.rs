@@ -522,10 +522,7 @@ fn ctap_status_errors_are_classified_with_raw_byte() {
         let error = op.advance(&[status, 0x90, 0x00]).unwrap_err();
         assert_eq!(error.kind, kind, "status {status:#04x}");
         assert_eq!(error.phase, Phase::Command);
-        assert_eq!(
-            error.status_word.map(|sw| sw.raw()),
-            Some(u16::from(status))
-        );
+        assert_eq!(error.application_status, Some(status));
     }
 }
 

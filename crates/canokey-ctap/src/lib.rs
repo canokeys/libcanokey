@@ -15,8 +15,10 @@
 //! authenticators speak, [`cose`] parses and encodes COSE public keys, and
 //! [`authdata`] parses `authenticatorData`. Note the convention used
 //! throughout: for CTAP-level failures
-//! [`Error::status_word`](canokey_protocol::Error::status_word) carries the
-//! raw CTAP status byte, not an ISO 7816 status word.
+//! [`Error::application_status`](canokey_protocol::Error::application_status)
+//! carries the raw CTAP status byte, while
+//! [`Error::status_word`](canokey_protocol::Error::status_word) is reserved
+//! for ISO 7816 status words.
 //!
 //! # ClientPIN
 //!

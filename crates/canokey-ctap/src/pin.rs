@@ -6,7 +6,7 @@
 //! CBC PIN encryption, pinUvAuthParam HMACs, and PIN retry reporting. Every
 //! operation sends the explicit SELECT of the FIDO2 application followed by
 //! one wrapped `0x06` message; a non-success CTAP status byte is classified
-//! in the Command phase with the raw byte retained in `Error::status_word`
+//! in the Command phase with the raw byte retained in `Error::application_status`
 //! (for example 0x31 PIN_INVALID maps to [`ErrorKind::InvalidPin`]).
 //!
 //! # Randomness
