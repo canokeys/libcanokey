@@ -589,15 +589,30 @@ pub fn get_pin_status(
 /// Construct an empty VERIFY status query for an already selected PIV applet.
 /// This profile-free form preserves the caller's selected transaction and does
 /// not emit SELECT or infer firmware capabilities.
-pub fn get_pin_status_selected(
-    options: OperationOptions,
-) -> Result<Operation<PinStatus>, Error> {
+pub fn get_pin_status_selected(options: OperationOptions) -> Result<Operation<PinStatus>, Error> {
     discovery::single(command::pin_status(), Phase::Command, options, |r| {
-        if !r.data.is_empty() { return Err(Error::new(ErrorKind::InvalidResponse)); }
+        if !r.data.is_empty() {
+            return Err(Error::new(ErrorKind::InvalidResponse));
+        }
         match r.status.raw() {
-            0x9000 => Ok(PinStatus { verified: Some(true), retries_remaining: None, retries_total: None, blocked: false }),
-            0x6983 => Ok(PinStatus { verified: Some(false), retries_remaining: Some(0), retries_total: None, blocked: true }),
-            sw if sw & 0xfff0 == 0x63c0 => Ok(PinStatus { verified: Some(false), retries_remaining: Some((sw & 15) as u8), retries_total: None, blocked: false }),
+            0x9000 => Ok(PinStatus {
+                verified: Some(true),
+                retries_remaining: None,
+                retries_total: None,
+                blocked: false,
+            }),
+            0x6983 => Ok(PinStatus {
+                verified: Some(false),
+                retries_remaining: Some(0),
+                retries_total: None,
+                blocked: true,
+            }),
+            sw if sw & 0xfff0 == 0x63c0 => Ok(PinStatus {
+                verified: Some(false),
+                retries_remaining: Some((sw & 15) as u8),
+                retries_total: None,
+                blocked: false,
+            }),
             _ => Err(auth_error(r.status, SecretReference::Pin)),
         }
     })
