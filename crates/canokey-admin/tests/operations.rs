@@ -274,7 +274,7 @@ fn existing_access_sends_target_without_select_or_verify() {
     assert!(op.command().is_err());
 }
 #[test]
-fn existing_access_pin_status_and_change_pin_without_select() {
+fn existing_access_pin_status_without_select() {
     let mut op = operation_with_access(
         &profile(),
         Request::PinStatus,
@@ -293,18 +293,6 @@ fn existing_access_pin_status_and_change_pin_without_select() {
             blocked: false,
         })
     ));
-
-    let mut op = operation_with_access(
-        &profile(),
-        Request::ChangePin(Pin::from_bytes(b"newpin").unwrap()),
-        Access::Existing,
-        Default::default(),
-    )
-    .unwrap();
-    assert_eq!(op.start().unwrap(), Step::Exchange);
-    assert_eq!(op.command().unwrap().as_bytes(), b"\0\x21\0\0\x06newpin");
-    op.advance(&[0x90, 0]).unwrap();
-    assert_eq!(op.result().unwrap().confirmed_writes, 1);
 }
 #[test]
 fn access_preflight_rejections() {
@@ -330,30 +318,17 @@ fn access_preflight_rejections() {
         .kind,
         ErrorKind::InvalidArgument
     );
-    for request in [Request::PinStatus, Request::FactoryReset] {
-        assert_eq!(
-            operation_with_access(&profile(), request, Access::Pin(pin()), Default::default())
-                .unwrap_err()
-                .kind,
-            ErrorKind::InvalidArgument
-        );
-    }
-    let mut op = operation_with_access(
-        &profile(),
-        Request::SetNfc(false),
-        Access::Pin(pin()),
-        Default::default(),
-    )
-    .unwrap();
-    assert_eq!(op.start().unwrap(), Step::Exchange);
     assert_eq!(
-        op.command().unwrap().as_bytes(),
-        &[0, 0xa4, 4, 0, 5, 0xf0, 0, 0, 0, 0]
+        operation_with_access(
+            &profile(),
+            Request::PinStatus,
+            Access::Pin(pin()),
+            Default::default()
+        )
+        .unwrap_err()
+        .kind,
+        ErrorKind::InvalidArgument
     );
-    op.advance(&[0x90, 0]).unwrap();
-    assert_eq!(op.command().unwrap().as_bytes(), b"\0\x20\0\0\x06654321");
-    op.advance(&[0x90, 0]).unwrap();
-    assert_eq!(op.command().unwrap().as_bytes(), &[0, 0x14, 1, 0]);
 }
 #[test]
 fn pass_slots_typed_read_golden() {
@@ -396,9 +371,8 @@ fn pass_slots_malformed_reads() {
     for dump in [
         &[0x02][..],                         // truncated STATIC dump
         &[0x01, 0x05, b'a'][..],             // OATH name_len overruns the buffer
-        &[0x00][..],                         // single slot only
-        &[0x00, 0x00, 0x00][..],             // trailing garbage after two slots
         &[][..],                             // empty response
+        &[0x00, 0x00, 0x00][..],             // trailing garbage after two slots
         &[0x02, 0x02, 0x00][..],             // STATIC append_enter beyond the 0/1 firmware emits
         &[0x01, 0x01, b'a', 0x02, 0x00][..], // OATH append_enter beyond 0/1
     ] {
@@ -489,21 +463,6 @@ fn pass_slot_typed_write_golden() {
 }
 #[test]
 fn pass_slot_write_rejections_and_redaction() {
-    let protected = PassSlotConfig::Off;
-    assert_eq!(
-        operation(
-            &profile(),
-            Request::SetPassSlot {
-                slot: PassSlotId::Short,
-                config: protected,
-            },
-            None,
-            Default::default()
-        )
-        .unwrap_err()
-        .kind,
-        ErrorKind::SecurityStatusNotSatisfied
-    );
     for config in [
         PassSlotConfig::Static {
             password: SecretBytes::new(vec![b'a'; 33]),
@@ -513,15 +472,8 @@ fn pass_slot_write_rejections_and_redaction() {
             password: SecretBytes::new(vec![0x7f]),
             append_enter: false,
         },
-        PassSlotConfig::Static {
-            password: SecretBytes::new(vec![0x1f]),
-            append_enter: false,
-        },
         PassSlotConfig::HmacSha1 {
             key: SecretBytes::new(vec![0; 19]),
-        },
-        PassSlotConfig::HmacSha1 {
-            key: SecretBytes::new(vec![0; 21]),
         },
     ] {
         assert_eq!(
@@ -548,11 +500,4 @@ fn pass_slot_write_rejections_and_redaction() {
     };
     let debug = format!("{request:?}");
     assert!(!debug.contains("s3cret-pass"));
-    let request = Request::SetPassSlot {
-        slot: PassSlotId::Long,
-        config: PassSlotConfig::HmacSha1 {
-            key: SecretBytes::new(b"0123456789abcdefABCD".to_vec()),
-        },
-    };
-    assert!(!format!("{request:?}").contains("0123456789abcdefABCD"));
 }

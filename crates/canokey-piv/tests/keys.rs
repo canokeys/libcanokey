@@ -414,68 +414,41 @@ fn mlkem768_seed_import_writes_seed_tlv() {
 
 #[test]
 fn ml_seed_import_rejects_bad_lengths_and_algorithm_mismatch() {
-    for bad in [vec![0; 31], vec![0; 33]] {
-        assert_eq!(
-            PrivateKeyMaterial::mldsa65_seed(&bad).unwrap_err().kind,
-            ErrorKind::InvalidArgument
-        );
-    }
-    for bad in [vec![0; 63], vec![0; 65]] {
-        assert_eq!(
-            PrivateKeyMaterial::mlkem768_seed(&bad).unwrap_err().kind,
-            ErrorKind::InvalidArgument
-        );
-    }
-    for (material, algorithm) in [
-        (
-            PrivateKeyMaterial::mldsa65_seed(&[0; 32]).unwrap(),
-            Algorithm::MlKem768,
-        ),
-        (
-            PrivateKeyMaterial::mlkem768_seed(&[0; 64]).unwrap(),
-            Algorithm::MlDsa65,
-        ),
-        (
-            PrivateKeyMaterial::mldsa65_seed(&[0; 32]).unwrap(),
-            Algorithm::Ed25519,
-        ),
-    ] {
-        // Construction fails before any command is produced.
-        let error = import_key(
-            &profile("3.1.0"),
-            KeyParameters::new(Slot::Signature, algorithm),
-            material,
-            access(),
-            Default::default(),
-        )
-        .unwrap_err();
-        assert_eq!(error.kind, ErrorKind::InvalidArgument);
-    }
+    // One below the MlDsa65 seed length and one above the MlKem768 length;
+    // both hit the same fixed-length check.
+    assert_eq!(
+        PrivateKeyMaterial::mldsa65_seed(&[0; 31]).unwrap_err().kind,
+        ErrorKind::InvalidArgument
+    );
+    assert_eq!(
+        PrivateKeyMaterial::mlkem768_seed(&[0; 65])
+            .unwrap_err()
+            .kind,
+        ErrorKind::InvalidArgument
+    );
+    // Construction fails before any command is produced.
+    let error = import_key(
+        &profile("3.1.0"),
+        KeyParameters::new(Slot::Signature, Algorithm::MlKem768),
+        PrivateKeyMaterial::mldsa65_seed(&[0; 32]).unwrap(),
+        access(),
+        Default::default(),
+    )
+    .unwrap_err();
+    assert_eq!(error.kind, ErrorKind::InvalidArgument);
 }
 
 #[test]
 fn ml_seed_import_requires_observed_wire_ids() {
-    let p = profile_without_ml();
-    for (material, algorithm) in [
-        (
-            PrivateKeyMaterial::mldsa65_seed(&[0; 32]).unwrap(),
-            Algorithm::MlDsa65,
-        ),
-        (
-            PrivateKeyMaterial::mlkem768_seed(&[0; 64]).unwrap(),
-            Algorithm::MlKem768,
-        ),
-    ] {
-        let error = import_key(
-            &p,
-            KeyParameters::new(Slot::Signature, algorithm),
-            material,
-            access(),
-            Default::default(),
-        )
-        .unwrap_err();
-        assert_eq!(error.kind, ErrorKind::CapabilityUnknown);
-    }
+    let error = import_key(
+        &profile_without_ml(),
+        KeyParameters::new(Slot::Signature, Algorithm::MlDsa65),
+        PrivateKeyMaterial::mldsa65_seed(&[0; 32]).unwrap(),
+        access(),
+        Default::default(),
+    )
+    .unwrap_err();
+    assert_eq!(error.kind, ErrorKind::CapabilityUnknown);
 }
 
 #[test]

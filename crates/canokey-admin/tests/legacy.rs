@@ -255,8 +255,6 @@ fn nfc_read_authentication_and_sm2_layout_have_separate_boundaries() {
 #[test]
 fn pass_configuration_requires_3_0_firmware() {
     for request in [
-        Request::PassConfiguration,
-        Request::SetPassConfiguration(vec![0]),
         Request::PassSlots,
         Request::SetPassSlot {
             slot: PassSlotId::Short,

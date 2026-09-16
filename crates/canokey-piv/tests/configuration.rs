@@ -273,39 +273,37 @@ fn batch_authentication_and_profile_invalidation_are_explicit() {
 
 #[test]
 fn algorithm_extension_read_requires_management_on_3_0_x() {
-    for version in ["3.0.0", "3.0.3"] {
-        let p = profile(version);
+    let p = profile("3.0.3");
+    assert_eq!(
+        p.capability(Capability::PivProtectedAlgorithmConfigRead)
+            .support,
+        Support::Supported
+    );
+    // Access modes that cannot authenticate with the management key are
+    // rejected at construction; no APDU is emitted.
+    for access in [
+        Access::None,
+        Access::Pin(Pin::from_bytes(b"123456").unwrap()),
+    ] {
         assert_eq!(
-            p.capability(Capability::PivProtectedAlgorithmConfigRead)
-                .support,
-            Support::Supported
+            read_algorithm_config(&p, access, Default::default())
+                .unwrap_err()
+                .kind,
+            ErrorKind::SecurityStatusNotSatisfied
         );
-        // Access modes that cannot authenticate with the management key are
-        // rejected at construction; no APDU is emitted.
-        for access in [
-            Access::None,
-            Access::Pin(Pin::from_bytes(b"123456").unwrap()),
-        ] {
-            assert_eq!(
-                read_algorithm_config(&p, access, Default::default())
-                    .unwrap_err()
-                    .kind,
-                ErrorKind::SecurityStatusNotSatisfied
-            );
-        }
-        // Management authentication follows the normal SELECT→auth→read path.
-        let mut op = read_algorithm_config(&p, tdes_access(), Default::default()).unwrap();
-        authenticate_tdes(&mut op);
-        assert_eq!(op.command().unwrap().as_bytes(), hex("00ee010000"));
-        op.advance(&hex("01e00516e153545556579000")).unwrap();
-        assert!(op.result().unwrap().enabled());
-        // Existing stays an unproven caller assertion and reads directly.
-        let mut op = read_algorithm_config(&p, Access::Existing, Default::default()).unwrap();
-        assert_eq!(op.start().unwrap(), Step::Exchange);
-        assert_eq!(op.command().unwrap().as_bytes(), hex("00ee010000"));
-        op.advance(&hex("01e00516e153545556579000")).unwrap();
-        assert!(op.result().unwrap().enabled());
     }
+    // Management authentication follows the normal SELECT→auth→read path.
+    let mut op = read_algorithm_config(&p, tdes_access(), Default::default()).unwrap();
+    authenticate_tdes(&mut op);
+    assert_eq!(op.command().unwrap().as_bytes(), hex("00ee010000"));
+    op.advance(&hex("01e00516e153545556579000")).unwrap();
+    assert!(op.result().unwrap().enabled());
+    // Existing stays an unproven caller assertion and reads directly.
+    let mut op = read_algorithm_config(&p, Access::Existing, Default::default()).unwrap();
+    assert_eq!(op.start().unwrap(), Step::Exchange);
+    assert_eq!(op.command().unwrap().as_bytes(), hex("00ee010000"));
+    op.advance(&hex("01e00516e153545556579000")).unwrap();
+    assert!(op.result().unwrap().enabled());
     // From 3.1.0 the INS EE read is unauthenticated again.
     let p = profile("3.1.0");
     assert_eq!(

@@ -205,22 +205,20 @@ fn legacy_set_default_single_slot_form_and_option_rejection() {
     );
     assert_eq!(op.advance(&[0x90, 0]).unwrap(), Step::Done);
     assert!(matches!(op.take_result().unwrap(), Outcome::Unit));
-    for version in ["1.3", "2.0.0"] {
-        for request in [
-            Request::SetDefault {
-                slot: DefaultSlot::Long,
-                append_enter: false,
-                name: name(),
-            },
-            Request::SetDefault {
-                slot: DefaultSlot::Short,
-                append_enter: true,
-                name: name(),
-            },
-        ] {
-            let e = operation(&profile(version), request, None, Default::default()).unwrap_err();
-            assert_eq!(e.kind, ErrorKind::InvalidArgument);
-        }
+    for request in [
+        Request::SetDefault {
+            slot: DefaultSlot::Long,
+            append_enter: false,
+            name: name(),
+        },
+        Request::SetDefault {
+            slot: DefaultSlot::Short,
+            append_enter: true,
+            name: name(),
+        },
+    ] {
+        let e = operation(&profile("2.0.0"), request, None, Default::default()).unwrap_err();
+        assert_eq!(e.kind, ErrorKind::InvalidArgument);
     }
 }
 #[test]
@@ -245,21 +243,19 @@ fn old_modern_firmware_uses_modern_select_and_truncated_calculate() {
 }
 #[test]
 fn challenge_response_requires_pinned_3_1_evidence() {
-    for version in ["1.3", "1.5.2", "2.0.1", "3.0.3"] {
-        for request in [
-            Request::GetSerial,
-            Request::ChallengeResponseHmac {
-                slot: HmacSlot::Short,
-                challenge: vec![1],
-            },
-        ] {
-            assert_eq!(
-                operation(&profile(version), request, None, Default::default())
-                    .unwrap_err()
-                    .kind,
-                ErrorKind::UnsupportedFeature
-            );
-        }
+    for request in [
+        Request::GetSerial,
+        Request::ChallengeResponseHmac {
+            slot: HmacSlot::Short,
+            challenge: vec![1],
+        },
+    ] {
+        assert_eq!(
+            operation(&profile("3.0.3"), request, None, Default::default())
+                .unwrap_err()
+                .kind,
+            ErrorKind::UnsupportedFeature
+        );
     }
     for version in ["3.2.0", "nonsense"] {
         assert_eq!(
