@@ -474,7 +474,9 @@ pub enum Request {
     },
     /// Clear the stored keyboard HID map.
     ClearKeyboardKeymap,
-    /// Read raw PASS applet configuration.
+    /// Read raw PASS applet configuration. The INS 43 read sits behind the
+    /// Admin-PIN gate on every firmware that implements it, so it requires
+    /// PIN authentication like the typed slot read and both PASS writes.
     PassConfiguration,
     /// Replace raw PASS applet configuration bytes.
     SetPassConfiguration(Vec<u8>),

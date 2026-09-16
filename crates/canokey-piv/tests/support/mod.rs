@@ -29,6 +29,32 @@ pub fn access() -> Access {
             .unwrap(),
     ))
 }
+#[allow(dead_code)]
+pub fn tdes_access() -> Access {
+    Access::Management(ManagementAuthentication::external(
+        ManagementKey::from_bytes(
+            ManagementKeyAlgorithm::Tdes,
+            &hex("0123456789abcdef23456789abcdef01456789abcdef0123"),
+        )
+        .unwrap(),
+    ))
+}
+/// SELECT (with legacy explicit Le) and Tdes External management authentication
+/// using the known-answer vector cross-checked in tests/management.rs.
+#[allow(dead_code)]
+pub fn authenticate_tdes<T>(op: &mut Operation<T>) {
+    selected_with_le(op, true);
+    assert_eq!(
+        op.command().unwrap().as_bytes(),
+        hex("0087039b047c02810000")
+    );
+    op.advance(&hex("7c0a8108fedcba98765432109000")).unwrap();
+    assert_eq!(
+        op.command().unwrap().as_bytes(),
+        hex("0087039b0c7c0a82080737f6c53750d4a400")
+    );
+    op.advance(&[0x90, 0]).unwrap();
+}
 pub fn selected<T>(op: &mut Operation<T>) {
     selected_with_le(op, false);
 }

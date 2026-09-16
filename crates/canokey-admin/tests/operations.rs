@@ -357,7 +357,7 @@ fn access_preflight_rejections() {
 }
 #[test]
 fn pass_slots_typed_read_golden() {
-    let mut op = begin(Request::PassSlots, false);
+    let mut op = begin(Request::PassSlots, true);
     assert_eq!(op.command().unwrap().as_bytes(), &[0, 0x43, 0, 0, 0]);
     // short = STATIC with enter; long = OATH name "abc" without enter.
     op.advance(&[0x02, 0x01, 0x01, 0x03, b'a', b'b', b'c', 0x00, 0x90, 0])
@@ -375,7 +375,7 @@ fn pass_slots_typed_read_golden() {
     );
 
     // Off + HmacSha1.
-    let mut op = begin(Request::PassSlots, false);
+    let mut op = begin(Request::PassSlots, true);
     op.advance(&[0x00, 0x03, 0x90, 0]).unwrap();
     let Value::PassSlots(slots) = &op.result().unwrap().value else {
         panic!()
@@ -383,7 +383,7 @@ fn pass_slots_typed_read_golden() {
     assert_eq!(slots.short, PassSlotState::Off);
     assert_eq!(slots.long, PassSlotState::HmacSha1);
     // Unknown type byte remains observable and parsing continues.
-    let mut op = begin(Request::PassSlots, false);
+    let mut op = begin(Request::PassSlots, true);
     op.advance(&[0x07, 0x00, 0x90, 0]).unwrap();
     let Value::PassSlots(slots) = &op.result().unwrap().value else {
         panic!()
@@ -400,7 +400,7 @@ fn pass_slots_malformed_reads() {
         &[0x00, 0x00, 0x00][..], // trailing garbage after two slots
         &[][..],                 // empty response
     ] {
-        let mut op = begin(Request::PassSlots, false);
+        let mut op = begin(Request::PassSlots, true);
         let mut response = dump.to_vec();
         response.extend_from_slice(&[0x90, 0]);
         assert_eq!(
@@ -409,6 +409,40 @@ fn pass_slots_malformed_reads() {
             "dump {dump:?}"
         );
     }
+}
+#[test]
+fn pass_reads_require_pin_on_all_firmware() {
+    // INS 43/44 have sat behind the firmware PIN gate since their introduction,
+    // so bare reads are rejected at construction without emitting a command.
+    for request in [Request::PassSlots, Request::PassConfiguration] {
+        assert_eq!(
+            operation(&profile(), request, None, Default::default())
+                .unwrap_err()
+                .kind,
+            ErrorKind::SecurityStatusNotSatisfied
+        );
+    }
+    // The authenticated typed read still follows the normal transcript.
+    let mut op = begin(Request::PassSlots, true);
+    assert_eq!(op.command().unwrap().as_bytes(), &[0, 0x43, 0, 0, 0]);
+    op.advance(&[0x00, 0x03, 0x90, 0]).unwrap();
+    let Value::PassSlots(slots) = &op.result().unwrap().value else {
+        panic!()
+    };
+    assert_eq!(slots.short, PassSlotState::Off);
+    assert_eq!(slots.long, PassSlotState::HmacSha1);
+    // An already verified Admin transaction may read without resending VERIFY.
+    let mut op = operation_with_access(
+        &profile(),
+        Request::PassConfiguration,
+        Access::Existing,
+        Default::default(),
+    )
+    .unwrap();
+    assert_eq!(op.start().unwrap(), Step::Exchange);
+    assert_eq!(op.command().unwrap().as_bytes(), &[0, 0x43, 0, 0, 0]);
+    op.advance(&[0x00, 0x00, 0x90, 0]).unwrap();
+    assert!(matches!(op.result().unwrap().value, Value::Bytes(_)));
 }
 #[test]
 fn pass_slot_typed_write_golden() {

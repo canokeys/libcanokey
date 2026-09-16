@@ -203,6 +203,12 @@ pub enum Capability {
     RetryReset,
     /// Replacement of the complete algorithm configuration.
     AlgorithmConfigWrite,
+    /// PIV INS EE algorithm-extension read (P1 01) requires management-key
+    /// authentication. At 3.0.0 (canokey-core 7cb33508) `piv_algorithm_extension`
+    /// gates both the read and the write behind `in_admin_status`; the pinned
+    /// 3.1.0 evidence (9e77287) gates only the write, leaving the read
+    /// unauthenticated.
+    PivProtectedAlgorithmConfigRead,
     /// SM2 key agreement with separate peer static and ephemeral points.
     Sm2Agreement,
     /// On-device PIV attestation certificate generation.
@@ -571,6 +577,9 @@ impl DeviceProfile {
             }
             Capability::AdminPublicNfcStatus => return self.firmware_range((3, 0, 1), (3, 1, 0)),
             Capability::AdminLegacySm2 => return self.firmware_range((3, 0, 0), (3, 0, 3)),
+            Capability::PivProtectedAlgorithmConfigRead => {
+                return self.firmware_range((3, 0, 0), (3, 0, 3))
+            }
             Capability::AdminPublicConfiguration | Capability::AdminExtendedConfiguration => {
                 return self.firmware_range((3, 1, 0), (3, 1, 0))
             }

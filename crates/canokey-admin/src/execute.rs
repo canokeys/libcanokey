@@ -50,7 +50,9 @@ fn sm2_valid(s: Sm2Configuration) -> Result<(), Error> {
 ///
 /// Baseline commands cover audited 1.3–3.1.0; individual requests and layouts
 /// have independent capability gates. Old configuration/flash reads require PIN;
-/// NFC reads require PIN on 3.0.0. Legacy SM2 identifier bytes stay uninterpreted.
+/// NFC reads require PIN on 3.0.0. PASS configuration/slot reads (INS 43)
+/// require PIN on every firmware that implements them: the firmware PIN gate
+/// predates the commands themselves. Legacy SM2 identifier bytes stay uninterpreted.
 /// SELECT
 /// occurs once; `Some(pin)` causes explicit VERIFY before the request. Protected
 /// requests require it. PinStatus and FactoryReset reject a PIN to prevent hidden
@@ -91,7 +93,11 @@ pub fn operation(
 /// 6982. Under `Existing`, PinStatus and ChangePin send only their own VERIFY
 /// or CHANGE PIN command; `Request::VerifyPin` has no PIN of its own and is
 /// rejected with `InvalidArgument`. PinStatus and FactoryReset reject
-/// [`Access::Pin`] to prevent hidden credential attempts.
+/// [`Access::Pin`] to prevent hidden credential attempts. PASS
+/// configuration/slot reads and writes (INS 43/44) sit behind the firmware
+/// Admin-PIN gate on every firmware that implements them, so under
+/// [`Access::None`] they are rejected with `SecurityStatusNotSatisfied`
+/// before any I/O, like other protected requests.
 ///
 /// # Errors
 /// Returns capability, invalid-input, missing-authentication or host-budget errors
@@ -140,11 +146,17 @@ pub fn operation_with_access(
         }
         _ => {}
     }
-    let protected_read = matches!(request, Request::Configuration | Request::FlashUsage)
-        && profile
-            .capability(Capability::AdminPublicConfiguration)
-            .support
-            == Support::Unsupported
+    // PASS configuration reads (INS 43) are unconditionally protected: the
+    // firmware `pin.is_validated` gate has covered INS 43/44 since their
+    // introduction (2.0.1 admin.c predates the commands entirely; every later
+    // audited source dispatches them only behind the gate), so no capability
+    // gate is needed and a bare read would fail on-card with 6982.
+    let protected_read = matches!(request, Request::PassSlots | Request::PassConfiguration)
+        || matches!(request, Request::Configuration | Request::FlashUsage)
+            && profile
+                .capability(Capability::AdminPublicConfiguration)
+                .support
+                == Support::Unsupported
         || matches!(request, Request::NfcStatus)
             && profile.capability(Capability::AdminPublicNfcStatus).support == Support::Unsupported;
     let protected = protected_read
