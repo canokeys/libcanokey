@@ -190,6 +190,12 @@ impl fmt::Debug for PinSession {
 }
 
 /// A decrypted pinUvAuthToken. Redacted in Debug and zeroized on drop.
+///
+/// Tokens are ceremony-scoped: per CTAP 2.1 the authenticator clears all
+/// permissions except largeBlobWrite after the token is used for a
+/// makeCredential or getAssertion, so obtain a fresh token for each ceremony
+/// instead of caching one. Tokens also expire on a firmware timer and on
+/// power cycles.
 pub struct PinToken(SecretBytes);
 impl PinToken {
     /// Borrow the decrypted token bytes. Avoid logging or unmanaged copies.
