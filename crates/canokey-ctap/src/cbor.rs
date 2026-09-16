@@ -364,7 +364,10 @@ fn encode_into(value: &Value, out: &mut Vec<u8>, depth: usize) -> Result<(), Err
                 encoded.push((key_bytes, value));
             }
             // Canonical CBOR map order: shorter encoded keys first, then
-            // bytewise lexicographic (RFC 8949 section 4.2.1).
+            // bytewise lexicographic (RFC 8949 section 4.2.3, the ordering
+            // CTAP2 canonical CBOR requires). Section 4.2.1's plain
+            // lexicographic order would produce different encodings and
+            // break pinUvAuthParam HMACs, which cover these exact bytes.
             encoded.sort_by(|a, b| a.0.len().cmp(&b.0.len()).then_with(|| a.0.cmp(&b.0)));
             head(out, 5, encoded.len() as u64);
             for (key, value) in encoded {

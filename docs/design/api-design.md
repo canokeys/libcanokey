@@ -393,20 +393,26 @@ profile-free: no NDEF behavior is known to vary across firmware versions, so no
 01) stores one message in a Type 4 Tag style data file: bytes [0..2) hold the
 big-endian message length (NLEN), followed by NLEN message bytes. Operations
 select the applet, then select files by ID: the 15-byte capability container
-(CC, file 0xE103) and the NDEF data file (file 0x0001). Reads and writes use
+(CC, file 0xE103) and the NDEF data file selected by the ID the CC advertises
+(the Type 4 Tag CC declares the file). Reads and writes use
 explicit-offset READ/UPDATE BINARY in chunks of at most 240 bytes, negotiated
 down to the caller's exchange budgets, so no APDU chaining or extended lengths
 are required. `ndef::MAX_MESSAGE_LENGTH` is the firmware hard maximum of 1022
 bytes; `read_message` rejects an NLEN above the CC-declared maximum before any
 allocation or message read.
 
-The CC parses into `NdefCapability`: the maximum storable message length (CC
-file size minus two, clamped to 1022) and a read-only flag taken from the CC
-write-access byte. `write_message` copies the message at construction, writes a
-zero NLEN first, then the message chunks, then the real NLEN: an interrupted
-write leaves the file with NLEN zero instead of a stale length pointing at a
-partially updated message. The CC is not read on writes; a read-only file is
-reported by the device as 6982, mapped to SecurityStatusNotSatisfied. This
+The CC parses into `NdefCapability`: the advertised NDEF file ID, the maximum
+storable message length (CC file size minus two, clamped to 1022) and a
+read-only flag taken from the CC write-access byte. `write_message` copies the
+message at construction (into a zeroizing buffer, like the read path), reads
+the CC before touching the data file, and fails before any UPDATE when the CC
+marks the file read-only (SecurityStatusNotSatisfied, the status a firmware
+write would produce) or advertises a maximum below the message length
+(LimitExceeded). It then writes a zero NLEN first, then the message chunks,
+then the real NLEN: an interrupted write leaves the file with NLEN zero
+instead of a stale length pointing at a partially updated message. A device
+that still rejects the UPDATE with 6982 maps to SecurityStatusNotSatisfied.
+This
 mutates device state, and a mid-write I/O failure may leave the message
 cleared; neither is replayed automatically.
 
@@ -450,7 +456,8 @@ fails construction with InvalidArgument before any I/O.
 
 The typed CTAP2 layer lives in `ctap::ctap2`, `ctap::status`, `ctap::cbor`,
 `ctap::cose` and `ctap::authdata`, with ClientPin and credential management
-behind the default `clientpin` feature. `ctap2` provides the command-level
+behind the `clientpin` feature (a default feature of the canokey-ctap crate;
+opt-in as `canokey/clientpin` on the facade). `ctap2` provides the command-level
 operations `get_info`, `make_credential`, `get_assertion`,
 `get_next_assertion`, `reset` and `selection`. Every command-level operation
 sends the explicit SELECT of the FIDO2 application before its wrapped CTAP
@@ -503,7 +510,8 @@ with the workspace certificate-inspection rule. What remains host-side is
 WebAuthn ceremony logic: clientDataJSON construction, origin and rpId
 policy, attestation trust decisions and assertion signature verification.
 
-With the default `clientpin` feature, `ctap::pin` implements ClientPIN
+With the `clientpin` feature (default on canokey-ctap, opt-in via
+`canokey/clientpin` on the facade), `ctap::pin` implements ClientPIN
 protocols 1 and 2: `get_key_agreement` takes a caller-supplied 32-byte
 ephemeral P-256 scalar and validates the authenticator's peer key as a P-256
 ECDH-ES+HKDF-256 COSE key; `get_pin_retries`; `set_pin`/`change_pin` with
