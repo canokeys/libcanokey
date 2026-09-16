@@ -8,6 +8,7 @@ members = [
     "crates/canokey-key",
     "crates/canokey-openpgp",
     "crates/canokey-oath",
+    "crates/canokey-ndef",
     "crates/canokey",
     "crates/canokey-c",
 ]
@@ -27,6 +28,7 @@ canokey-protocol = { path = "crates/canokey-protocol" }
 canokey-compat = { path = "crates/canokey-compat" }
 canokey-admin = { path = "crates/canokey-admin" }
 canokey-oath = { path = "crates/canokey-oath" }
+canokey-ndef = { path = "crates/canokey-ndef" }
 canokey-key = { path = "crates/canokey-key" }
 canokey-openpgp = { path = "crates/canokey-openpgp" }
 canokey-piv = { path = "crates/canokey-piv" }

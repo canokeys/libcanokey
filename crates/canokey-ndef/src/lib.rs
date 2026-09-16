@@ -1,0 +1,499 @@
+//! Caller-owned NDEF applet message reading and writing.
+//!
+//! The NDEF applet (AID `D2 76 00 00 85 01 01`) stores one NDEF message in a
+//! Type 4 Tag style data file: bytes `[0..2)` hold the big-endian message
+//! length (NLEN), followed by NLEN message bytes. Factories in this crate
+//! select the applet, read the 15-byte capability container (CC, file ID
+//! `0xE103`) and read or replace the message in the NDEF data file (file ID
+//! `0x0001`) using explicit offset chunks of at most 240 bytes, so no APDU
+//! chaining or extended length support is required. The caller drives the
+//! returned [`Operation`] and owns all transport I/O; cancellation or drop
+//! never sends further commands.
+//!
+//! These factories are profile-free: no NDEF behaviour is known to vary across
+//! firmware versions, so no `DeviceProfile` or compat capability is consulted.
+//! A failed applet SELECT reports 0x6A82 as [`ErrorKind::UnsupportedDevice`],
+//! which covers devices where the NDEF applet is disabled or absent.
+//!
+//! # Writes and crash consistency
+//!
+//! [`write_message`] first writes a zero NLEN, then the message chunks, then
+//! the real NLEN. A crash or connection loss mid-write therefore leaves the
+//! file with NLEN zero (no message) instead of a stale length pointing at a
+//! partially updated message. The CC is not read on writes; a read-only file
+//! is reported by the device as 0x6982, mapped to
+//! [`ErrorKind::SecurityStatusNotSatisfied`].
+//!
+//! # Status word mapping
+//!
+//! 0x6A82 maps to [`ErrorKind::UnsupportedDevice`] only for the initial applet
+//! SELECT ([`Phase::Select`]) and to [`ErrorKind::NotFound`] for the CC/NDEF
+//! file selects; 0x6982 maps to [`ErrorKind::SecurityStatusNotSatisfied`]
+//! (read-only write) and 0x6985 to [`ErrorKind::ConditionsNotSatisfied`]
+//! (for example UPDATE BINARY without a selected data file). Unmapped status
+//! words remain [`ErrorKind::UnexpectedStatusWord`] with the raw status.
+//!
+//! # Example: read an empty NDEF message offline
+//!
+//! ```
+//! use canokey_ndef::read_message;
+//! use canokey_protocol::Step;
+//! let mut op = read_message(Default::default())?;
+//! assert_eq!(op.start()?, Step::Exchange);
+//! assert_eq!(
+//!     op.command()?.as_bytes(),
+//!     &[0x00, 0xa4, 0x04, 0x00, 0x07, 0xd2, 0x76, 0x00, 0x00, 0x85, 0x01, 0x01]
+//! );
+//! // SELECT applet and SELECT CC succeed; CC describes a writable 1024-byte file.
+//! op.advance(&[0x90, 0x00])?;
+//! op.advance(&[0x90, 0x00])?;
+//! op.advance(&[
+//!     0x00, 0x0f, 0x20, 0x00, 0xff, 0x00, 0xff, 0x04, 0x06, 0xe1, 0x04, 0x04, 0x00, 0x00, 0x00,
+//!     0x90, 0x00,
+//! ])?;
+//! // SELECT NDEF data file succeeds; NLEN is zero, so no message bytes follow.
+//! op.advance(&[0x90, 0x00])?;
+//! assert_eq!(op.advance(&[0x00, 0x00, 0x90, 0x00])?, Step::Done);
+//! assert!(op.take_result()?.is_empty());
+//! # Ok::<(), canokey_protocol::Error>(())
+//! ```
+#![deny(missing_docs)]
+#![forbid(unsafe_code)]
+
+use canokey_protocol::operation::engine::{Action, Machine};
+use canokey_protocol::operation::{validate_command, LogicalCommand, ResponseData};
+use canokey_protocol::{
+    ApduHeader, Error, ErrorKind, ExpectedLength, Operation, OperationOptions, Phase, SecretBytes,
+};
+use std::fmt;
+
+/// NDEF applet application identifier, selected by DF name.
+const NDEF_AID: [u8; 7] = [0xd2, 0x76, 0x00, 0x00, 0x85, 0x01, 0x01];
+/// Capability container file identifier inside the NDEF applet.
+const CC_FILE_ID: u16 = 0xe103;
+/// NDEF data file identifier inside the NDEF applet.
+const NDEF_FILE_ID: u16 = 0x0001;
+/// Capability container length in bytes; firmware bounds CC reads to this.
+const CC_LEN: usize = 15;
+/// Largest READ/UPDATE BINARY chunk, keeping every APDU within short encoding.
+const CHUNK: usize = 240;
+/// Hard firmware maximum for one NDEF message, excluding the two NLEN bytes.
+pub const MAX_MESSAGE_LENGTH: usize = 1022;
+
+/// Parsed NDEF capability container (CC) limits.
+///
+/// The CC is 15 bytes: CCLEN, mapping version, MLe/MLc, then the NDEF file
+/// control TLV whose value carries the NDEF file ID, the maximum file size
+/// and the read/write access bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NdefCapability {
+    /// Largest storable message in bytes, excluding the two NLEN bytes: the
+    /// CC maximum file size minus two, clamped to [`MAX_MESSAGE_LENGTH`].
+    pub max_message_length: usize,
+    /// Whether the CC write-access byte is nonzero, meaning the device
+    /// rejects UPDATE BINARY on the NDEF data file with 0x6982.
+    pub read_only: bool,
+}
+
+/// An owned NDEF message read from the device.
+///
+/// The bytes are the raw message without the two NLEN length bytes. They are
+/// held in a zeroizing buffer and redacted from `Debug` output.
+#[derive(Clone)]
+pub struct NdefMessage(SecretBytes);
+impl NdefMessage {
+    /// Borrow the raw NDEF message bytes, excluding the two NLEN bytes.
+    pub fn as_bytes(&self) -> &[u8] {
+        self.0.as_bytes()
+    }
+    /// Return the message length in bytes.
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+    /// Return whether the message is empty (the device reported NLEN zero).
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+impl fmt::Debug for NdefMessage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("NdefMessage([REDACTED])")
+    }
+}
+
+/// Build SELECT by DF name for the NDEF applet.
+fn select_applet() -> LogicalCommand {
+    LogicalCommand::new(
+        ApduHeader::new(0x00, 0xa4, 0x04, 0x00),
+        NDEF_AID.to_vec(),
+        ExpectedLength::Absent,
+    )
+}
+/// Build SELECT by two-byte big-endian file ID inside the NDEF applet.
+fn select_file(file_id: u16) -> LogicalCommand {
+    LogicalCommand::new(
+        ApduHeader::new(0x00, 0xa4, 0x00, 0x0c),
+        file_id.to_be_bytes().to_vec(),
+        ExpectedLength::Absent,
+    )
+}
+/// Build READ BINARY at a big-endian P1/P2 offset with a short Le.
+fn read_binary(offset: u16, length: usize) -> LogicalCommand {
+    LogicalCommand::new(
+        ApduHeader::new(0x00, 0xb0, (offset >> 8) as u8, offset as u8),
+        vec![],
+        ExpectedLength::Exact(length as u32),
+    )
+}
+/// Build UPDATE BINARY at a big-endian P1/P2 offset with owned chunk data.
+fn update_binary(offset: u16, data: &[u8]) -> LogicalCommand {
+    LogicalCommand::new(
+        ApduHeader::new(0x00, 0xd6, (offset >> 8) as u8, offset as u8),
+        data.to_vec(),
+        ExpectedLength::Absent,
+    )
+}
+
+/// Parse the 15-byte capability container into validated limits.
+///
+/// # Errors
+/// Returns [`ErrorKind::InvalidResponse`] at [`Phase::Parsing`] unless the
+/// data is exactly 15 bytes, contains the 04/06 NDEF file control TLV
+/// marker at bytes 7..9, and declares a maximum file size of at least two.
+fn parse_cc(data: &[u8]) -> Result<NdefCapability, Error> {
+    let invalid = || Error::new(ErrorKind::InvalidResponse).at(Phase::Parsing);
+    if data.len() != CC_LEN || data[7] != 0x04 || data[8] != 0x06 {
+        return Err(invalid());
+    }
+    let max_file_size = u16::from_be_bytes([data[11], data[12]]) as usize;
+    if max_file_size < 2 {
+        return Err(invalid());
+    }
+    Ok(NdefCapability {
+        max_message_length: (max_file_size - 2).min(MAX_MESSAGE_LENGTH),
+        read_only: data[14] != 0,
+    })
+}
+
+/// Largest read chunk fitting the exchange response budget (at least one).
+fn read_chunk(options: &OperationOptions) -> usize {
+    CHUNK.min(options.exchange.max_response_bytes - 2)
+}
+/// Largest write chunk fitting the exchange command budget.
+fn write_chunk(options: &OperationOptions) -> Result<usize, Error> {
+    let chunk = CHUNK.min(options.exchange.max_command_bytes.saturating_sub(6));
+    if chunk == 0 {
+        return Err(Error::new(ErrorKind::LimitExceeded));
+    }
+    Ok(chunk)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ReadStep {
+    SelectApplet,
+    SelectCc,
+    ReadCc,
+    SelectNdef,
+    ReadNlen,
+    Message,
+}
+
+struct CapabilityMachine {
+    step: ReadStep,
+}
+impl CapabilityMachine {
+    fn command(&self) -> Result<LogicalCommand, Error> {
+        match self.step {
+            ReadStep::SelectApplet => Ok(select_applet()),
+            ReadStep::SelectCc => Ok(select_file(CC_FILE_ID)),
+            ReadStep::ReadCc => Ok(read_binary(0, CC_LEN)),
+            _ => Err(Error::new(ErrorKind::ProtocolViolation)),
+        }
+    }
+}
+impl Machine<NdefCapability> for CapabilityMachine {
+    fn next(&mut self, response: Option<ResponseData>) -> Result<Action<NdefCapability>, Error> {
+        if let Some(response) = response {
+            match self.step {
+                ReadStep::SelectApplet => {
+                    response.ensure_success(Phase::Select)?;
+                    self.step = ReadStep::SelectCc;
+                }
+                ReadStep::SelectCc => {
+                    response.ensure_success(Phase::Command)?;
+                    self.step = ReadStep::ReadCc;
+                }
+                ReadStep::ReadCc => {
+                    response.ensure_success(Phase::Command)?;
+                    return Ok(Action::Done(parse_cc(response.data.as_bytes())?));
+                }
+                _ => return Err(Error::new(ErrorKind::ProtocolViolation)),
+            }
+        }
+        Ok(Action::Command(self.command()?))
+    }
+}
+
+struct ReadMachine {
+    step: ReadStep,
+    chunk: usize,
+    max_message: usize,
+    offset: usize,
+    remaining: usize,
+    bytes: SecretBytes,
+}
+impl ReadMachine {
+    fn command(&self) -> Result<LogicalCommand, Error> {
+        match self.step {
+            ReadStep::SelectApplet => Ok(select_applet()),
+            ReadStep::SelectCc => Ok(select_file(CC_FILE_ID)),
+            ReadStep::ReadCc => Ok(read_binary(0, CC_LEN)),
+            ReadStep::SelectNdef => Ok(select_file(NDEF_FILE_ID)),
+            ReadStep::ReadNlen => Ok(read_binary(0, 2)),
+            ReadStep::Message => Ok(read_binary(
+                self.offset as u16,
+                self.remaining.min(self.chunk),
+            )),
+        }
+    }
+}
+impl Machine<NdefMessage> for ReadMachine {
+    fn next(&mut self, response: Option<ResponseData>) -> Result<Action<NdefMessage>, Error> {
+        if let Some(response) = response {
+            match self.step {
+                ReadStep::SelectApplet => {
+                    response.ensure_success(Phase::Select)?;
+                    self.step = ReadStep::SelectCc;
+                }
+                ReadStep::SelectCc => {
+                    response.ensure_success(Phase::Command)?;
+                    self.step = ReadStep::ReadCc;
+                }
+                ReadStep::ReadCc => {
+                    response.ensure_success(Phase::Command)?;
+                    let capability = parse_cc(response.data.as_bytes())?;
+                    self.max_message = capability.max_message_length;
+                    self.step = ReadStep::SelectNdef;
+                }
+                ReadStep::SelectNdef => {
+                    response.ensure_success(Phase::Command)?;
+                    self.step = ReadStep::ReadNlen;
+                }
+                ReadStep::ReadNlen => {
+                    response.ensure_success(Phase::Command)?;
+                    let nlen: [u8; 2] =
+                        response.data.as_bytes().try_into().map_err(|_| {
+                            Error::new(ErrorKind::InvalidResponse).at(Phase::Parsing)
+                        })?;
+                    let nlen = u16::from_be_bytes(nlen) as usize;
+                    if nlen > self.max_message {
+                        // The card claims a message beyond its own CC limit;
+                        // do not allocate or read further.
+                        return Err(Error::new(ErrorKind::InvalidResponse).at(Phase::Parsing));
+                    }
+                    self.remaining = nlen;
+                    self.offset = 2;
+                    self.step = ReadStep::Message;
+                    if nlen == 0 {
+                        return Ok(Action::Done(NdefMessage(SecretBytes::default())));
+                    }
+                }
+                ReadStep::Message => {
+                    response.ensure_success(Phase::Command)?;
+                    let want = self.remaining.min(self.chunk);
+                    if response.data.len() != want {
+                        return Err(Error::new(ErrorKind::InvalidResponse).at(Phase::Parsing));
+                    }
+                    self.bytes.extend(response.data.as_bytes());
+                    self.remaining -= want;
+                    self.offset += want;
+                    if self.remaining == 0 {
+                        return Ok(Action::Done(NdefMessage(std::mem::take(&mut self.bytes))));
+                    }
+                }
+            }
+        }
+        Ok(Action::Command(self.command()?))
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WriteStep {
+    SelectApplet,
+    SelectNdef,
+    ZeroLength,
+    Message,
+    FinalLength,
+}
+
+struct WriteMachine {
+    step: WriteStep,
+    message: Vec<u8>,
+    chunk: usize,
+    offset: usize,
+}
+impl WriteMachine {
+    fn command(&self) -> LogicalCommand {
+        match self.step {
+            WriteStep::SelectApplet => select_applet(),
+            WriteStep::SelectNdef => select_file(NDEF_FILE_ID),
+            WriteStep::ZeroLength => update_binary(0, &[0, 0]),
+            WriteStep::Message => {
+                let take = (self.message.len() - self.offset).min(self.chunk);
+                update_binary(
+                    2 + self.offset as u16,
+                    &self.message[self.offset..self.offset + take],
+                )
+            }
+            WriteStep::FinalLength => update_binary(0, &(self.message.len() as u16).to_be_bytes()),
+        }
+    }
+}
+impl Machine<()> for WriteMachine {
+    fn next(&mut self, response: Option<ResponseData>) -> Result<Action<()>, Error> {
+        if let Some(response) = response {
+            match self.step {
+                WriteStep::SelectApplet => {
+                    response.ensure_success(Phase::Select)?;
+                    self.step = WriteStep::SelectNdef;
+                }
+                WriteStep::SelectNdef => {
+                    response.ensure_success(Phase::Command)?;
+                    self.step = WriteStep::ZeroLength;
+                }
+                WriteStep::ZeroLength => {
+                    response.ensure_success(Phase::Command)?;
+                    self.step = if self.message.is_empty() {
+                        WriteStep::FinalLength
+                    } else {
+                        WriteStep::Message
+                    };
+                }
+                WriteStep::Message => {
+                    response.ensure_success(Phase::Command)?;
+                    self.offset += (self.message.len() - self.offset).min(self.chunk);
+                    if self.offset == self.message.len() {
+                        self.step = WriteStep::FinalLength;
+                    }
+                }
+                WriteStep::FinalLength => {
+                    response.ensure_success(Phase::Command)?;
+                    return Ok(Action::Done(()));
+                }
+            }
+        }
+        Ok(Action::Command(self.command()))
+    }
+}
+
+/// Read the NDEF capability container: maximum message length and write access.
+///
+/// The operation selects the NDEF applet, selects the CC file and reads its
+/// 15 bytes; no NDEF data file is touched. No device profile is required: no
+/// NDEF variance is known across firmware versions, and a 0x6A82 applet
+/// SELECT failure maps to [`ErrorKind::UnsupportedDevice`].
+///
+/// # Errors
+/// Invalid options fail at construction; a CC read must fit the response and
+/// exchange budgets before any I/O, otherwise [`ErrorKind::LimitExceeded`].
+/// During execution, card status failures retain their phase and a malformed
+/// CC returns [`ErrorKind::InvalidResponse`] at [`Phase::Parsing`].
+pub fn read_capability(options: OperationOptions) -> Result<Operation<NdefCapability>, Error> {
+    let options = options.validate()?;
+    if options.limits.max_total_response_bytes < CC_LEN || options.limits.max_exchanges < 3 {
+        return Err(Error::new(ErrorKind::LimitExceeded));
+    }
+    validate_command(&read_binary(0, CC_LEN), options)?;
+    Operation::from_machine(
+        CapabilityMachine {
+            step: ReadStep::SelectApplet,
+        },
+        options,
+    )
+}
+
+/// Read the complete NDEF message, chunking READ BINARY at 240 bytes or less.
+///
+/// The operation selects the NDEF applet, reads and validates the CC, reads
+/// the two-byte NLEN, then reads the message from offset two in explicit
+/// offset chunks. An NLEN of zero completes without further reads; an NLEN
+/// above the CC maximum message length fails before any allocation or
+/// message read. The result owns its bytes and is redacted from `Debug`.
+///
+/// # Errors
+/// Invalid options fail at construction. A worst-case read (CC + NLEN +
+/// [`MAX_MESSAGE_LENGTH`] bytes, with its chunk exchanges) must fit the
+/// operation budgets before any I/O, otherwise [`ErrorKind::LimitExceeded`].
+/// During execution, card status failures retain their phase; a malformed
+/// CC, short NLEN, oversized NLEN or short message chunk returns
+/// [`ErrorKind::InvalidResponse`] at [`Phase::Parsing`].
+pub fn read_message(options: OperationOptions) -> Result<Operation<NdefMessage>, Error> {
+    let options = options.validate()?;
+    if options.limits.max_total_response_bytes < CC_LEN + 2 + MAX_MESSAGE_LENGTH {
+        return Err(Error::new(ErrorKind::LimitExceeded));
+    }
+    let chunk = read_chunk(&options);
+    let exchanges = 5 + MAX_MESSAGE_LENGTH.div_ceil(chunk);
+    if options.limits.max_exchanges < exchanges {
+        return Err(Error::new(ErrorKind::LimitExceeded));
+    }
+    validate_command(&read_binary(0, CC_LEN), options)?;
+    Operation::from_machine(
+        ReadMachine {
+            step: ReadStep::SelectApplet,
+            chunk,
+            max_message: MAX_MESSAGE_LENGTH,
+            offset: 0,
+            remaining: 0,
+            bytes: SecretBytes::default(),
+        },
+        options,
+    )
+}
+
+/// Replace the complete NDEF message, chunking UPDATE BINARY at 240 bytes or less.
+///
+/// The message is copied at construction and must not exceed
+/// [`MAX_MESSAGE_LENGTH`] (the firmware hard maximum). The operation selects
+/// the NDEF applet and data file, writes a zero NLEN first so an interrupted
+/// write leaves no stale message, writes the message from offset two in
+/// explicit offset chunks, and finally writes the real NLEN. The CC is not
+/// read: a read-only file is reported by the device as 0x6982, mapped to
+/// [`ErrorKind::SecurityStatusNotSatisfied`].
+///
+/// This mutates device state; an I/O failure mid-write may leave the message
+/// cleared (NLEN zero) and must not be replayed automatically.
+///
+/// # Errors
+/// A message longer than [`MAX_MESSAGE_LENGTH`] fails at construction with
+/// [`ErrorKind::InvalidArgument`] before any I/O, as do invalid options and
+/// exchange budgets too small for the known command sequence
+/// ([`ErrorKind::LimitExceeded`]). Card status failures during execution
+/// retain the Command phase.
+pub fn write_message(message: &[u8], options: OperationOptions) -> Result<Operation<()>, Error> {
+    let options = options.validate()?;
+    if message.len() > MAX_MESSAGE_LENGTH {
+        return Err(Error::new(ErrorKind::InvalidArgument));
+    }
+    let chunk = write_chunk(&options)?;
+    let exchanges = 4 + message.len().div_ceil(chunk);
+    if options.limits.max_exchanges < exchanges {
+        return Err(Error::new(ErrorKind::LimitExceeded));
+    }
+    validate_command(&update_binary(0, &[0, 0]), options)?;
+    if !message.is_empty() {
+        validate_command(
+            &update_binary(2, &message[..message.len().min(chunk)]),
+            options,
+        )?;
+    }
+    Operation::from_machine(
+        WriteMachine {
+            step: WriteStep::SelectApplet,
+            message: message.to_vec(),
+            chunk,
+            offset: 0,
+        },
+        options,
+    )
+}
