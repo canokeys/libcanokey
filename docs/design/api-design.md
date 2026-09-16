@@ -195,12 +195,11 @@ execution policy, not proof of live authentication; firmware answers 6982 for a
 protected request without prior verification. `Request::VerifyPin` carries no
 PIN of its own and is rejected under `Existing`; PinStatus and ChangePin send
 only their own VERIFY or CHANGE PIN command. PinStatus under `Existing` is the
-no-SELECT Admin PIN status entry: a single empty VERIFY.
-Empty VERIFY
+no-SELECT Admin PIN status entry: a single empty VERIFY. Empty VERIFY
 returns status data; submitted-PIN failures retain AdminPin and retries. The
 corresponding PIV profile-free no-SELECT entry remains `piv::get_pin_status_selected`.
-Factory reset
-rejects a supplied PIN and requires the card's existing blocked/physical-presence state.
+Factory reset rejects a supplied PIN and requires the card's existing
+blocked/physical-presence state.
 Applet resets use Admin authorization and destroy the named applet's data/credentials.
 
 Configuration patches read current state, preserve unspecified fields and only write
@@ -212,10 +211,11 @@ write may still have changed the device. Invalidate credential/object caches on 
 mutation attempts too. Neither progress nor completion is an automatic refresh.
 
 Typed PASS slot operations layer on the raw PassConfiguration/SetPassConfiguration
-commands (INS 43/44) under baseline Admin capability evidence. Both reads and
+commands (INS 43/44), gated by `Capability::AdminPassConfig`: these commands
+exist only from firmware 3.0.0, so older known firmware is rejected with
+UnsupportedFeature at construction. Both reads and
 writes sit behind the firmware Admin-PIN gate: the gate predates the commands
-themselves (2.0.1 admin.c has no INS 43/44 at all), so no capability gate is
-needed and `Access::None` is rejected with SecurityStatusNotSatisfied at
+themselves, so `Access::None` is rejected with SecurityStatusNotSatisfied at
 construction for the reads as for the writes.
 `Request::PassSlots` parses the two-slot dump into `PassSlots`: each
 `PassSlotState` is Off, Static with only its append-enter flag, HmacSha1, Oath
@@ -412,8 +412,7 @@ write would produce) or advertises a maximum below the message length
 then the real NLEN: an interrupted write leaves the file with NLEN zero
 instead of a stale length pointing at a partially updated message. A device
 that still rejects the UPDATE with 6982 maps to SecurityStatusNotSatisfied.
-This
-mutates device state, and a mid-write I/O failure may leave the message
+This mutates device state, and a mid-write I/O failure may leave the message
 cleared; neither is replayed automatically.
 
 6A82 maps to UnsupportedDevice only on applet SELECT (the NDEF applet disabled
