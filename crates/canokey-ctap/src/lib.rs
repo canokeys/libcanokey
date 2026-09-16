@@ -56,6 +56,15 @@
 //! selected FIDO2 applet, without a `clientpin` gate: no resident keys and
 //! no PIN.
 //!
+//! # hmac-secret extension
+//!
+//! [`hmacsecret`] implements the platform side of the CTAP 2.x hmac-secret
+//! extension and the CanoKey-specific hmac-secret-mc makeCredential variant:
+//! the declaration flag on [`MakeCredentialParams`], and (with `clientpin`)
+//! the encrypted salt exchange through `HmacSecretInput`, built from a
+//! `pin` key-agreement session. The exchange needs key agreement only; it
+//! does not require a PIN to be set on the device.
+//!
 //! # Cargo features
 //!
 //! - `clientpin` (default): the `pin` module and its RustCrypto
@@ -142,6 +151,7 @@ pub mod cose;
 #[cfg(feature = "clientpin")]
 pub mod credmgmt;
 pub mod ctap2;
+pub mod hmacsecret;
 #[cfg(feature = "clientpin")]
 pub mod largeblob;
 #[cfg(feature = "clientpin")]
@@ -155,6 +165,9 @@ pub use ctap2::{
     MakeCredentialResponse, PinUvAuth, PinUvAuthProtocol, PublicKeyCredentialDescriptor,
     PublicKeyCredentialParameters, RelyingParty, UserEntity, MAX_USER_ID_LEN,
 };
+#[cfg(feature = "clientpin")]
+pub use hmacsecret::HmacSecretInput;
+pub use hmacsecret::HmacSecretSalts;
 #[cfg(feature = "clientpin")]
 pub use pin::{
     change_pin, get_key_agreement, get_pin_retries, get_pin_token, get_pin_token_with_permissions,

@@ -16,6 +16,9 @@
 use crate::authdata::AuthenticatorData;
 use crate::cbor::{self, Value};
 use crate::cose::CoseAlgorithm;
+use crate::hmacsecret;
+#[cfg(feature = "clientpin")]
+use crate::hmacsecret::HmacSecretInput;
 use crate::{select_then, CtapResponse};
 use canokey_protocol::{Error, ErrorKind, Operation, OperationOptions, Phase, SecretBytes};
 
@@ -25,6 +28,12 @@ const COMMAND_GET_INFO: u8 = 0x04;
 const COMMAND_RESET: u8 = 0x07;
 const COMMAND_GET_NEXT_ASSERTION: u8 = 0x08;
 const COMMAND_SELECTION: u8 = 0x0b;
+
+/// Extension key of the hmac-secret declaration/exchange (CTAP 2.x).
+pub(crate) const EXT_HMAC_SECRET: &str = "hmac-secret";
+/// Extension key of the CanoKey hmac-secret-mc makeCredential variant.
+#[cfg(feature = "clientpin")]
+pub(crate) const EXT_HMAC_SECRET_MC: &str = "hmac-secret-mc";
 
 /// Maximum byte length of a user ID in makeCredential/getAssertion (CTAP2).
 pub const MAX_USER_ID_LEN: usize = 64;
@@ -361,7 +370,9 @@ impl AuthenticatorInfo {
 ///
 /// The required members are set with [`Self::new`]; the optional lists and
 /// fields start empty/`None` and can be assigned directly. `exclude_list` and
-/// `options` are omitted from the wire encoding when empty.
+/// `options` are omitted from the wire encoding when empty, as are the
+/// extensions when neither `extensions` nor the typed extension fields
+/// request any.
 #[derive(Clone, Debug)]
 pub struct MakeCredentialParams {
     /// The SHA-256 hash of the client data (key 1, required).
@@ -375,7 +386,9 @@ pub struct MakeCredentialParams {
     pub pub_key_cred_params: Vec<CoseAlgorithm>,
     /// Credentials to exclude (key 5); omitted when empty.
     pub exclude_list: Vec<PublicKeyCredentialDescriptor>,
-    /// Extension inputs as name/value pairs (key 6).
+    /// Extension inputs as name/value pairs (key 6). Do not repeat the keys
+    /// covered by the typed extension fields (`hmac_secret`,
+    /// `hmac_secret_mc`): a duplicate is rejected at construction.
     pub extensions: Vec<(String, Value)>,
     /// Requested options as name/value pairs (key 7); omitted when empty.
     pub options: Vec<(String, bool)>,
@@ -384,10 +397,26 @@ pub struct MakeCredentialParams {
     /// Optional enterprise attestation request (key 10): 1 for
     /// vendor-facilitated or 2 for platform-managed.
     pub enterprise_attestation: Option<u32>,
+    /// Request the hmac-secret declaration (extension `"hmac-secret": true`
+    /// in key 6): asks the authenticator to mark the new credential as
+    /// hmac-secret-capable. This is a plain declaration and works without
+    /// any PIN or key agreement; the authenticator's confirmation is
+    /// reported by [`MakeCredentialResponse::hmac_secret_supported`].
+    pub hmac_secret: bool,
+    /// Optional CanoKey-specific hmac-secret-mc exchange input (extension
+    /// `"hmac-secret-mc"` in key 6): performs the encrypted hmac-secret salt
+    /// exchange inside makeCredential. Requires `hmac_secret` to be `true`
+    /// (the firmware fails the request with CTAP2_ERR_MISSING_PARAMETER
+    /// otherwise); the decrypted salt outputs are reported by
+    /// [`MakeCredentialResponse::hmac_secret_mc`]. Unlike the declaration,
+    /// the exchange needs a pin/UV protocol key agreement (but no PIN) — see
+    /// [`HmacSecretInput`].
+    #[cfg(feature = "clientpin")]
+    pub hmac_secret_mc: Option<HmacSecretInput>,
 }
 impl MakeCredentialParams {
     /// Build parameters with the required members; all optional members start
-    /// empty or `None`.
+    /// empty, `false` or `None`.
     pub fn new(
         client_data_hash: [u8; 32],
         rp: RelyingParty,
@@ -404,6 +433,9 @@ impl MakeCredentialParams {
             options: Vec::new(),
             pin_uv_auth: None,
             enterprise_attestation: None,
+            hmac_secret: false,
+            #[cfg(feature = "clientpin")]
+            hmac_secret_mc: None,
         }
     }
 }
@@ -421,12 +453,22 @@ pub struct GetAssertionParams {
     pub client_data_hash: [u8; 32],
     /// The acceptable credentials (key 3); omitted when empty.
     pub allow_list: Vec<PublicKeyCredentialDescriptor>,
-    /// Extension inputs as name/value pairs (key 4).
+    /// Extension inputs as name/value pairs (key 4). Do not repeat the key
+    /// covered by the typed `hmac_secret` field: a duplicate is rejected at
+    /// construction.
     pub extensions: Vec<(String, Value)>,
     /// Requested options as name/value pairs (key 5); omitted when empty.
     pub options: Vec<(String, bool)>,
     /// Optional pinUvAuthProtocol/pinUvAuthParam pair (keys 6/7).
     pub pin_uv_auth: Option<PinUvAuth>,
+    /// Optional hmac-secret exchange input (extension `"hmac-secret"` in
+    /// key 4): the encrypted salt exchange of CTAP 2.x. The decrypted salt
+    /// outputs are reported by [`GetAssertionResponse::hmac_secret`]. The
+    /// exchange needs a pin/UV protocol key agreement but no PIN — see
+    /// [`HmacSecretInput`]. Note the CanoKey firmware rejects combining this
+    /// extension with the `up: false` option (CTAP2_ERR_UNSUPPORTED_OPTION).
+    #[cfg(feature = "clientpin")]
+    pub hmac_secret: Option<HmacSecretInput>,
 }
 impl GetAssertionParams {
     /// Build parameters with the required members; all optional members start
@@ -439,6 +481,8 @@ impl GetAssertionParams {
             extensions: Vec::new(),
             options: Vec::new(),
             pin_uv_auth: None,
+            #[cfg(feature = "clientpin")]
+            hmac_secret: None,
         }
     }
 }
@@ -456,6 +500,9 @@ pub struct MakeCredentialResponse {
     att_stmt: Value,
     ep_att: Option<bool>,
     large_blob_key: Option<SecretBytes>,
+    hmac_secret_supported: bool,
+    #[cfg(feature = "clientpin")]
+    hmac_secret_mc: Option<SecretBytes>,
 }
 impl MakeCredentialResponse {
     /// Return the attestation statement format identifier (key 1), for
@@ -484,6 +531,21 @@ impl MakeCredentialResponse {
     pub fn large_blob_key(&self) -> Option<&SecretBytes> {
         self.large_blob_key.as_ref()
     }
+    /// Return whether the authenticator confirmed the hmac-secret
+    /// declaration (`"hmac-secret": true` in the authData extensions),
+    /// marking the new credential as hmac-secret-capable. Absent means not
+    /// supported; a present non-boolean value is a parse error.
+    pub fn hmac_secret_supported(&self) -> bool {
+        self.hmac_secret_supported
+    }
+    /// Return the decrypted hmac-secret-mc exchange output (32 bytes for one
+    /// salt, 64 for two) when the exchange was requested through
+    /// [`MakeCredentialParams::hmac_secret_mc`] and the authenticator
+    /// answered it. The bytes are secret: redacted and zeroized.
+    #[cfg(feature = "clientpin")]
+    pub fn hmac_secret_mc(&self) -> Option<&SecretBytes> {
+        self.hmac_secret_mc.as_ref()
+    }
 }
 
 /// The parsed authenticatorGetAssertion / authenticatorGetNextAssertion
@@ -503,6 +565,8 @@ pub struct GetAssertionResponse {
     number_of_credentials: Option<u64>,
     user_selected: Option<bool>,
     large_blob_key: Option<SecretBytes>,
+    #[cfg(feature = "clientpin")]
+    hmac_secret: Option<SecretBytes>,
 }
 impl GetAssertionResponse {
     /// Return the credential descriptor (key 1) when the authenticator sent
@@ -538,6 +602,14 @@ impl GetAssertionResponse {
     /// are credential-adjacent key material: redacted and zeroized.
     pub fn large_blob_key(&self) -> Option<&SecretBytes> {
         self.large_blob_key.as_ref()
+    }
+    /// Return the decrypted hmac-secret exchange output (32 bytes for one
+    /// salt, 64 for two) when the exchange was requested through
+    /// [`GetAssertionParams::hmac_secret`] and the authenticator answered
+    /// it. The bytes are secret: redacted and zeroized.
+    #[cfg(feature = "clientpin")]
+    pub fn hmac_secret(&self) -> Option<&SecretBytes> {
+        self.hmac_secret.as_ref()
     }
 }
 
@@ -673,7 +745,10 @@ fn parse_get_info(bytes: &[u8]) -> Result<AuthenticatorInfo, Error> {
     })
 }
 
-fn parse_make_credential(bytes: &[u8]) -> Result<MakeCredentialResponse, Error> {
+fn parse_make_credential(
+    bytes: &[u8],
+    #[cfg(feature = "clientpin")] hmac_secret_mc: Option<&HmacSecretInput>,
+) -> Result<MakeCredentialResponse, Error> {
     let value = cbor::parse(bytes)?;
     if value.as_map().is_none() {
         return Err(invalid());
@@ -693,16 +768,26 @@ fn parse_make_credential(bytes: &[u8]) -> Result<MakeCredentialResponse, Error> 
     if entries.iter().any(|(key, _)| key.as_text().is_none()) {
         return Err(invalid());
     }
+    let hmac_secret_supported = hmacsecret::declaration_supported(&auth_data)?;
+    #[cfg(feature = "clientpin")]
+    let hmac_secret_mc =
+        hmacsecret::exchange_output(&auth_data, EXT_HMAC_SECRET_MC, hmac_secret_mc)?;
     Ok(MakeCredentialResponse {
         fmt,
         auth_data,
         att_stmt,
         ep_att: opt_bool(&value, 4)?,
         large_blob_key: opt_secret_bytes(&value, 5)?,
+        hmac_secret_supported,
+        #[cfg(feature = "clientpin")]
+        hmac_secret_mc,
     })
 }
 
-fn parse_get_assertion(bytes: &[u8]) -> Result<GetAssertionResponse, Error> {
+fn parse_get_assertion(
+    bytes: &[u8],
+    #[cfg(feature = "clientpin")] hmac_secret: Option<&HmacSecretInput>,
+) -> Result<GetAssertionResponse, Error> {
     let value = cbor::parse(bytes)?;
     if value.as_map().is_none() {
         return Err(invalid());
@@ -719,6 +804,8 @@ fn parse_get_assertion(bytes: &[u8]) -> Result<GetAssertionResponse, Error> {
         .as_bytes()
         .ok_or_else(invalid)?;
     let user = opt(&value, 4, UserEntity::from_value)?;
+    #[cfg(feature = "clientpin")]
+    let hmac_secret = hmacsecret::exchange_output(&auth_data, EXT_HMAC_SECRET, hmac_secret)?;
     Ok(GetAssertionResponse {
         credential,
         auth_data,
@@ -727,6 +814,8 @@ fn parse_get_assertion(bytes: &[u8]) -> Result<GetAssertionResponse, Error> {
         number_of_credentials: opt_uint(&value, 5)?,
         user_selected: opt_bool(&value, 6)?,
         large_blob_key: opt_secret_bytes(&value, 7)?,
+        #[cfg(feature = "clientpin")]
+        hmac_secret,
     })
 }
 
@@ -797,20 +886,35 @@ pub fn get_info(options: OperationOptions) -> Result<Operation<AuthenticatorInfo
 /// # Errors
 /// Construction fails before any I/O with [`ErrorKind::InvalidArgument`]
 /// when `rp.id` is empty, `user.id` is empty or longer than
-/// [`MAX_USER_ID_LEN`] bytes, `pub_key_cred_params` is empty, or
-/// `enterprise_attestation` is not 1 or 2. Response failures follow
-/// [`get_info`]; a response missing `fmt`, `authData` or a text-keyed
-/// `attStmt` is [`ErrorKind::InvalidResponse`] in [`Phase::Parsing`].
+/// [`MAX_USER_ID_LEN`] bytes, `pub_key_cred_params` is empty,
+/// `enterprise_attestation` is not 1 or 2, a raw `extensions` entry repeats
+/// the key of a typed extension field that is also set (`"hmac-secret"` /
+/// `"hmac-secret-mc"`), or `hmac_secret_mc` is set without `hmac_secret`.
+/// Response failures follow [`get_info`]; a response missing `fmt`,
+/// `authData` or a text-keyed `attStmt` is [`ErrorKind::InvalidResponse`] in
+/// [`Phase::Parsing`]. When the hmac-secret-mc exchange was requested, a
+/// response whose authData lacks the encrypted `"hmac-secret-mc"` output is
+/// likewise [`ErrorKind::InvalidResponse`].
 pub fn make_credential(
     params: MakeCredentialParams,
     options: OperationOptions,
 ) -> Result<Operation<MakeCredentialResponse>, Error> {
+    let raw_extension = |name: &str| params.extensions.iter().any(|(key, _)| key == name);
     if params.rp.id.is_empty()
         || params.user.id.is_empty()
         || params.user.id.len() > MAX_USER_ID_LEN
         || params.pub_key_cred_params.is_empty()
         || matches!(params.enterprise_attestation, Some(n) if !(1..=2).contains(&n))
+        || (params.hmac_secret && raw_extension(EXT_HMAC_SECRET))
     {
+        return Err(invalid_argument());
+    }
+    #[cfg(feature = "clientpin")]
+    if params.hmac_secret_mc.is_some() && (!params.hmac_secret || raw_extension(EXT_HMAC_SECRET_MC))
+    {
+        // The firmware requires "hmac-secret": true alongside
+        // "hmac-secret-mc" (CTAP2_ERR_MISSING_PARAMETER otherwise); a raw
+        // duplicate of either key would fail in our own strict parser.
         return Err(invalid_argument());
     }
     let mut entries = vec![
@@ -848,8 +952,17 @@ pub fn make_credential(
             Value::Array(params.exclude_list.iter().map(|d| d.to_value()).collect()),
         ));
     }
-    if !params.extensions.is_empty() {
-        entries.push((Value::Unsigned(6), extension_map(&params.extensions)));
+    let mut extensions = params.extensions.clone();
+    if params.hmac_secret {
+        extensions.push((EXT_HMAC_SECRET.to_owned(), Value::Bool(true)));
+    }
+    #[cfg(feature = "clientpin")]
+    if let Some(input) = &params.hmac_secret_mc {
+        // Canonical ordering places "hmac-secret" before "hmac-secret-mc".
+        extensions.push((EXT_HMAC_SECRET_MC.to_owned(), input.to_value()));
+    }
+    if !extensions.is_empty() {
+        entries.push((Value::Unsigned(6), extension_map(&extensions)));
     }
     if !params.options.is_empty() {
         entries.push((Value::Unsigned(7), option_map(&params.options)));
@@ -872,6 +985,17 @@ pub fn make_credential(
     }
     let mut message = vec![COMMAND_MAKE_CREDENTIAL];
     message.extend_from_slice(&cbor::encode(&Value::Map(entries))?);
+    // The parser needs the exchange's shared secret to decrypt the
+    // authenticator's encrypted hmac-secret-mc output.
+    #[cfg(feature = "clientpin")]
+    let hmac_secret_mc = params.hmac_secret_mc;
+    #[cfg(feature = "clientpin")]
+    return select_then(&message, options, move |response| {
+        typed(response, |bytes| {
+            parse_make_credential(bytes, hmac_secret_mc.as_ref())
+        })
+    });
+    #[cfg(not(feature = "clientpin"))]
     select_then(&message, options, |response| {
         typed(response, parse_make_credential)
     })
@@ -894,14 +1018,28 @@ pub fn make_credential(
 ///
 /// # Errors
 /// Construction fails before any I/O with [`ErrorKind::InvalidArgument`]
-/// when `rp_id` is empty. Response failures follow [`get_info`]; a response
-/// missing `authData` or `signature` is [`ErrorKind::InvalidResponse`] in
-/// [`Phase::Parsing`].
+/// when `rp_id` is empty or a raw `extensions` entry repeats
+/// `"hmac-secret"` while the typed `hmac_secret` field is also set.
+/// Response failures follow [`get_info`]; a response missing `authData` or
+/// `signature` is [`ErrorKind::InvalidResponse`] in [`Phase::Parsing`]. When
+/// the hmac-secret exchange was requested, a response whose authData lacks
+/// the encrypted `"hmac-secret"` output is likewise
+/// [`ErrorKind::InvalidResponse`].
 pub fn get_assertion(
     params: GetAssertionParams,
     options: OperationOptions,
 ) -> Result<Operation<GetAssertionResponse>, Error> {
     if params.rp_id.is_empty() {
+        return Err(invalid_argument());
+    }
+    #[cfg(feature = "clientpin")]
+    if params.hmac_secret.is_some()
+        && params
+            .extensions
+            .iter()
+            .any(|(key, _)| key == EXT_HMAC_SECRET)
+    {
+        // A duplicate "hmac-secret" key would fail in our own strict parser.
         return Err(invalid_argument());
     }
     let mut entries = vec![
@@ -917,8 +1055,16 @@ pub fn get_assertion(
             Value::Array(params.allow_list.iter().map(|d| d.to_value()).collect()),
         ));
     }
-    if !params.extensions.is_empty() {
-        entries.push((Value::Unsigned(4), extension_map(&params.extensions)));
+    #[cfg(feature = "clientpin")]
+    let mut extensions = params.extensions.clone();
+    #[cfg(not(feature = "clientpin"))]
+    let extensions = params.extensions.clone();
+    #[cfg(feature = "clientpin")]
+    if let Some(input) = &params.hmac_secret {
+        extensions.push((EXT_HMAC_SECRET.to_owned(), input.to_value()));
+    }
+    if !extensions.is_empty() {
+        entries.push((Value::Unsigned(4), extension_map(&extensions)));
     }
     if !params.options.is_empty() {
         entries.push((Value::Unsigned(5), option_map(&params.options)));
@@ -935,6 +1081,17 @@ pub fn get_assertion(
     }
     let mut message = vec![COMMAND_GET_ASSERTION];
     message.extend_from_slice(&cbor::encode(&Value::Map(entries))?);
+    // The parser needs the exchange's shared secret to decrypt the
+    // authenticator's encrypted hmac-secret output.
+    #[cfg(feature = "clientpin")]
+    let hmac_secret = params.hmac_secret;
+    #[cfg(feature = "clientpin")]
+    return select_then(&message, options, move |response| {
+        typed(response, |bytes| {
+            parse_get_assertion(bytes, hmac_secret.as_ref())
+        })
+    });
+    #[cfg(not(feature = "clientpin"))]
     select_then(&message, options, |response| {
         typed(response, parse_get_assertion)
     })
@@ -949,13 +1106,24 @@ pub fn get_assertion(
 /// [`get_assertion`]. CTAP 0x2E NO_CREDENTIALS ([`ErrorKind::NotFound`])
 /// means no further assertions exist.
 ///
+/// Note: a getNextAssertion response can also carry an hmac-secret exchange
+/// output for its credential, but this operation has no exchange context to
+/// decrypt it with; the raw value remains available through
+/// [`AuthenticatorData::extensions`].
+///
 /// # Errors
 /// See [`get_assertion`].
 pub fn get_next_assertion(
     options: OperationOptions,
 ) -> Result<Operation<GetAssertionResponse>, Error> {
     select_then(&[COMMAND_GET_NEXT_ASSERTION], options, |response| {
-        typed(response, parse_get_assertion)
+        typed(response, |bytes| {
+            parse_get_assertion(
+                bytes,
+                #[cfg(feature = "clientpin")]
+                None,
+            )
+        })
     })
 }
 

@@ -228,7 +228,7 @@ fn validate_pin(pin: &[u8]) -> Result<(), Error> {
 }
 
 /// Protocol V2 requires a caller-supplied IV; protocol V1 rejects one.
-fn check_iv(protocol: PinUvAuthProtocol, iv: Option<&[u8; 16]>) -> Result<(), Error> {
+pub(crate) fn check_iv(protocol: PinUvAuthProtocol, iv: Option<&[u8; 16]>) -> Result<(), Error> {
     if (protocol == PinUvAuthProtocol::V2) != iv.is_some() {
         return Err(invalid_argument());
     }
@@ -270,7 +270,7 @@ fn derive_shared_secret(protocol: PinUvAuthProtocol, ecdh_x: &[u8; 32]) -> Secre
 /// HMAC-SHA-256 with the protocol's key selection and output width: V1 uses
 /// the whole key and truncates to 16 bytes; V2 uses key[0..32] and returns
 /// the full 32 bytes.
-fn authenticate(protocol: PinUvAuthProtocol, key: &[u8], message: &[u8]) -> SecretBytes {
+pub(crate) fn authenticate(protocol: PinUvAuthProtocol, key: &[u8], message: &[u8]) -> SecretBytes {
     let key = if protocol == PinUvAuthProtocol::V2 && key.len() > 32 {
         &key[..32]
     } else {
@@ -291,7 +291,7 @@ fn authenticate(protocol: PinUvAuthProtocol, key: &[u8], message: &[u8]) -> Secr
 /// and the PIN hash are, by construction). V1 uses the shared secret as the
 /// key and a zero IV; V2 uses bytes 32..64 as the key and the caller's IV,
 /// with the wire value `IV || ciphertext`.
-fn encrypt(
+pub(crate) fn encrypt(
     protocol: PinUvAuthProtocol,
     shared_secret: &[u8],
     iv: Option<&[u8; 16]>,
@@ -322,10 +322,10 @@ fn encrypt(
     }
 }
 
-/// The inverse of [`encrypt`] for the authenticator's encrypted
-/// pinUvAuthToken. Any length, padding or framing violation is
-/// [`ErrorKind::InvalidResponse`], never a panic.
-fn decrypt_token(
+/// The inverse of [`encrypt`] for the authenticator's encrypted outputs
+/// (pinUvAuthToken, hmac-secret outputs). Any length, padding or framing
+/// violation is [`ErrorKind::InvalidResponse`], never a panic.
+pub(crate) fn decrypt(
     protocol: PinUvAuthProtocol,
     shared_secret: &[u8],
     ciphertext: &[u8],
@@ -628,7 +628,7 @@ fn pin_token_operation(
             let encrypted = required(value.map_get_int(2))?
                 .as_bytes()
                 .ok_or_else(invalid)?;
-            Ok(PinToken(decrypt_token(
+            Ok(PinToken(decrypt(
                 protocol,
                 shared_secret.as_bytes(),
                 encrypted,
