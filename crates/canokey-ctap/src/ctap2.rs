@@ -68,9 +68,11 @@ impl PinUvAuthProtocol {
 /// A pinUvAuthProtocol/pinUvAuthParam pair for makeCredential and
 /// getAssertion requests. The parameter is redacted in Debug and zeroized.
 ///
-/// Construction enforces the CTAP2 parameter widths: 16 bytes for protocol
-/// V1 and 32 bytes for protocol V2 (either width is accepted here; the
-/// authenticator rejects a mismatch with its selected protocol).
+/// Construction accepts a 16- or 32-byte parameter regardless of `protocol`
+/// (the CTAP2 widths are 16 for V1 and 32 for V2). Matching the width to the
+/// protocol is the caller's responsibility: a mismatch is only detected by
+/// the authenticator, which rejects the request. `PinToken::authenticate`
+/// (feature `clientpin`) already produces the width matching its protocol.
 #[derive(Clone, Debug)]
 pub struct PinUvAuth {
     /// The protocol version the parameter was computed with.
@@ -78,7 +80,8 @@ pub struct PinUvAuth {
     param: SecretBytes,
 }
 impl PinUvAuth {
-    /// Copy a pinUvAuthParam of exactly 16 (V1) or 32 (V2) bytes.
+    /// Copy a pinUvAuthParam of exactly 16 or 32 bytes; the width is not
+    /// checked against `protocol` (see the type documentation).
     ///
     /// # Errors
     /// Any other length fails as [`ErrorKind::InvalidArgument`] before I/O.
@@ -868,7 +871,7 @@ pub fn make_credential(
         ));
     }
     let mut message = vec![COMMAND_MAKE_CREDENTIAL];
-    message.extend_from_slice(&cbor::encode(&Value::Map(entries)));
+    message.extend_from_slice(&cbor::encode(&Value::Map(entries))?);
     select_then(&message, options, |response| {
         typed(response, parse_make_credential)
     })
@@ -931,7 +934,7 @@ pub fn get_assertion(
         ));
     }
     let mut message = vec![COMMAND_GET_ASSERTION];
-    message.extend_from_slice(&cbor::encode(&Value::Map(entries)));
+    message.extend_from_slice(&cbor::encode(&Value::Map(entries))?);
     select_then(&message, options, |response| {
         typed(response, parse_get_assertion)
     })

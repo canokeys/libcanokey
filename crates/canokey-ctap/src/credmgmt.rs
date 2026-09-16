@@ -164,11 +164,11 @@ fn message(
     params: Option<Value>,
     protocol: PinUvAuthProtocol,
     token: Option<&PinToken>,
-) -> Vec<u8> {
+) -> Result<Vec<u8>, Error> {
     let mut entries = vec![(uint(1), uint(u64::from(subcommand)))];
     let mut mac_input = vec![subcommand];
     if let Some(params) = params {
-        mac_input.extend_from_slice(&cbor::encode(&params));
+        mac_input.extend_from_slice(&cbor::encode(&params)?);
         entries.push((uint(2), params));
     }
     entries.push((uint(3), uint(u64::from(protocol.to_u8()))));
@@ -177,8 +177,8 @@ fn message(
         entries.push((uint(4), Value::Bytes(auth.as_bytes().to_vec())));
     }
     let mut message = vec![COMMAND_CREDENTIAL_MANAGEMENT];
-    message.extend_from_slice(&cbor::encode(&Value::Map(entries)));
-    message
+    message.extend_from_slice(&cbor::encode(&Value::Map(entries))?);
+    Ok(message)
 }
 
 fn descriptor_value(descriptor: &PublicKeyCredentialDescriptor) -> Value {
@@ -440,8 +440,13 @@ impl<T: Send> Machine<Vec<T>> for Enumerate<T> {
                 let total = required(value.map_get_int(self.total_key))?
                     .as_uint()
                     .ok_or_else(invalid)?;
+                if total == 0 {
+                    // A successful Begin carries one entry; reporting a zero
+                    // total alongside it violates the CTAP2 contract.
+                    return Err(invalid());
+                }
                 self.items.push((self.parse_entry)(&value)?);
-                self.remaining = total.saturating_sub(1);
+                self.remaining = total - 1;
                 if self.remaining > self.max_get_next {
                     // An absurd authenticator-reported total must not turn
                     // into an unbounded command loop.
@@ -528,7 +533,7 @@ pub fn get_creds_metadata(
     protocol: PinUvAuthProtocol,
     options: OperationOptions,
 ) -> Result<Operation<CredsMetadata>, Error> {
-    let message = message(SUBCOMMAND_GET_CREDS_METADATA, None, protocol, Some(token));
+    let message = message(SUBCOMMAND_GET_CREDS_METADATA, None, protocol, Some(token))?;
     select_then(&message, options, |response| {
         typed(response, |bytes| {
             let value = cbor::parse(bytes)?;
@@ -573,8 +578,8 @@ pub fn enumerate_rps(
     protocol: PinUvAuthProtocol,
     options: OperationOptions,
 ) -> Result<Operation<Vec<RpEntry>>, Error> {
-    let begin = message(SUBCOMMAND_ENUMERATE_RPS_BEGIN, None, protocol, Some(token));
-    let get_next = message(SUBCOMMAND_ENUMERATE_RPS_GET_NEXT, None, protocol, None);
+    let begin = message(SUBCOMMAND_ENUMERATE_RPS_BEGIN, None, protocol, Some(token))?;
+    let get_next = message(SUBCOMMAND_ENUMERATE_RPS_GET_NEXT, None, protocol, None)?;
     enumerate(begin, get_next, RESPONSE_TOTAL_RPS, parse_rp_entry, options)
 }
 
@@ -623,13 +628,13 @@ pub fn enumerate_credentials(
         Some(Value::Map(params)),
         protocol,
         Some(token),
-    );
+    )?;
     let get_next = message(
         SUBCOMMAND_ENUMERATE_CREDENTIALS_GET_NEXT,
         None,
         protocol,
         None,
-    );
+    )?;
     enumerate(
         begin,
         get_next,
@@ -674,7 +679,7 @@ pub fn delete_credential(
         Some(params),
         protocol,
         Some(token),
-    );
+    )?;
     select_then(&message, options, |response| typed(response, empty_payload))
 }
 
@@ -712,6 +717,6 @@ pub fn update_user_information(
         Some(params),
         protocol,
         Some(token),
-    );
+    )?;
     select_then(&message, options, |response| typed(response, empty_payload))
 }

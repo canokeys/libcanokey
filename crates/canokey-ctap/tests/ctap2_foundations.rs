@@ -4,7 +4,7 @@ use canokey_ctap::authdata::AuthenticatorData;
 use canokey_ctap::cbor::{self, Value};
 use canokey_ctap::cose::{CoseAlgorithm, CoseKey};
 use canokey_ctap::status::{CtapErrorCode, CtapStatus};
-use canokey_protocol::ErrorKind;
+use canokey_protocol::{ErrorKind, Phase};
 
 // ---------------------------------------------------------------- cbor ----
 
@@ -31,13 +31,13 @@ fn cbor_rfc8949_integer_round_trips() {
     ];
     for &(value, bytes) in vectors {
         assert_eq!(cbor::parse(bytes).unwrap(), Value::Unsigned(value));
-        assert_eq!(cbor::encode(&Value::Unsigned(value)), bytes);
+        assert_eq!(cbor::encode(&Value::Unsigned(value)).unwrap(), bytes);
     }
     // Negative integers: -1 and -256 from RFC 8949 appendix A.
     assert_eq!(cbor::parse(&[0x20]).unwrap(), Value::Negative(0));
-    assert_eq!(cbor::encode(&Value::Negative(0)), [0x20]);
+    assert_eq!(cbor::encode(&Value::Negative(0)).unwrap(), [0x20]);
     assert_eq!(cbor::parse(&[0x38, 0xff]).unwrap(), Value::Negative(255));
-    assert_eq!(cbor::encode(&Value::Negative(255)), [0x38, 0xff]);
+    assert_eq!(cbor::encode(&Value::Negative(255)).unwrap(), [0x38, 0xff]);
     // Full i64 domain through from_int/as_int.
     assert_eq!(Value::from_int(-1).as_int(), Some(-1));
     assert_eq!(Value::from_int(i64::MIN).as_int(), Some(i64::MIN));
@@ -76,7 +76,7 @@ fn cbor_rfc8949_compound_round_trips() {
     ];
     for (value, bytes) in vectors {
         assert_eq!(&cbor::parse(bytes).unwrap(), value, "bytes {bytes:02x?}");
-        assert_eq!(cbor::encode(value), *bytes, "value {value:?}");
+        assert_eq!(cbor::encode(value).unwrap(), *bytes, "value {value:?}");
     }
 }
 
@@ -138,6 +138,23 @@ fn cbor_enforces_max_nesting_depth() {
 }
 
 #[test]
+fn cbor_encode_enforces_max_nesting_depth() {
+    // A caller-built value deeper than MAX_DEPTH must fail, not overflow the
+    // stack; 63 nested arrays around a uint (depth 64) still encodes.
+    let nest = |levels: usize| {
+        let mut value = Value::Unsigned(0);
+        for _ in 0..levels {
+            value = Value::Array(vec![value]);
+        }
+        value
+    };
+    assert!(cbor::encode(&nest(63)).is_ok());
+    let error = cbor::encode(&nest(64)).expect_err("depth 65 must be rejected");
+    assert_eq!(error.kind, ErrorKind::LimitExceeded);
+    assert_eq!(error.phase, Phase::Construction);
+}
+
+#[test]
 fn cbor_encode_sorts_map_keys_canonically() {
     // Canonical order: shorter encoded keys first, then lexicographic.
     let map = Value::Map(vec![
@@ -147,7 +164,7 @@ fn cbor_encode_sorts_map_keys_canonically() {
         (Value::Unsigned(10), Value::Null),
         (Value::Unsigned(2), Value::Null),
     ]);
-    let encoded = cbor::encode(&map);
+    let encoded = cbor::encode(&map).unwrap();
     // Keys: 2 (0x02), 10 (0x0a), -1 (0x20), then 100 (0x18 0x64) and "a".
     assert_eq!(
         encoded,
@@ -324,7 +341,7 @@ fn cose_ecdh_es_hkdf256_is_key_agreement_only() {
     assert_eq!(key.algorithm(), Some(CoseAlgorithm::EcdhEsHkdf256));
     assert!(!CoseAlgorithm::EcdhEsHkdf256.is_signature());
     // Round-trips to the platform key-agreement map shape.
-    let encoded = cbor::encode(&key.to_value());
+    let encoded = cbor::encode(&key.to_value()).unwrap();
     assert_eq!(cbor::parse(&encoded).unwrap(), p256_map(-25));
 }
 
@@ -428,11 +445,11 @@ fn golden_authdata(flags: u8) -> Vec<u8> {
         bytes.extend_from_slice(&[0xbb; 16]); // aaguid
         bytes.extend_from_slice(&4u16.to_be_bytes()); // credentialIdLength
         bytes.extend_from_slice(&[0x01, 0x02, 0x03, 0x04]); // credentialId
-        bytes.extend_from_slice(&cbor::encode(&es256_key_value()));
+        bytes.extend_from_slice(&cbor::encode(&es256_key_value()).unwrap());
     }
     if flags & AuthenticatorData::FLAG_ED != 0 {
         let extensions = Value::Map(vec![(Value::Text("hmac-secret".into()), Value::Bool(true))]);
-        bytes.extend_from_slice(&cbor::encode(&extensions));
+        bytes.extend_from_slice(&cbor::encode(&extensions).unwrap());
     }
     bytes
 }
@@ -506,7 +523,7 @@ fn authdata_rejects_bad_credential_id_lengths() {
         bytes.extend_from_slice(&0u32.to_be_bytes());
         bytes.extend_from_slice(&[0xbb; 16]);
         bytes.extend_from_slice(&id_len.to_be_bytes());
-        bytes.extend_from_slice(&cbor::encode(&es256_key_value()));
+        bytes.extend_from_slice(&cbor::encode(&es256_key_value()).unwrap());
         assert!(
             AuthenticatorData::parse(&bytes).is_err(),
             "id_len {id_len} must fail"
@@ -519,7 +536,7 @@ fn authdata_rejects_bad_credential_id_lengths() {
     bytes.extend_from_slice(&[0xbb; 16]);
     bytes.extend_from_slice(&1023u16.to_be_bytes());
     bytes.extend_from_slice(&[0xcc; 1023]);
-    bytes.extend_from_slice(&cbor::encode(&es256_key_value()));
+    bytes.extend_from_slice(&cbor::encode(&es256_key_value()).unwrap());
     assert!(AuthenticatorData::parse(&bytes).is_ok());
 }
 
@@ -531,7 +548,7 @@ fn authdata_rejects_non_map_or_non_text_key_extensions() {
     ] {
         let mut bytes = golden_authdata(0x01);
         bytes[32] = AuthenticatorData::FLAG_UP | AuthenticatorData::FLAG_ED;
-        bytes.extend_from_slice(&cbor::encode(&extensions));
+        bytes.extend_from_slice(&cbor::encode(&extensions).unwrap());
         assert!(AuthenticatorData::parse(&bytes).is_err());
     }
 }

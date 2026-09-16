@@ -359,10 +359,10 @@ fn decrypt_token(
 
 /// Build the complete clientPIN message: command byte 0x06 followed by the
 /// canonical CBOR map.
-fn client_pin_message(entries: Vec<(Value, Value)>) -> Vec<u8> {
+fn client_pin_message(entries: Vec<(Value, Value)>) -> Result<Vec<u8>, Error> {
     let mut message = vec![COMMAND_CLIENT_PIN];
-    message.extend_from_slice(&cbor::encode(&Value::Map(entries)));
-    message
+    message.extend_from_slice(&cbor::encode(&Value::Map(entries))?);
+    Ok(message)
 }
 
 fn uint(value: u64) -> Value {
@@ -420,7 +420,7 @@ pub fn get_key_agreement(
     let message = client_pin_message(vec![
         protocol_entry(protocol),
         (uint(2), uint(u64::from(SUBCOMMAND_GET_KEY_AGREEMENT))),
-    ]);
+    ])?;
     select_then(&message, options, move |response| {
         typed(response, |bytes| {
             let value = cbor::parse(bytes)?;
@@ -465,7 +465,7 @@ pub fn get_pin_retries(
     let message = client_pin_message(vec![
         protocol_entry(protocol),
         (uint(2), uint(u64::from(SUBCOMMAND_GET_PIN_RETRIES))),
-    ]);
+    ])?;
     select_then(&message, options, |response| {
         typed(response, |bytes| {
             let value = cbor::parse(bytes)?;
@@ -534,7 +534,7 @@ pub fn set_pin(
         (uint(3), session.key_agreement.to_value()),
         (uint(4), Value::Bytes(auth_param.as_bytes().to_vec())),
         (uint(5), Value::Bytes(new_pin_enc)),
-    ]);
+    ])?;
     select_then(&message, options, |response| typed(response, empty_payload))
 }
 
@@ -595,7 +595,7 @@ pub fn change_pin(
         (uint(4), Value::Bytes(auth_param.as_bytes().to_vec())),
         (uint(5), Value::Bytes(new_pin_enc)),
         (uint(6), Value::Bytes(pin_hash_enc)),
-    ]);
+    ])?;
     select_then(&message, options, |response| typed(response, empty_payload))
 }
 
@@ -676,7 +676,7 @@ pub fn get_pin_token(
         SUBCOMMAND_GET_PIN_TOKEN,
         pin_hash_enc,
         Vec::new(),
-    ));
+    ))?;
     pin_token_operation(session, &message, options)
 }
 
@@ -727,6 +727,6 @@ pub fn get_pin_token_with_permissions(
         SUBCOMMAND_GET_PIN_TOKEN_WITH_PERMISSIONS,
         pin_hash_enc,
         extra,
-    ));
+    ))?;
     pin_token_operation(session, &message, options)
 }

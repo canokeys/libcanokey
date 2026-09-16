@@ -73,6 +73,9 @@ const RESP_RP_BEGIN: &str =
     "a303a26269646b6578616d706c652e636f6d646e616d65674578616d706c65045820a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf0502";
 const RESP_RP_BEGIN_HUGE_TOTAL: &str =
     "a303a26269646b6578616d706c652e636f6d646e616d65674578616d706c65045820a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf051864";
+/// Same Begin payload with totalRPs = 0 alongside the entry: spec-violating.
+const RESP_RP_BEGIN_ZERO_TOTAL: &str =
+    "a303a26269646b6578616d706c652e636f6d646e616d65674578616d706c65045820a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf0500";
 const RESP_RP_NEXT: &str =
     "a203a1626964696f746865722e6f7267045820c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedf";
 const RESP_CRED_BEGIN: &str =
@@ -247,6 +250,19 @@ fn enumerate_rps_absurd_total_hits_limit_exceeded() {
     assert_command(&op, &hex(MSG_RPS_BEGIN));
     let error = advance_missing(&mut op, &hex(RESP_RP_BEGIN_HUGE_TOTAL));
     assert_eq!(error.kind, ErrorKind::LimitExceeded);
+    assert_eq!(error.phase, Phase::Parsing);
+}
+
+#[test]
+fn enumerate_rps_zero_total_with_entry_is_invalid_response() {
+    let token = token_v1();
+    let mut op = enumerate_rps(&token, PinUvAuthProtocol::V1, OperationOptions::default()).unwrap();
+    begin(&mut op);
+    assert_command(&op, &hex(MSG_RPS_BEGIN));
+    // A successful Begin reporting totalRPs = 0 alongside a parseable entry
+    // violates the CTAP2 contract and must not silently return the entry.
+    let error = advance_missing(&mut op, &hex(RESP_RP_BEGIN_ZERO_TOTAL));
+    assert_eq!(error.kind, ErrorKind::InvalidResponse);
     assert_eq!(error.phase, Phase::Parsing);
 }
 

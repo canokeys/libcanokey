@@ -35,6 +35,9 @@ fn invalid() -> Error {
 fn limit() -> Error {
     Error::new(ErrorKind::LimitExceeded).at(Phase::Parsing)
 }
+fn limit_construction() -> Error {
+    Error::new(ErrorKind::LimitExceeded).at(Phase::Construction)
+}
 
 /// A decoded CBOR data item.
 ///
@@ -256,7 +259,7 @@ fn parse_at(bytes: &[u8], pos: usize, depth: usize) -> Result<(Value, usize), Er
             for _ in 0..argument {
                 let (key, next) = parse_at(bytes, cursor, depth + 1)?;
                 // Duplicate keys are compared by canonical encoding.
-                if !seen.insert(encode(&key)) {
+                if !seen.insert(encode(&key).map_err(|_| limit())?) {
                     return Err(invalid());
                 }
                 let (value, next) = parse_at(bytes, next, depth + 1)?;
@@ -302,10 +305,15 @@ pub fn parse_item(bytes: &[u8]) -> Result<(Value, usize), Error> {
 /// lengths, and map keys sorted canonically (shorter encoded keys first,
 /// then bytewise lexicographic). `pinUvAuthParam` HMACs depend on this
 /// exact byte stream.
-pub fn encode(value: &Value) -> Vec<u8> {
+///
+/// # Errors
+/// Nesting beyond [`MAX_DEPTH`] fails as [`ErrorKind::LimitExceeded`] in
+/// [`Phase::Construction`]. Parsed values always satisfy the limit, but a
+/// caller-built value can be arbitrarily deep.
+pub fn encode(value: &Value) -> Result<Vec<u8>, Error> {
     let mut out = Vec::new();
-    encode_into(value, &mut out);
-    out
+    encode_into(value, &mut out, 1)?;
+    Ok(out)
 }
 
 fn head(out: &mut Vec<u8>, major: u8, argument: u64) {
@@ -327,7 +335,10 @@ fn head(out: &mut Vec<u8>, major: u8, argument: u64) {
     }
 }
 
-fn encode_into(value: &Value, out: &mut Vec<u8>) {
+fn encode_into(value: &Value, out: &mut Vec<u8>, depth: usize) -> Result<(), Error> {
+    if depth > MAX_DEPTH {
+        return Err(limit_construction());
+    }
     match value {
         Value::Unsigned(argument) => head(out, 0, *argument),
         Value::Negative(argument) => head(out, 1, *argument),
@@ -342,25 +353,28 @@ fn encode_into(value: &Value, out: &mut Vec<u8>) {
         Value::Array(items) => {
             head(out, 4, items.len() as u64);
             for item in items {
-                encode_into(item, out);
+                encode_into(item, out, depth + 1)?;
             }
         }
         Value::Map(entries) => {
-            let mut encoded: Vec<(Vec<u8>, &Value)> = entries
-                .iter()
-                .map(|(key, value)| (encode(key), value))
-                .collect();
+            let mut encoded: Vec<(Vec<u8>, &Value)> = Vec::with_capacity(entries.len());
+            for (key, value) in entries {
+                let mut key_bytes = Vec::new();
+                encode_into(key, &mut key_bytes, depth + 1)?;
+                encoded.push((key_bytes, value));
+            }
             // Canonical CBOR map order: shorter encoded keys first, then
             // bytewise lexicographic (RFC 8949 section 4.2.1).
             encoded.sort_by(|a, b| a.0.len().cmp(&b.0.len()).then_with(|| a.0.cmp(&b.0)));
             head(out, 5, encoded.len() as u64);
             for (key, value) in encoded {
                 out.extend_from_slice(&key);
-                encode_into(value, out);
+                encode_into(value, out, depth + 1)?;
             }
         }
         Value::Bool(false) => out.push(0xf4),
         Value::Bool(true) => out.push(0xf5),
         Value::Null => out.push(0xf6),
     }
+    Ok(())
 }
