@@ -9,6 +9,14 @@ pub fn profile(version: &str) -> DeviceProfile {
     );
     DeviceProfile::from_observations(o).unwrap()
 }
+#[allow(dead_code)]
+pub fn profile_without_ml() -> DeviceProfile {
+    let mut o = DeviceObservations::new(b"3.1.0".to_vec());
+    o.piv_version = Some(PivApplicationVersion([5, 7, 0]));
+    o.algorithm_config =
+        Some(AlgorithmConfig::parse(&[1, 0xe0, 5, 0x16, 0xe1, 0x53, 0x54, 0x55]).unwrap());
+    DeviceProfile::from_observations(o).unwrap()
+}
 pub fn hex(s: &str) -> Vec<u8> {
     (0..s.len())
         .step_by(2)

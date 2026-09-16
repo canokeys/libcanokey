@@ -368,6 +368,124 @@ fn extended_curve_import_checks_scalars_and_wire_ids() {
 }
 
 #[test]
+fn mldsa65_seed_import_writes_seed_and_policy_tlvs() {
+    let mut params = KeyParameters::new(Slot::Signature, Algorithm::MlDsa65);
+    params.pin_policy = PinPolicy::Always;
+    params.touch_policy = TouchPolicy::Cached;
+    let seed: Vec<u8> = (0..32).collect();
+    let material = PrivateKeyMaterial::mldsa65_seed(&seed).unwrap();
+    assert_eq!(material.algorithm(), Algorithm::MlDsa65);
+    let mut op = import_key(
+        &profile("3.1.0"),
+        params,
+        material,
+        access(),
+        Default::default(),
+    )
+    .unwrap();
+    authenticate(&mut op);
+    let mut expected = hex("00fe569c280920");
+    expected.extend(0..32);
+    expected.extend(hex("aa0103ab0103"));
+    assert_eq!(op.command().unwrap().as_bytes(), expected);
+    assert_eq!(op.advance(&[0x90, 0]).unwrap(), Step::Done);
+    assert_eq!(
+        op.take_result().unwrap().profile_effect,
+        ProfileEffect::Unchanged
+    );
+}
+
+#[test]
+fn mlkem768_seed_import_writes_seed_tlv() {
+    let seed: Vec<u8> = (0..64).collect();
+    let material = PrivateKeyMaterial::mlkem768_seed(&seed).unwrap();
+    assert_eq!(material.algorithm(), Algorithm::MlKem768);
+    let mut op = import_key(
+        &profile("3.1.0"),
+        KeyParameters::new(Slot::KeyManagement, Algorithm::MlKem768),
+        material,
+        access(),
+        Default::default(),
+    )
+    .unwrap();
+    authenticate(&mut op);
+    let mut expected = hex("00fe579d420a40");
+    expected.extend(0..64);
+    assert_eq!(op.command().unwrap().as_bytes(), expected);
+    assert_eq!(op.advance(&[0x90, 0]).unwrap(), Step::Done);
+    assert_eq!(
+        op.take_result().unwrap().profile_effect,
+        ProfileEffect::Unchanged
+    );
+}
+
+#[test]
+fn ml_seed_import_rejects_bad_lengths_and_algorithm_mismatch() {
+    for bad in [vec![0; 31], vec![0; 33]] {
+        assert_eq!(
+            PrivateKeyMaterial::mldsa65_seed(&bad).unwrap_err().kind,
+            ErrorKind::InvalidArgument
+        );
+    }
+    for bad in [vec![0; 63], vec![0; 65]] {
+        assert_eq!(
+            PrivateKeyMaterial::mlkem768_seed(&bad).unwrap_err().kind,
+            ErrorKind::InvalidArgument
+        );
+    }
+    for (material, algorithm) in [
+        (
+            PrivateKeyMaterial::mldsa65_seed(&[0; 32]).unwrap(),
+            Algorithm::MlKem768,
+        ),
+        (
+            PrivateKeyMaterial::mlkem768_seed(&[0; 64]).unwrap(),
+            Algorithm::MlDsa65,
+        ),
+        (
+            PrivateKeyMaterial::mldsa65_seed(&[0; 32]).unwrap(),
+            Algorithm::Ed25519,
+        ),
+    ] {
+        // Construction fails before any command is produced.
+        let error = import_key(
+            &profile("3.1.0"),
+            KeyParameters::new(Slot::Signature, algorithm),
+            material,
+            access(),
+            Default::default(),
+        )
+        .unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidArgument);
+    }
+}
+
+#[test]
+fn ml_seed_import_requires_observed_wire_ids() {
+    let p = profile_without_ml();
+    for (material, algorithm) in [
+        (
+            PrivateKeyMaterial::mldsa65_seed(&[0; 32]).unwrap(),
+            Algorithm::MlDsa65,
+        ),
+        (
+            PrivateKeyMaterial::mlkem768_seed(&[0; 64]).unwrap(),
+            Algorithm::MlKem768,
+        ),
+    ] {
+        let error = import_key(
+            &p,
+            KeyParameters::new(Slot::Signature, algorithm),
+            material,
+            access(),
+            Default::default(),
+        )
+        .unwrap_err();
+        assert_eq!(error.kind, ErrorKind::CapabilityUnknown);
+    }
+}
+
+#[test]
 fn extended_ecdh_validates_points_and_retains_raw_secrets() {
     // Standard curve generators (SEC 2), independent of the validator under test.
     let p521 = hex(concat!("04",
