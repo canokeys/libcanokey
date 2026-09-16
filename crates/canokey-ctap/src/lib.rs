@@ -18,6 +18,28 @@
 //! [`Error::status_word`](canokey_protocol::Error::status_word) carries the
 //! raw CTAP status byte, not an ISO 7816 status word.
 //!
+//! # ClientPIN
+//!
+//! With the default `clientpin` feature, `pin` implements the host side of
+//! authenticatorClientPIN (0x06) for pin/UV auth protocols 1 and 2: key
+//! agreement, PIN set/change, and pinUvAuthToken retrieval. All randomness
+//! (ephemeral scalars, V2 IVs) is caller-supplied.
+//!
+//! # Credential management
+//!
+//! Also behind `clientpin`, the `credmgmt` module implements
+//! authenticatorCredentialManagement (0x0A): storage counters, RP and
+//! credential enumeration with in-operation GetNext loops, credential
+//! deletion and user-information updates, all authenticated with a
+//! pinUvAuthToken from the `pin` module.
+//!
+//! # Cargo features
+//!
+//! - `clientpin` (default): the `pin` module and its RustCrypto
+//!   dependencies (`p256`, `sha2`, `hmac`, `hkdf`, `aes`, `cbc`), all pure
+//!   Rust. With the feature disabled the envelope and the dependency-free
+//!   CTAP2 foundations remain available.
+//!
 //! # CTAP2 commands
 //!
 //! [`ctap2`] provides the typed command-level operations:
@@ -92,7 +114,11 @@ use std::fmt;
 pub mod authdata;
 pub mod cbor;
 pub mod cose;
+#[cfg(feature = "clientpin")]
+pub mod credmgmt;
 pub mod ctap2;
+#[cfg(feature = "clientpin")]
+pub mod pin;
 pub mod status;
 
 pub use ctap2::{
@@ -100,6 +126,11 @@ pub use ctap2::{
     AuthenticatorInfo, GetAssertionParams, GetAssertionResponse, MakeCredentialParams,
     MakeCredentialResponse, PinUvAuth, PinUvAuthProtocol, PublicKeyCredentialDescriptor,
     PublicKeyCredentialParameters, RelyingParty, UserEntity, MAX_USER_ID_LEN,
+};
+#[cfg(feature = "clientpin")]
+pub use pin::{
+    change_pin, get_key_agreement, get_pin_retries, get_pin_token, get_pin_token_with_permissions,
+    set_pin, Permissions, PinRetries, PinSession, PinToken,
 };
 pub use status::{CtapErrorCode, CtapStatus};
 
