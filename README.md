@@ -109,7 +109,7 @@ Firmware compatibility covers audited 1.3–3.1.0 layouts with per-operation gat
 Legacy OATH commands, OpenPGP DO framing and Admin configuration fields are selected
 from actual Admin firmware; unknown base versions do not enable mutations; development builds follow their
 declared numeric base version while preserving the original version text.
-See [compatibility contracts](docs/api-design.md#profiles-and-probing) for the model
+See [compatibility contracts](docs/design/api-design.md#profiles-and-probing) for the model
 and each applet's historical restrictions. Every factory checks required evidence. PIV `sign_streaming`
 handles ML-DSA and empty Ed25519 messages explicitly; SM2 initiators require PIN
 Never/Once and peer keys supplied at construction. See [plan](plan.md) for firmware
@@ -149,8 +149,8 @@ exchange with raw application I/O. Hold one connection lease across the operatio
 supply complete responses including SW1/SW2 and disable transport retries/continuation.
 Getters never send APDUs. On I/O failure, drop the operation and drain or isolate
 pending I/O before connection reuse. Cancel/drop never roll back device effects.
-Boundary sketches: [Console/Dart](docs/console-integration.md),
-[PKCS#11/C](docs/pkcs11-integration.md).
+Boundary sketches: [Console/Dart](docs/guides/console-integration.md),
+[PKCS#11/C](docs/guides/pkcs11-integration.md).
 
 ## Certificate inspection
 
@@ -188,9 +188,11 @@ are ignored.
 
 ## Documentation and license
 
-- [API contracts](docs/api-design.md): ownership, execution and binding rules.
+- [Documentation map](docs/README.md): design documents vs user guides, with an
+  architecture overview.
+- [API contracts](docs/design/api-design.md): ownership, execution and binding rules.
 - [Plan](plan.md): remaining work and acceptance criteria.
-- [Reference evidence](docs/references.md): pinned firmware and consumer sources.
+- [Reference evidence](docs/design/references.md): pinned firmware and consumer sources.
 - [Contributor instructions](AGENTS.md): language, architecture, checks and commits.
 
 Copyright 2026 canokeys.org. Licensed under [Apache-2.0](LICENSE). Each workspace

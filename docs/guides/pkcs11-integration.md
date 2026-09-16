@@ -1,6 +1,6 @@
 # PKCS#11 integration boundary
 
-This document is **application pseudocode**, not an implemented PKCS#11 integration. The [runnable C probe](../crates/canokey-c/examples/probe.c) uses today's ABI with complete cleanup. The [header](../crates/canokey-c/include/canokey.h) is authoritative for available functions. Shared contracts live in [design](api-design.md).
+This document is **application pseudocode**, not an implemented PKCS#11 integration. The [runnable C probe](../../crates/canokey-c/examples/probe.c) uses today's ABI with complete cleanup. The [header](../../crates/canokey-c/include/canokey.h) is authoritative for available functions. Shared contracts live in [design](../design/api-design.md).
 
 ## Caller-owned state
 

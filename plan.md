@@ -1,7 +1,7 @@
 # Remaining work
 
 [README](README.md) lists implemented features and examples;
-[API contracts](docs/api-design.md) define ownership and protocol behavior.
+[API contracts](docs/design/api-design.md) define ownership and protocol behavior.
 
 ## Firmware-dependent features
 

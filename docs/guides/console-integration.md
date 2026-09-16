@@ -1,6 +1,6 @@
 # Console integration boundary
 
-This is **future integration pseudocode**, not a shipped FRB binding or a modification to Console. The core factories shown here are implemented; the runnable equivalents are linked from [README](../README.md). Common ownership and protocol rules live in [design](api-design.md).
+This is **future integration pseudocode**, not a shipped FRB binding or a modification to Console. The core factories shown here are implemented; the runnable equivalents are linked from [README](../../README.md). Common ownership and protocol rules live in [design](../design/api-design.md).
 
 ## Responsibilities
 

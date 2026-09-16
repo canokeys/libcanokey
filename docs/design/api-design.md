@@ -1,8 +1,8 @@
 # API contracts
 
-[README](../README.md) lists implemented features and examples;
-[plan](../plan.md) tracks remaining work. Rustdoc and the
-[experimental C header](../crates/canokey-c/include/canokey.h) define signatures.
+[README](../../README.md) lists implemented features and examples;
+[plan](../../plan.md) tracks remaining work. Rustdoc and the
+[experimental C header](../../crates/canokey-c/include/canokey.h) define signatures.
 [References](references.md) records firmware and consumer evidence.
 
 ## Ownership and execution
@@ -532,7 +532,7 @@ A Console FRB adapter belongs in Console and calls the Rust facade directly. It 
 hold a private enum of concrete Operation types and Option for idempotent close,
 but must not duplicate protocol state. Dart owns async execution; Python bindings
 would follow the same model with a caller-owned synchronous loop. Binding examples:
-[Console](console-integration.md), [PKCS#11](pkcs11-integration.md).
+[Console](../guides/console-integration.md), [PKCS#11](../guides/pkcs11-integration.md).
 
 CanoKey private RSA, ECDH/X25519 and ML-KEM operations may use every ordinary
 asymmetric slot evidenced by the profile. PIV slot names do not impose host
