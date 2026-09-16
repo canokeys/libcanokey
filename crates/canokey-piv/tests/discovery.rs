@@ -1,5 +1,5 @@
 use canokey_piv::*;
-use canokey_protocol::{ErrorKind, Step};
+use canokey_protocol::{ErrorKind, SecretReference, Step};
 #[test]
 fn selected_version_and_configuration_validate_observations() {
     let mut version = read_version_selected(Default::default()).unwrap();
@@ -58,4 +58,63 @@ fn random_is_version_gated_chunked_and_atomic() {
     empty.start().unwrap();
     assert_eq!(empty.advance(&[6, 0, 0, 0x90, 0]).unwrap(), Step::Done);
     assert!(empty.result().unwrap().is_empty());
+}
+#[test]
+fn selected_pin_status_maps_verify_status_words() {
+    // Profile-free: a single empty VERIFY with no SELECT.
+    let mut op = get_pin_status_selected(Default::default()).unwrap();
+    assert_eq!(op.start().unwrap(), Step::Exchange);
+    assert_eq!(op.command().unwrap().as_bytes(), &[0, 0x20, 0, 0x80, 0]);
+    assert_eq!(op.advance(&[0x90, 0]).unwrap(), Step::Done);
+    assert_eq!(
+        op.result().unwrap(),
+        &PinStatus {
+            verified: Some(true),
+            retries_remaining: None,
+            retries_total: None,
+            blocked: false,
+        }
+    );
+    // 6983 reports a blocked PIN with zero remaining attempts.
+    let mut op = get_pin_status_selected(Default::default()).unwrap();
+    op.start().unwrap();
+    op.advance(&[0x69, 0x83]).unwrap();
+    assert_eq!(
+        op.result().unwrap(),
+        &PinStatus {
+            verified: Some(false),
+            retries_remaining: Some(0),
+            retries_total: None,
+            blocked: true,
+        }
+    );
+    // 63Cx carries the remaining retry count as typed status data.
+    let mut op = get_pin_status_selected(Default::default()).unwrap();
+    op.start().unwrap();
+    op.advance(&[0x63, 0xc2]).unwrap();
+    assert_eq!(
+        op.result().unwrap(),
+        &PinStatus {
+            verified: Some(false),
+            retries_remaining: Some(2),
+            retries_total: None,
+            blocked: false,
+        }
+    );
+}
+#[test]
+fn selected_pin_status_rejects_data_and_unmapped_statuses() {
+    // Nonempty response data is malformed for an empty VERIFY query.
+    let mut op = get_pin_status_selected(Default::default()).unwrap();
+    op.start().unwrap();
+    assert_eq!(
+        op.advance(&[1, 0x90, 0]).unwrap_err().kind,
+        ErrorKind::InvalidResponse
+    );
+    // Other statuses surface as authentication-context errors naming the PIN.
+    let mut op = get_pin_status_selected(Default::default()).unwrap();
+    op.start().unwrap();
+    let error = op.advance(&[0x69, 0x82]).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::SecurityStatusNotSatisfied);
+    assert_eq!(error.reference, Some(SecretReference::Pin));
 }

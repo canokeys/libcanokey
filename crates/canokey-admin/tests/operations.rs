@@ -424,15 +424,12 @@ fn pass_reads_require_pin_on_all_firmware() {
             ErrorKind::SecurityStatusNotSatisfied
         );
     }
-    // The authenticated typed read still follows the normal transcript.
+    // The authenticated typed read still follows the normal transcript;
+    // typed value decoding is covered by pass_slots_typed_read_golden.
     let mut op = begin(Request::PassSlots, true);
     assert_eq!(op.command().unwrap().as_bytes(), &[0, 0x43, 0, 0, 0]);
     op.advance(&[0x00, 0x03, 0x90, 0]).unwrap();
-    let Value::PassSlots(slots) = &op.result().unwrap().value else {
-        panic!()
-    };
-    assert_eq!(slots.short, PassSlotState::Off);
-    assert_eq!(slots.long, PassSlotState::HmacSha1);
+    assert!(matches!(op.result().unwrap().value, Value::PassSlots(_)));
     // An already verified Admin transaction may read without resending VERIFY.
     let mut op = operation_with_access(
         &profile(),

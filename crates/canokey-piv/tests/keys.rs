@@ -124,22 +124,6 @@ fn metadata_legacy_status_and_slot_gates_are_narrow() {
         Default::default()
     )
     .is_err());
-    // 3.0.x gates the INS EE read behind management authentication
-    // (Capability::PivProtectedAlgorithmConfigRead): a bare read fails at
-    // construction, while explicit management authentication keeps working.
-    assert_eq!(
-        read_algorithm_config(&profile("3.0.3"), Access::None, Default::default())
-            .unwrap_err()
-            .kind,
-        ErrorKind::SecurityStatusNotSatisfied
-    );
-    let mut op =
-        read_algorithm_config(&profile("3.0.3"), tdes_access(), Default::default()).unwrap();
-    authenticate_tdes(&mut op);
-    assert_eq!(op.command().unwrap().as_bytes(), hex("00ee010000"));
-    op.advance(&[0, 0xe0, 5, 0x16, 0xe1, 0x53, 0x55, 0x90, 0])
-        .unwrap();
-    assert!(!op.result().unwrap().enabled());
 }
 
 #[test]

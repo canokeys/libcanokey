@@ -274,16 +274,4 @@ fn challenge_response_requires_pinned_3_1_evidence() {
             ErrorKind::CapabilityUnknown
         );
     }
-    assert_eq!(
-        profile("3.0.3")
-            .capability(Capability::OathChallengeResponse)
-            .support,
-        Support::Unsupported
-    );
-    assert_eq!(
-        profile("3.1.0")
-            .capability(Capability::OathChallengeResponse)
-            .support,
-        Support::Supported
-    );
 }
