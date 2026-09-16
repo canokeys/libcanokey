@@ -16,6 +16,8 @@ canokey-admin.workspace = true
 canokey-piv.workspace = true
 canokey-oath.workspace = true
 canokey-openpgp.workspace = true
+canokey-ndef.workspace = true
+canokey-ctap.workspace = true
 
 x509-info = { workspace = true, optional = true }
 
