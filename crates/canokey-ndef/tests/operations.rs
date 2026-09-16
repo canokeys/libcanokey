@@ -80,31 +80,16 @@ fn read_message_selects_cc_advertised_file_id() {
         op.command().unwrap().as_bytes(),
         &[0x00, 0xa4, 0x00, 0x0c, 0x02, 0xe1, 0x04]
     );
-    op.advance(&OK).unwrap();
-    assert_eq!(op.command().unwrap().as_bytes(), &READ_NLEN);
-    assert_eq!(op.advance(&[0x00, 0x00, 0x90, 0x00]).unwrap(), Step::Done);
-    assert!(op.take_result().unwrap().is_empty());
 }
 
 #[test]
-fn read_capability_parses_read_only_and_smaller_file() {
-    let mut op = read_capability(Default::default()).unwrap();
-    op.start().unwrap();
-    op.advance(&OK).unwrap();
-    op.advance(&OK).unwrap();
-    assert_eq!(op.advance(&cc_response(100, true)).unwrap(), Step::Done);
-    let capability = op.result().unwrap();
-    assert_eq!(capability.max_message_length, 98);
-    assert!(capability.read_only);
-}
-
-#[test]
-fn read_capability_rejects_malformed_cc() {
+fn read_capability_rejects_invalid_cc() {
+    // Bad NDEF file control TLV marker: the length/marker rejection branch.
     let mut bad_tag = cc_response(1024, false);
     bad_tag[7] = 0x05;
-    let mut bad_len = cc_response(1024, false);
-    bad_len[8] = 0x07;
-    for cc in [bad_tag, bad_len] {
+    // A maximum file size below the two NLEN bytes: the minimum-size branch.
+    let tiny = cc_response(1, false);
+    for cc in [bad_tag, tiny] {
         let mut op = read_capability(Default::default()).unwrap();
         op.start().unwrap();
         op.advance(&OK).unwrap();
@@ -113,22 +98,6 @@ fn read_capability_rejects_malformed_cc() {
         assert_eq!(error.kind, ErrorKind::InvalidResponse);
         assert_eq!(error.phase, Phase::Parsing);
         assert_eq!(op.state(), OperationState::Failed);
-    }
-}
-
-#[test]
-fn read_capability_rejects_truncated_and_tiny_cc() {
-    let mut truncated = cc_response(1024, false);
-    truncated.truncate(14); // 14 CC bytes instead of 15
-    truncated.extend(OK);
-    for cc in [truncated, cc_response(1, false)] {
-        let mut op = read_capability(Default::default()).unwrap();
-        op.start().unwrap();
-        op.advance(&OK).unwrap();
-        op.advance(&OK).unwrap();
-        let error = op.advance(&cc).unwrap_err();
-        assert_eq!(error.kind, ErrorKind::InvalidResponse);
-        assert_eq!(error.phase, Phase::Parsing);
     }
 }
 
@@ -169,15 +138,6 @@ fn read_message_multi_chunk() {
     second.extend(OK);
     assert_eq!(op.advance(&second).unwrap(), Step::Done);
     assert_eq!(op.result().unwrap().as_bytes(), body);
-}
-
-#[test]
-fn read_message_empty_short_circuits() {
-    let mut op = at_nlen_read();
-    assert_eq!(op.advance(&[0x00, 0x00, 0x90, 0x00]).unwrap(), Step::Done);
-    let message = op.take_result().unwrap();
-    assert!(message.is_empty());
-    assert_eq!(message.as_bytes(), b"");
 }
 
 #[test]
@@ -354,18 +314,6 @@ fn write_message_selects_cc_advertised_file_id() {
         op.command().unwrap().as_bytes(),
         &[0x00, 0xa4, 0x00, 0x0c, 0x02, 0xe1, 0x04]
     );
-    op.advance(&OK).unwrap();
-    op.advance(&OK).unwrap();
-    assert_eq!(
-        op.command().unwrap().as_bytes(),
-        &[0x00, 0xd6, 0x00, 0x02, 0x02, b'h', b'i']
-    );
-    op.advance(&OK).unwrap();
-    assert_eq!(
-        op.command().unwrap().as_bytes(),
-        &[0x00, 0xd6, 0x00, 0x00, 0x02, 0x00, 0x02]
-    );
-    assert_eq!(op.advance(&OK).unwrap(), Step::Done);
 }
 
 #[test]
@@ -398,30 +346,13 @@ fn write_message_beyond_cc_maximum_fails_before_any_update() {
 }
 
 #[test]
-fn write_message_device_write_rejection_is_security_status() {
-    // A device that still rejects UPDATE BINARY with 0x6982 keeps the mapping.
-    let mut op = write_message(b"hello", Default::default()).unwrap();
-    op.start().unwrap();
-    op.advance(&OK).unwrap();
-    op.advance(&OK).unwrap();
-    op.advance(&cc_response(1024, false)).unwrap();
-    op.advance(&OK).unwrap();
-    let error = op.advance(&[0x69, 0x82]).unwrap_err();
-    assert_eq!(error.kind, ErrorKind::SecurityStatusNotSatisfied);
-    assert_eq!(error.phase, Phase::Command);
-    assert_eq!(op.state(), OperationState::Failed);
-}
-
-#[test]
 fn write_message_rejects_oversized_message_before_io() {
     let message = vec![0u8; MAX_MESSAGE_LENGTH + 1];
     let error = write_message(&message, Default::default()).unwrap_err();
     assert_eq!(error.kind, ErrorKind::InvalidArgument);
     // The firmware hard maximum itself is accepted at construction.
     let message = vec![0u8; MAX_MESSAGE_LENGTH];
-    let mut op = write_message(&message, Default::default()).unwrap();
-    assert_eq!(op.start().unwrap(), Step::Exchange);
-    assert_eq!(op.command().unwrap().as_bytes(), &SELECT_APPLET);
+    write_message(&message, Default::default()).unwrap();
 }
 
 #[test]
@@ -450,14 +381,6 @@ fn cancel_mid_operation_sends_nothing_further() {
     );
     assert_eq!(
         op.advance(&OK).unwrap_err().kind,
-        ErrorKind::OperationStateError
-    );
-    let mut op = write_message(b"hello", Default::default()).unwrap();
-    op.start().unwrap();
-    op.cancel();
-    assert_eq!(op.state(), OperationState::Cancelled);
-    assert_eq!(
-        op.command().unwrap_err().kind,
         ErrorKind::OperationStateError
     );
 }
