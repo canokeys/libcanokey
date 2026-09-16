@@ -243,3 +243,47 @@ fn old_modern_firmware_uses_modern_select_and_truncated_calculate() {
         op.advance(&[0x76, 5, 6, 0, 0, 0, 1, 0x90, 0]).unwrap();
     }
 }
+#[test]
+fn yubikey_api_requires_pinned_3_1_evidence() {
+    for version in ["1.3", "1.5.2", "2.0.1", "3.0.3"] {
+        for request in [
+            Request::GetSerialYk,
+            Request::ChallengeResponseHmac {
+                slot: YkSlot::Slot1,
+                challenge: vec![1],
+            },
+        ] {
+            assert_eq!(
+                operation(&profile(version), request, None, Default::default())
+                    .unwrap_err()
+                    .kind,
+                ErrorKind::UnsupportedFeature
+            );
+        }
+    }
+    for version in ["3.2.0", "nonsense"] {
+        assert_eq!(
+            operation(
+                &profile(version),
+                Request::GetSerialYk,
+                None,
+                Default::default()
+            )
+            .unwrap_err()
+            .kind,
+            ErrorKind::CapabilityUnknown
+        );
+    }
+    assert_eq!(
+        profile("3.0.3")
+            .capability(Capability::OathYubiKeyApi)
+            .support,
+        Support::Unsupported
+    );
+    assert_eq!(
+        profile("3.1.0")
+            .capability(Capability::OathYubiKeyApi)
+            .support,
+        Support::Supported
+    );
+}

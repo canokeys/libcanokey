@@ -156,6 +156,14 @@ fn target(request: &Request, legacy: bool, slots: bool) -> Result<Option<Logical
             };
             (0x55, p1, p2, ExpectedLength::Absent)
         }
+        Request::GetSerialYk => (1, 0x10, 0, ExpectedLength::Absent),
+        Request::ChallengeResponseHmac { slot, challenge } => {
+            if challenge.len() > 64 {
+                return Err(argument());
+            }
+            data.extend(challenge);
+            (1, slot.wire(), 0, ExpectedLength::Absent)
+        }
     };
     let mut c = command(ins, p1, p2, data, le);
     if paged {
@@ -306,6 +314,15 @@ fn result(request: &Request, data: SecretBytes, legacy: bool) -> Result<Outcome,
             }
             Ok(Outcome::Calculations(output))
         }
+        Request::GetSerialYk => Ok(Outcome::Serial(
+            data.as_bytes().try_into().map_err(|_| invalid())?,
+        )),
+        Request::ChallengeResponseHmac { .. } => {
+            if data.as_bytes().len() != 20 {
+                return Err(invalid());
+            }
+            Ok(Outcome::ChallengeResponse(data))
+        }
         _ if data.is_empty() => Ok(Outcome::Unit),
         _ => Err(invalid()),
     }
@@ -330,6 +347,15 @@ fn result(request: &Request, data: SecretBytes, legacy: bool) -> Result<Outcome,
 /// already fails earlier at the OATH capability check), and a Long slot or
 /// append-enter request is then rejected with InvalidArgument before any I/O.
 ///
+/// GetSerialYk and ChallengeResponseHmac are the YubiKey OTP API commands the
+/// OATH applet answers for KeePassXC-style challenge-response (INS 0x01, P1
+/// 0x10/0x30/0x38). The firmware dispatches them before its access-validation
+/// gate, so the machine sends SELECT then the command without VALIDATE even
+/// when the applet reports an access challenge; supplying an access key is
+/// rejected with InvalidArgument. They require the pinned 3.1 evidence
+/// ([`Capability::OathYubiKeyApi`]): audited 1.5.2 and 2.0.1 sources lack the
+/// dispatch.
+///
 /// # Errors
 /// Capability, input and known command-budget errors fail before execution.
 /// Authentication, malformed fields, unexpected status and cumulative budget
@@ -341,10 +367,18 @@ pub fn operation(
     options: OperationOptions,
 ) -> Result<Operation<Outcome>, Error> {
     profile.capability(Capability::Oath).require()?;
+    let yk_api = matches!(
+        request,
+        Request::GetSerialYk | Request::ChallengeResponseHmac { .. }
+    );
     if matches!(request, Request::Select) && access.is_some()
         || matches!(request, Request::Validate) && access.is_none()
+        || yk_api && access.is_some()
     {
         return Err(argument());
+    }
+    if yk_api {
+        profile.capability(Capability::OathYubiKeyApi).require()?;
     }
     let legacy = profile.capability(Capability::OathLegacy).support == Support::Supported;
     let slots = profile.capability(Capability::OathSetDefaultSlots).support == Support::Supported;
@@ -502,6 +536,12 @@ impl Machine<Outcome> for Oath {
             {
                 e.kind = ErrorKind::NotFound;
             }
+            if self.phase == 3
+                && response.status.raw() == 0x6a82
+                && matches!(self.request, Request::ChallengeResponseHmac { .. })
+            {
+                e.kind = ErrorKind::NotFound;
+            }
             return Err(e);
         }
         match self.phase {
@@ -521,6 +561,15 @@ impl Machine<Outcome> for Oath {
                 let selection = selection(response.data)?;
                 if matches!(self.request, Request::Select) {
                     return Ok(Action::Done(Outcome::Selection(selection)));
+                }
+                // The firmware dispatches the YubiKey OTP API commands before
+                // its access-validation gate, so no VALIDATE is sent even when
+                // the selection reports an access challenge.
+                if matches!(
+                    self.request,
+                    Request::GetSerialYk | Request::ChallengeResponseHmac { .. }
+                ) {
+                    return self.target();
                 }
                 match (&self.access, selection.challenge) {
                     (None, None) => self.target(),

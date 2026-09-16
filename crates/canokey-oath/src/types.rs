@@ -145,6 +145,23 @@ impl DefaultSlot {
         }
     }
 }
+/// PASS HMAC-SHA1 slot addressed through the YubiKey OTP API commands that
+/// the OATH applet answers (INS 0x01).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum YkSlot {
+    /// Slot 1, wire P1 0x30 (YK_CMD_CHAL_HMAC1).
+    Slot1,
+    /// Slot 2, wire P1 0x38 (YK_CMD_CHAL_HMAC2).
+    Slot2,
+}
+impl YkSlot {
+    pub(crate) fn wire(self) -> u8 {
+        match self {
+            Self::Slot1 => 0x30,
+            Self::Slot2 => 0x38,
+        }
+    }
+}
 /// Owned OATH operation request.
 #[derive(Debug)]
 pub enum Request {
@@ -209,6 +226,29 @@ pub enum Request {
         append_enter: bool,
         /// Existing credential name.
         name: Name,
+    },
+    /// YubiKey OTP API GET SERIAL (INS 0x01, P1 0x10, no data) answered by the
+    /// OATH applet; used by KeePassXC-style challenge-response clients. The
+    /// firmware dispatches this command before the OATH access-validation
+    /// gate, so it works even when an access code is installed; `access` must
+    /// be None. Evidence: present in the pinned 3.1 firmware (canokey-core
+    /// 9e77287); the audited 1.5.2 (b16e8c5) and 2.0.1 (be6325b) sources
+    /// route INS 0x01 only to PUT, so construction requires
+    /// [`canokey_compat::Capability::OathYubiKeyApi`].
+    GetSerialYk,
+    /// YubiKey OTP API HMAC-SHA1 challenge-response (INS 0x01, P1 0x30/0x38)
+    /// answered by the OATH applet from a PASS HMAC-SHA1 slot; used by
+    /// KeePassXC. The firmware dispatches this command before the OATH
+    /// access-validation gate, so it works even when an access code is
+    /// installed; `access` must be None. A slot that is not configured as
+    /// HMAC-SHA1 fails with NotFound (SW 6A82). Same version evidence and
+    /// capability gate as [`Request::GetSerialYk`].
+    ChallengeResponseHmac {
+        /// PASS HMAC-SHA1 slot to answer from.
+        slot: YkSlot,
+        /// Challenge bytes, zero through 64 (PASS_HMAC_CHALLENGE_LENGTH);
+        /// longer inputs fail construction with InvalidArgument before any I/O.
+        challenge: Vec<u8>,
     },
 }
 /// Listed credential with raw algorithm/type octet, preserving unknown values.
@@ -277,6 +317,11 @@ pub enum Outcome {
     Entries(Vec<Entry>),
     /// Individual or all-credential calculations, in card order.
     Calculations(Vec<Calculation>),
+    /// Four-byte device serial from the YubiKey OTP API GET SERIAL command.
+    Serial([u8; 4]),
+    /// Twenty-byte HMAC-SHA1 challenge-response from a PASS slot; a credential
+    /// response, owned, redacted and wiped on drop.
+    ChallengeResponse(SecretBytes),
     /// Successful validation or empty mutation acknowledgment.
     Unit,
 }

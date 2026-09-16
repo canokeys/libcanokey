@@ -142,6 +142,11 @@ pub enum Capability {
     /// OATH SET DEFAULT accepts two touch slots and an append-enter flag from
     /// 3.0.0. Older firmware accepts only the single-slot, no-enter form.
     OathSetDefaultSlots,
+    /// OATH applet answers YubiKey OTP API commands (INS 01 with P1 10/30/38)
+    /// dispatched before its access-validation gate. Audited 1.5.2 and 2.0.1
+    /// sources route INS 01 only to PUT; the dispatch appears in the pinned
+    /// 3.1 evidence (introduced by canokey-core b0416d7, in no release tag).
+    OathYubiKeyApi,
     /// Baseline Admin commands; layouts and newer commands have separate gates.
     Admin,
     /// Admin NDEF/WebUSB availability flags introduced in 1.5.2.
@@ -537,6 +542,7 @@ impl DeviceProfile {
             }
             Capability::OathReliablePagination => return self.firmware_range((3, 0, 1), (3, 1, 0)),
             Capability::OathSetDefaultSlots => return self.firmware_range((3, 0, 0), (3, 1, 0)),
+            Capability::OathYubiKeyApi => return self.firmware_range((3, 1, 0), (3, 1, 0)),
             Capability::OpenPgp => return self.firmware_range((1, 3, 0), (3, 1, 0)),
             Capability::OpenPgpWrappedData => return self.firmware_range((2, 0, 0), (3, 1, 0)),
             Capability::OpenPgpAlgorithmInformation | Capability::OpenPgpPublicKeyLengthFix => {

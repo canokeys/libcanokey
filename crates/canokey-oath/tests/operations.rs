@@ -284,3 +284,121 @@ fn malformed_responses_budgets_and_cancellation() {
         ErrorKind::ConditionsNotSatisfied
     );
 }
+#[test]
+fn yk_get_serial_transcript_and_response_validation() {
+    // A protected applet does not gate the YubiKey OTP API commands.
+    let mut op = begin(Request::GetSerialYk, None);
+    op.advance(&selection(true)).unwrap();
+    assert_eq!(op.command().unwrap().as_bytes(), &[0, 1, 0x10, 0]);
+    assert_eq!(
+        op.advance(&[1, 2, 3, 0x90, 0]).unwrap_err().kind,
+        ErrorKind::InvalidResponse
+    );
+    let mut op = begin(Request::GetSerialYk, None);
+    op.advance(&selection(false)).unwrap();
+    assert_eq!(op.command().unwrap().as_bytes(), &[0, 1, 0x10, 0]);
+    assert_eq!(op.advance(&[1, 2, 3, 4, 0x90, 0]).unwrap(), Step::Done);
+    assert!(matches!(
+        op.take_result().unwrap(),
+        Outcome::Serial([1, 2, 3, 4])
+    ));
+    // An access input is rejected rather than silently ignored.
+    assert_eq!(
+        operation(
+            &profile(),
+            Request::GetSerialYk,
+            Some(access()),
+            Default::default()
+        )
+        .unwrap_err()
+        .kind,
+        ErrorKind::InvalidArgument
+    );
+}
+#[test]
+fn yk_challenge_response_transcripts_status_and_redaction() {
+    let hmac = [7u8; 20];
+    for (slot, p1) in [(YkSlot::Slot1, 0x30), (YkSlot::Slot2, 0x38)] {
+        let mut op = begin(
+            Request::ChallengeResponseHmac {
+                slot,
+                challenge: b"challenge".to_vec(),
+            },
+            None,
+        );
+        op.advance(&selection(true)).unwrap();
+        let mut expected = vec![0, 1, p1, 0, 9];
+        expected.extend(b"challenge");
+        assert_eq!(op.command().unwrap().as_bytes(), expected);
+        let mut response = hmac.to_vec();
+        response.extend([0x90, 0]);
+        assert_eq!(op.advance(&response).unwrap(), Step::Done);
+        let outcome = op.take_result().unwrap();
+        assert!(!format!("{outcome:?}").contains("7, 7"));
+        let Outcome::ChallengeResponse(bytes) = outcome else {
+            panic!()
+        };
+        assert_eq!(bytes.as_bytes(), &hmac);
+    }
+    let mut op = begin(
+        Request::ChallengeResponseHmac {
+            slot: YkSlot::Slot1,
+            challenge: vec![],
+        },
+        None,
+    );
+    op.advance(&selection(false)).unwrap();
+    assert_eq!(op.command().unwrap().as_bytes(), &[0, 1, 0x30, 0]);
+    let mut short = vec![7u8; 19];
+    short.extend([0x90, 0]);
+    assert_eq!(
+        op.advance(&short).unwrap_err().kind,
+        ErrorKind::InvalidResponse
+    );
+    let mut op = begin(
+        Request::ChallengeResponseHmac {
+            slot: YkSlot::Slot2,
+            challenge: vec![1],
+        },
+        None,
+    );
+    op.advance(&selection(false)).unwrap();
+    assert_eq!(
+        op.advance(&[0x6a, 0x82]).unwrap_err().kind,
+        ErrorKind::NotFound
+    );
+    // Construction bounds the challenge without any I/O.
+    let challenge_response = |challenge| Request::ChallengeResponseHmac {
+        slot: YkSlot::Slot1,
+        challenge,
+    };
+    operation(
+        &profile(),
+        challenge_response(vec![0; 64]),
+        None,
+        Default::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        operation(
+            &profile(),
+            challenge_response(vec![0; 65]),
+            None,
+            Default::default()
+        )
+        .unwrap_err()
+        .kind,
+        ErrorKind::InvalidArgument
+    );
+    assert_eq!(
+        operation(
+            &profile(),
+            challenge_response(vec![1]),
+            Some(access()),
+            Default::default()
+        )
+        .unwrap_err()
+        .kind,
+        ErrorKind::InvalidArgument
+    );
+}
