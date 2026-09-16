@@ -33,6 +33,14 @@
 //! deletion and user-information updates, all authenticated with a
 //! pinUvAuthToken from the `pin` module.
 //!
+//! # Large blobs
+//!
+//! Also behind `clientpin`, the `largeblob` module implements
+//! authenticatorLargeBlobs (0x0C): reading and replacing the authenticator's
+//! serialized large-blob array. The library owns the fragmentation; writes
+//! are authenticated with a pinUvAuthToken carrying the largeBlobWrite
+//! permission when the device has a PIN set.
+//!
 //! # Authenticator configuration
 //!
 //! Also behind `clientpin`, the `config` module implements
@@ -134,6 +142,8 @@ pub mod cose;
 #[cfg(feature = "clientpin")]
 pub mod credmgmt;
 pub mod ctap2;
+#[cfg(feature = "clientpin")]
+pub mod largeblob;
 #[cfg(feature = "clientpin")]
 pub mod pin;
 pub mod status;
