@@ -107,5 +107,20 @@ int main(void) {
     assert(cnk_operation_cancel(op)==CNK_OK&&cnk_operation_cancel(op)==CNK_OK);
     assert(cnk_operation_state(op,&state)==CNK_OK&&state==CNK_STATE_CANCELLED);
     cnk_operation_free(op);cnk_operation_free(NULL);cnk_profile_free(NULL);
+    cnk_operation_t *observed=NULL;
+    const uint8_t pre[]={9,8,7,6};
+    assert(cnk_probe_device_with_serial_new(CNK_PROBE_MINIMAL,pre,3,NULL,&observed,&err)==CNK_INVALID_ARGUMENT&&observed==NULL);
+    assert(cnk_probe_device_with_serial_new(CNK_PROBE_MINIMAL,pre,4,NULL,&observed,&err)==CNK_OK);
+    assert(cnk_operation_start(observed,&step,&err)==CNK_OK);
+    feed(observed,ok,sizeof(ok),&step);
+    feed(observed,fw,sizeof(fw),&step);
+    feed(observed,model,sizeof(model),&step);
+    assert(step==CNK_STEP_DONE);
+    cnk_profile_t *observed_profile=NULL;
+    assert(cnk_operation_take_profile(observed,&observed_profile)==CNK_OK);
+    uint32_t observed_serial=0;
+    assert(cnk_profile_serial_u32(observed_profile,&observed_serial)==CNK_OK&&observed_serial==0x09080706);
+    cnk_profile_free(observed_profile);
+    cnk_operation_free(observed);
     return 0;
 }

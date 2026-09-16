@@ -37,6 +37,34 @@ fn minimal_probe_and_optional_statuses() {
     assert_eq!(p.warnings().len(), 1);
 }
 #[test]
+fn probe_skips_serial_read_when_bootstrap_observed() {
+    let mut op = probe_device(ProbeOptions {
+        observed_serial: Some([1, 2, 3, 4]),
+        ..Default::default()
+    })
+    .unwrap();
+    op.start().unwrap();
+    exchange(
+        &mut op,
+        &[0, 0xa4, 4, 0, 5, 0xf0, 0, 0, 0, 0, 0],
+        &[0x90, 0],
+    );
+    exchange(&mut op, &[0, 0x31, 0, 0, 0], b"2.0.0\x90\x00");
+    exchange(&mut op, &[0, 0x31, 1, 0, 0], b"CanoKey\x90\x00");
+    // The serial read is skipped: the next command is the PIV select.
+    exchange(
+        &mut op,
+        &[0, 0xa4, 4, 0, 5, 0xa0, 0, 0, 3, 8, 0],
+        &[0x90, 0],
+    );
+    assert_eq!(
+        exchange(&mut op, &[0, 0xfd, 0, 0, 0], &[5, 7, 0, 0x90, 0]),
+        Step::Done
+    );
+    let p = op.take_result().unwrap();
+    assert_eq!(p.info().serial(), Some(&[1, 2, 3, 4][..]));
+}
+#[test]
 fn full_probe_keeps_firmware_and_piv_version_separate() {
     let mut op = probe_device(ProbeOptions::default()).unwrap();
     op.start().unwrap();

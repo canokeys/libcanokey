@@ -62,6 +62,9 @@ separate observations. PIV compatibility version never substitutes for firmware.
 `probe_device` reads Admin firmware/model/serial; default PIV mode then selects PIV,
 reads its version and reads algorithm configuration only where probing is known safe.
 Minimal mode stops after Admin. Probe performs no credential attempts or writes.
+A four-byte serial already observed by a bootstrap conversation may be supplied as
+`ProbeOptions::observed_serial`; the probe records it and skips its own serial
+read, avoiding a duplicate read at connection establishment.
 
 Capabilities distinguish Supported, Unsupported and Unknown; evidence distinguishes
 Observed, FirmwareMatrix and LatestKnownFallback. Firmware rules live in compat.

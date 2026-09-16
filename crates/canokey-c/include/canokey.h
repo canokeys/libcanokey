@@ -241,6 +241,7 @@ uint32_t cnk_abi_version(void);
 void cnk_profile_free(cnk_profile_t *);
 void cnk_operation_free(cnk_operation_t *);
 cnk_status_t cnk_probe_device_new(uint32_t mode,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_probe_device_with_serial_new(uint32_t mode,const uint8_t *serial,size_t serial_len,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_verify_pin_new(const cnk_profile_t *,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_get_pin_status_new(const cnk_profile_t *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_get_pin_status_selected_new(const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);

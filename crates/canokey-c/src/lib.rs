@@ -352,13 +352,55 @@ pub unsafe extern "C" fn cnk_probe_device_new(
         };
         canokey::probe_device(ProbeOptions {
             mode,
+            observed_serial: None,
             operation: options(opts)?,
         })
         .map(Inner::Probe)
         .map_err(|e| failure(e, error))
     })
 }
-/// Construct SELECT plus PIN verification, copying all credential bytes/options.
+/// Construct a probe like cnk_probe_device_new, optionally carrying the serial
+/// already observed by a bootstrap conversation. A non-NULL serial must point
+/// to exactly four bytes, copied before return; the probe then records them
+/// and skips its own serial read. A NULL serial behaves like
+/// cnk_probe_device_new. Invalid mode, serial length or options returns
+/// INVALID_ARGUMENT.
+///
+/// # Safety
+/// Follow the crate pointer/aliasing contract. A non-NULL serial must be
+/// readable for serial_len bytes; out/opts/error requirements match
+/// cnk_probe_device_new. The caller receives ownership of `*out` only on OK
+/// and must free it.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_probe_device_with_serial_new(
+    mode: u32,
+    serial: *const u8,
+    serial_len: usize,
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        let observed_serial = if serial.is_null() {
+            None
+        } else {
+            let bytes = std::slice::from_raw_parts(serial, serial_len);
+            Some(<[u8; 4]>::try_from(bytes).map_err(|_| ARG)?)
+        };
+        let mode = match mode {
+            0 => ProbeMode::Minimal,
+            1 => ProbeMode::Piv,
+            _ => return Err(ARG),
+        };
+        canokey::probe_device(ProbeOptions {
+            mode,
+            observed_serial,
+            operation: options(opts)?,
+        })
+        .map(Inner::Probe)
+        .map_err(|e| failure(e, error))
+    })
+}
 /// The source profile and input buffers may be released after return. Invalid
 /// PIN returns INVALID_ARGUMENT with error details; capability errors propagate.
 ///
