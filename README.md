@@ -77,15 +77,25 @@ protocol state.
   full/truncated calculations and paged results with explicit HOTP/touch markers.
   Set-default marks an HOTP credential as the touch keyboard-emulation default,
   using the two-slot/append-enter dialect only on firmware 3.0.0 and newer.
+  The YubiKey OTP API commands the OATH applet answers (GET SERIAL and
+  HMAC-SHA1 challenge-response from a PASS slot, dispatched before the
+  access-validation gate) provide the KeePassXC interop path; they require
+  3.1.0 firmware evidence.
 - NDEF capability-container reads and chunked message read/replace, with
   zero-NLEN-first crash-consistent writes; profile-free.
 - CTAP/FIDO2 ISO 7816 transport envelope (explicit FIDO2 selection, `80 10`
   message wrap and `80 C0` GET RESPONSE continuation) plus a typed CTAP2
   client layer: strict canonical CBOR, COSE key and authenticatorData parsing,
   and getInfo/makeCredential/getAssertion/reset/selection operations. The
-  default `clientpin` feature adds ClientPIN protocols 1 and 2 and credential
-  management with bounded in-operation enumeration. WebAuthn ceremonies
-  (clientDataJSON, attestation trust, rpId policy) remain host-side.
+  default `clientpin` feature adds ClientPIN protocols 1 and 2, credential
+  management with bounded in-operation enumeration, authenticatorConfig
+  (toggle always-UV, set minimum PIN length, require long touch for reset)
+  and fragmented largeBlobs reads/writes. The raw CTAP1/U2F
+  register/authenticate/check-only/version commands are ungated, and the
+  hmac-secret extension covers the makeCredential declaration plus the
+  encrypted salt exchange, including the CanoKey hmac-secret-mc variant.
+  WebAuthn ceremonies (clientDataJSON, attestation trust, rpId policy)
+  remain host-side.
 - OpenPGP DO/certificate reads and writes, separate PW1/PW3 modes, password/reset
   management, explicit policies/fingerprints/timestamps, key generation/import,
   shared SPKI export, signatures, PKCS#1 v1.5 decipher and ECDH/X25519.

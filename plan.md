@@ -45,8 +45,9 @@ that acceptance; cross-builds are checked. See the companion
 Console/ckman and general Python bindings remain separate scope. In CTAP,
 both the ISO 7816 transport envelope (FIDO2 selection, message wrap and
 continuation) and the CTAP2 client layer (strict canonical CBOR, typed
-command operations, ClientPin protocols 1/2 and credential management) are
-implemented in canokey-ctap; WebAuthn ceremony and relying-party logic
+command operations, ClientPin protocols 1/2, credential management,
+authenticatorConfig, largeBlobs, hmac-secret and the raw CTAP1/U2F commands)
+are implemented in canokey-ctap; WebAuthn ceremony and relying-party logic
 (clientDataJSON, attestation trust, rpId policy) remains host-side consumer
 scope. The CTAP2 layer (getInfo, ClientPin v1+v2, makeCredential,
 getAssertion with external ES256 and ML-DSA-65 verification, and credential

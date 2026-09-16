@@ -148,6 +148,25 @@ No firmware is linked or built as a dependency.
   P1 in {1,2} (short/long touch) and P2 the append-enter flag. Firmware answers
   6984 for a missing record and 6985 when the named credential is TOTP.
 
+- [`applets/oath/oath.c`](https://github.com/canokeys/canokey-core/blob/9e77287b2a272f6123d516790af93933dec72b78/applets/oath/oath.c#L682-L688)
+  dispatches the YubiKey OTP API commands under INS 0x01 (which collides with
+  OATH PUT) *before* the OATH access-validation gate, so KeePassXC-style
+  clients work on an access-protected applet: P1 0x10 (GET SERIAL) returns the
+  four-byte device serial, and P1 0x30/0x38 (`oath_yk_api_req`,
+  [L646-L667](https://github.com/canokeys/canokey-core/blob/9e77287b2a272f6123d516790af93933dec72b78/applets/oath/oath.c#L646-L667))
+  answer a challenge bounded by `PASS_HMAC_CHALLENGE_LENGTH` (64, per
+  `include/pass.h`) with the 20-byte HMAC-SHA1 of the corresponding PASS
+  HMAC slot, failing an unconfigured slot with 6A82. The dispatch was
+  introduced by core commit
+  [`b0416d7`](https://github.com/canokeys/canokey-core/commit/b0416d7)
+  (2026-05, in no release tag up to 3.0.3), and commit
+  [`e82e58b`](https://github.com/canokeys/canokey-core/commit/e82e58b)
+  relaxed the challenge check to accept short challenges. The audited
+  [1.5.2](https://github.com/canokeys/canokey-core/blob/b16e8c517ed72fe26e5101b450a99df2b3526aa1/applets/oath/oath.c)
+  and
+  [2.0.1](https://github.com/canokeys/canokey-core/blob/be6325b8c4e6d40e86b2943f65083ed6b71f8259/applets/oath/oath.c)
+  sources route INS 0x01 only to PUT.
+
 - [`include/ndef.h`](https://github.com/canokeys/canokey-core/blob/9e77287b2a272f6123d516790af93933dec72b78/include/ndef.h)
   defines the NDEF applet instructions A4/B0/D6, `NDEF_MSG_MAX_LENGTH` 1022 and
   the CC file E103 / NDEF data file 0001, with read-only encoded in CC byte 14.
@@ -211,6 +230,48 @@ No firmware is linked or built as a dependency.
   advertises FIDO_2_0 and U2F_V2, implements pin protocol v1 only (zero-IV
   AES-256-CBC with truncated 16-byte HMACs), and dispatches no
   credentialManagement.
+- authenticatorConfig builds the pinUvAuthParam MAC input in
+  [`ctap.c`](https://github.com/canokeys/canokey-core/blob/9e77287b2a272f6123d516790af93933dec72b78/applets/ctap/ctap.c#L3304-L3318)
+  as 32 bytes of 0xFF, the command byte 0x0D, the subcommand byte and the raw
+  subCommandParams encoding; only subcommands 0x02/0x03/0x04 are accepted
+  ([L3237-L3238](https://github.com/canokeys/canokey-core/blob/9e77287b2a272f6123d516790af93933dec72b78/applets/ctap/ctap.c#L3237-L3238)),
+  and the token must carry the authenticatorConfig permission
+  (`CP_PERMISSION_ACFG`).
+- authenticatorLargeBlobs (`ctap_large_blobs`,
+  [`ctap.c` L3405](https://github.com/canokeys/canokey-core/blob/9e77287b2a272f6123d516790af93933dec72b78/applets/ctap/ctap.c#L3405))
+  verifies each set fragment against the 70-byte MAC input
+  `0xFF * 32 || h'0C00' || uint32LittleEndian(offset) || SHA-256(fragment)`
+  ([L3528-L3538](https://github.com/canokeys/canokey-core/blob/9e77287b2a272f6123d516790af93933dec72b78/applets/ctap/ctap.c#L3528-L3538)),
+  requires `length` on the first fragment only, answers a wrong offset with
+  CTAP1_ERR_INVALID_SEQ (0x04,
+  [L3505](https://github.com/canokeys/canokey-core/blob/9e77287b2a272f6123d516790af93933dec72b78/applets/ctap/ctap.c#L3505))
+  and verifies the 16-byte truncated SHA-256 integrity trailer at commit
+  ([L3560-L3578](https://github.com/canokeys/canokey-core/blob/9e77287b2a272f6123d516790af93933dec72b78/applets/ctap/ctap.c#L3560-L3578)).
+  [`ctap-internal.h`](https://github.com/canokeys/canokey-core/blob/9e77287b2a272f6123d516790af93933dec72b78/applets/ctap/ctap-internal.h#L279-L283)
+  fixes `LARGE_BLOB_SIZE_LIMIT` at 4096 and `MAX_FRAGMENT_LENGTH` as
+  `MAX_CTAP_BUFSIZE - 64`, a platform-dependent value; the library therefore
+  keeps a conservative host-side 1024-byte fragment cap.
+- hmac-secret is parsed by `parse_hmac_secret_params` in
+  [`ctap-parser.c`](https://github.com/canokeys/canokey-core/blob/9e77287b2a272f6123d516790af93933dec72b78/applets/ctap/ctap-parser.c#L658)
+  with per-protocol saltEnc/saltAuth length checks
+  ([L735-L744](https://github.com/canokeys/canokey-core/blob/9e77287b2a272f6123d516790af93933dec72b78/applets/ctap/ctap-parser.c#L735-L744));
+  `ctap_build_hmac_secret_output`
+  ([`ctap.c` L1559](https://github.com/canokeys/canokey-core/blob/9e77287b2a272f6123d516790af93933dec72b78/applets/ctap/ctap.c#L1559))
+  produces the encrypted output placed in authData under "hmac-secret-mc" in
+  makeCredential
+  ([L1609-L1638](https://github.com/canokeys/canokey-core/blob/9e77287b2a272f6123d516790af93933dec72b78/applets/ctap/ctap.c#L1609-L1638))
+  and under "hmac-secret" in getAssertion
+  ([L2343-L2359](https://github.com/canokeys/canokey-core/blob/9e77287b2a272f6123d516790af93933dec72b78/applets/ctap/ctap.c#L2343-L2359)).
+- The CLA-00 dispatch in
+  [`ctap.c`](https://github.com/canokeys/canokey-core/blob/9e77287b2a272f6123d516790af93933dec72b78/applets/ctap/ctap.c#L3932-L3945)
+  routes the raw U2F REGISTER/AUTHENTICATE/VERSION commands; with alwaysUv
+  enabled REGISTER and AUTHENTICATE fail with SW_INS_NOT_SUPPORTED (6D00)
+  while VERSION still answers. In
+  [`u2f.c`](https://github.com/canokeys/canokey-core/blob/9e77287b2a272f6123d516790af93933dec72b78/applets/ctap/u2f.c)
+  the check-only control byte is answered with 6985 by design
+  ([L137](https://github.com/canokeys/canokey-core/blob/9e77287b2a272f6123d516790af93933dec72b78/applets/ctap/u2f.c#L137)),
+  and an invalid key handle or application-ID mismatch fails with 6A80
+  ([L131-L135](https://github.com/canokeys/canokey-core/blob/9e77287b2a272f6123d516790af93933dec72b78/applets/ctap/u2f.c#L131-L135)).
 
 These sources establish encoding and version rules, not hardware interoperability.
 Newer base versions and unrecognized versions remain Unknown for these mutations.

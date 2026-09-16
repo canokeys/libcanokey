@@ -284,6 +284,21 @@ a TOTP name returns 6985 (ConditionsNotSatisfied), and a missing name returns
 6984, mapped to NotFound in command context like Delete/Rename/Calculate. As a
 mutation it is never replayed after a lost response.
 
+The OATH applet also answers two YubiKey OTP API commands under INS 0x01,
+dispatched by the firmware before its access-validation gate (the INS collides
+with OATH PUT): `Request::GetSerialYk` (P1 0x10) returns the four-byte device
+serial as `Outcome::Serial`, and `Request::ChallengeResponseHmac { slot:
+YkSlot, challenge }` (P1 0x30/0x38 for the short/long slot) answers an
+at-most-64-byte challenge with the 20-byte HMAC-SHA1 of the corresponding PASS
+HMAC slot as `Outcome::ChallengeResponse`; an unconfigured slot returns 6A82,
+mapped to NotFound. This is the KeePassXC interop path; the HMAC key is
+configured through the Admin typed PASS slot (HmacSha1). Because the dispatch
+precedes the gate these commands work on an access-protected applet, and
+supplying an access key with them is rejected with InvalidArgument before any
+I/O. They are gated by `Capability::OathYubiKeyApi` (3.1.0 only): introduced
+by canokey-core commit b0416d7 (2026-05), absent from every release tag up to
+3.0.3 and present at the pinned 3.1.0 evidence HEAD.
+
 ### Historical OATH commands
 
 `Capability::Oath` covers baseline operations. `OathLegacy` selects the 1.3
@@ -503,6 +518,80 @@ complete the set. The CanoKey vendor metadata-only mode (subCommandParams
 key 0x80, returning the raw COSE algorithm identifier under response key
 0x80 instead of the public key) is caller opt-in; the legacy preview command
 0x41 is never emitted.
+
+Also behind `clientpin`, `ctap::config` implements authenticatorConfig (0x0D):
+`toggle_always_uv`, `set_min_pin_length` (subCommandParams keys 1
+newMinPINLength, 2 minPinLengthRPIDs, 3 forcePinChange, following the CTAP 2.1
+numbering) and `enable_long_touch_for_reset`. Every request carries
+pinUvAuthProtocol and pinUvAuthParam computed over
+`0xFF * 32 || 0x0D || subCommand || cbor(subCommandParams)` — the MAC input
+ends after the subcommand byte when no parameters are sent — with a
+pinUvAuthToken holding `Permissions::AUTHENTICATOR_CONFIG`; a successful
+response must have an empty payload. Construction enforces
+`MIN_MIN_PIN_LENGTH` (4) and `MAX_MIN_PIN_LENGTH_RP_IDS` (4) before any I/O.
+All three subcommands are persistent configuration changes. Enabling alwaysUv
+requires user verification on every CTAP2 operation and on 3.1.0 firmware
+disables the legacy U2F/CTAP1 interface entirely (see `ctap::u2f`). The
+long-touch-for-reset option makes a reset require holding the touch for up to
+30 seconds, and because the reset wait loop is not skipped over NFC, an NFC
+reset then always times out; only a full authenticatorReset reverses it.
+
+`ctap::largeblob` (also `clientpin`) implements authenticatorLargeBlobs
+(0x0C). `read_array` owns the fragmentation of the serialized large-blob
+array, requesting chunks of at most `DEFAULT_MAX_FRAGMENT_LENGTH` (1024)
+clamped so one fragment fits a single physical response under
+`max_response_bytes` (a 16-byte margin), accumulating at most
+`MAX_LARGE_BLOB_ARRAY_BYTES` (4096) bytes within the exchange budget;
+`read_chunk` is the single-shot read for callers implementing their own
+resume logic. `write_array` takes the complete serialized array (17..=4096
+bytes: the contents plus the caller-owned 16-byte truncated SHA-256 integrity
+trailer, whose construction stays the caller's responsibility), fragments it
+with `length` on the first fragment only and MACs each fragment over
+`0xFF * 32 || 0x0C00 || uint32LittleEndian(offset) || SHA-256(fragment)` with
+a token holding `Permissions::LARGE_BLOB_WRITE` (0x10); a device without a
+PIN needs no token (pass `None`, and the firmware ignores any keys 5/6).
+Firmware semantics: a fragment at a wrong offset fails with
+CTAP1_ERR_INVALID_SEQ (0x04), and the integrity trailer is verified at commit
+(mismatch 0x3D INTEGRITY_FAILURE), atomically replacing the previous array.
+The library transports the array verbatim; parsing its contents is the
+caller's.
+
+`ctap::u2f` (no feature gate) sends the raw CTAP1/U2F commands the FIDO2
+applet dispatches on plain CLA-00 APDUs: `register` (INS 0x01),
+`authenticate` (INS 0x02 with `CONTROL_ENFORCE_USER_PRESENCE_AND_SIGN` 0x03;
+`CONTROL_DONT_ENFORCE_USER_PRESENCE` 0x08 is exposed as a constant),
+`check_only` (INS 0x02 with `CONTROL_CHECK_ONLY` 0x07) and `version` (INS
+0x03, answering exactly `U2F_V2`). These are not `80 10`-wrapped CTAP
+messages and their responses carry no CTAP status byte, so status
+classification uses the ISO layer. `check_only` maps 6985 to `Ok(true)` by
+design (the one case where 6985 is not an error), an invalid handle or app-ID
+mismatch fails with 6A80 as an error rather than `Ok(false)`, and a success
+status fails as InvalidResponse. With alwaysUv enabled the firmware answers
+REGISTER and AUTHENTICATE with 6D00 (UnsupportedFeature); VERSION still
+answers. The registration's raw DER attestation certificate is length-framed
+only and preserved without validation, consistent with the workspace
+certificate-inspection rule.
+
+`ctap::hmacsecret` implements the hmac-secret extension. The makeCredential
+declaration (`MakeCredentialParams::hmac_secret`, a boolean both ways,
+reported by `MakeCredentialResponse::hmac_secret_supported`) is
+dependency-free and lives in `ctap2`. The encrypted salt exchange is prepared
+by `HmacSecretInput::new(&PinSession, HmacSecretSalts, iv)` behind
+`clientpin`, reusing the pin/UV protocol encapsulation: `saltEnc` encrypts
+one 32-byte salt or two concatenated salts (zero IV and same length under
+protocol v1; a caller-supplied fresh 16-byte IV, prefixed to the ciphertext,
+under v2) and `saltAuth` is the protocol HMAC over `saltEnc` (16 bytes under
+v1, 32 under v2). Key agreement is PIN-independent: the exchange does not
+require a PIN to be set on the device. GetAssertion
+(`GetAssertionParams::hmac_secret`) and the CanoKey vendor hmac-secret-mc
+makeCredential variant — which additionally requires the plain declaration in
+the same map, enforced before any I/O — report their decrypted 32/64-byte
+outputs as `GetAssertionResponse::hmac_secret` and
+`MakeCredentialResponse::hmac_secret_mc`, read from the authData ED
+extensions under the respective keys. A requested exchange whose output is
+missing from the response fails as InvalidResponse rather than a silent
+`None`. The firmware rejects combining the getAssertion exchange with
+`up: false`.
 
 ## Batch
 
