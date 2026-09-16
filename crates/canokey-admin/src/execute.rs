@@ -52,7 +52,8 @@ fn sm2_valid(s: Sm2Configuration) -> Result<(), Error> {
 /// have independent capability gates. Old configuration/flash reads require PIN;
 /// NFC reads require PIN on 3.0.0. PASS configuration/slot reads (INS 43)
 /// require PIN on every firmware that implements them: the firmware PIN gate
-/// predates the commands themselves. Legacy SM2 identifier bytes stay uninterpreted.
+/// predates the commands themselves, and the commands exist only from 3.0.0
+/// ([`Capability::AdminPassConfig`]). Legacy SM2 identifier bytes stay uninterpreted.
 /// SELECT
 /// occurs once; `Some(pin)` causes explicit VERIFY before the request. Protected
 /// requests require it. PinStatus and FactoryReset reject a PIN to prevent hidden
@@ -130,6 +131,12 @@ pub fn operation_with_access(
         Request::ResetApplet(Applet::Ctap | Applet::Pass) => profile
             .capability(Capability::AdminCtapPassReset)
             .require()?,
+        Request::PassConfiguration
+        | Request::SetPassConfiguration(_)
+        | Request::PassSlots
+        | Request::SetPassSlot { .. } => {
+            profile.capability(Capability::AdminPassConfig).require()?
+        }
         Request::NfcStatus | Request::SetNfc(_) => {
             profile.capability(Capability::AdminNfc).require()?
         }
@@ -148,9 +155,9 @@ pub fn operation_with_access(
     }
     // PASS configuration reads (INS 43) are unconditionally protected: the
     // firmware `pin.is_validated` gate has covered INS 43/44 since their
-    // introduction (2.0.1 admin.c predates the commands entirely; every later
-    // audited source dispatches them only behind the gate), so no capability
-    // gate is needed and a bare read would fail on-card with 6982.
+    // introduction in 3.0.0 (2.0.1 admin.c predates the commands entirely, so
+    // the AdminPassConfig gate above rejects them there), so a bare read would
+    // fail on-card with 6982.
     let protected_read = matches!(request, Request::PassSlots | Request::PassConfiguration)
         || matches!(request, Request::Configuration | Request::FlashUsage)
             && profile

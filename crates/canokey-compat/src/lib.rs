@@ -163,6 +163,11 @@ pub enum Capability {
     AdminLegacyOpenPgpTouch,
     /// CTAP and PASS resets introduced in 3.0.
     AdminCtapPassReset,
+    /// Admin PASS configuration read/write (INS 43/44), introduced in 3.0.0
+    /// (canokey-core 7cb33508 `ADMIN_INS_READ/WRITE_PASS_CONFIG`) and present
+    /// through the pinned 3.1.0; absent at 2.0.1. Every firmware with these
+    /// commands dispatches them behind the Admin-PIN gate.
+    AdminPassConfig,
     /// Vendor NFC switch introduced in 3.0.
     AdminNfc,
     /// Reading NFC status without Admin PIN from 3.0.1.
@@ -572,9 +577,10 @@ impl DeviceProfile {
             Capability::AdminLegacyOpenPgpTouch => {
                 return self.firmware_range((1, 3, 0), (1, 3, 0))
             }
-            Capability::AdminCtapPassReset | Capability::AdminNfc | Capability::AdminSm2 => {
-                return self.firmware_range((3, 0, 0), (3, 1, 0))
-            }
+            Capability::AdminCtapPassReset
+            | Capability::AdminNfc
+            | Capability::AdminSm2
+            | Capability::AdminPassConfig => return self.firmware_range((3, 0, 0), (3, 1, 0)),
             Capability::AdminPublicNfcStatus => return self.firmware_range((3, 0, 1), (3, 1, 0)),
             Capability::AdminLegacySm2 => return self.firmware_range((3, 0, 0), (3, 0, 3)),
             Capability::PivProtectedAlgorithmConfigRead => {

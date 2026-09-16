@@ -394,11 +394,13 @@ fn pass_slots_typed_read_golden() {
 #[test]
 fn pass_slots_malformed_reads() {
     for dump in [
-        &[0x02][..],             // truncated STATIC dump
-        &[0x01, 0x05, b'a'][..], // OATH name_len overruns the buffer
-        &[0x00][..],             // single slot only
-        &[0x00, 0x00, 0x00][..], // trailing garbage after two slots
-        &[][..],                 // empty response
+        &[0x02][..],                         // truncated STATIC dump
+        &[0x01, 0x05, b'a'][..],             // OATH name_len overruns the buffer
+        &[0x00][..],                         // single slot only
+        &[0x00, 0x00, 0x00][..],             // trailing garbage after two slots
+        &[][..],                             // empty response
+        &[0x02, 0x02, 0x00][..],             // STATIC append_enter beyond the 0/1 firmware emits
+        &[0x01, 0x01, b'a', 0x02, 0x00][..], // OATH append_enter beyond 0/1
     ] {
         let mut op = begin(Request::PassSlots, true);
         let mut response = dump.to_vec();

@@ -415,6 +415,9 @@ impl PassSlotState {
             0x00 => (Self::Off, 1),
             0x02 => {
                 let (&enter, _) = rest.split_first().ok_or_else(invalid)?;
+                if enter > 1 {
+                    return Err(invalid());
+                }
                 (
                     Self::Static {
                         append_enter: enter != 0,
@@ -429,10 +432,14 @@ impl PassSlotState {
                 if rest.len() < len + 1 {
                     return Err(invalid());
                 }
+                let enter = rest[len];
+                if enter > 1 {
+                    return Err(invalid());
+                }
                 (
                     Self::Oath {
                         name: rest[..len].to_vec(),
-                        append_enter: rest[len] != 0,
+                        append_enter: enter != 0,
                     },
                     len + 3,
                 )
@@ -477,6 +484,8 @@ pub enum Request {
     /// Read raw PASS applet configuration. The INS 43 read sits behind the
     /// Admin-PIN gate on every firmware that implements it, so it requires
     /// PIN authentication like the typed slot read and both PASS writes.
+    /// INS 43/44 exist only from firmware 3.0.0; older known firmware is
+    /// rejected at construction with `UnsupportedFeature`.
     PassConfiguration,
     /// Replace raw PASS applet configuration bytes.
     SetPassConfiguration(Vec<u8>),
