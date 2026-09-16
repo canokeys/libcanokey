@@ -244,12 +244,12 @@ fn old_modern_firmware_uses_modern_select_and_truncated_calculate() {
     }
 }
 #[test]
-fn yubikey_api_requires_pinned_3_1_evidence() {
+fn challenge_response_requires_pinned_3_1_evidence() {
     for version in ["1.3", "1.5.2", "2.0.1", "3.0.3"] {
         for request in [
-            Request::GetSerialYk,
+            Request::GetSerial,
             Request::ChallengeResponseHmac {
-                slot: YkSlot::Slot1,
+                slot: HmacSlot::Short,
                 challenge: vec![1],
             },
         ] {
@@ -265,7 +265,7 @@ fn yubikey_api_requires_pinned_3_1_evidence() {
         assert_eq!(
             operation(
                 &profile(version),
-                Request::GetSerialYk,
+                Request::GetSerial,
                 None,
                 Default::default()
             )
@@ -276,13 +276,13 @@ fn yubikey_api_requires_pinned_3_1_evidence() {
     }
     assert_eq!(
         profile("3.0.3")
-            .capability(Capability::OathYubiKeyApi)
+            .capability(Capability::OathChallengeResponse)
             .support,
         Support::Unsupported
     );
     assert_eq!(
         profile("3.1.0")
-            .capability(Capability::OathYubiKeyApi)
+            .capability(Capability::OathChallengeResponse)
             .support,
         Support::Supported
     );

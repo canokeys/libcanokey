@@ -285,16 +285,16 @@ fn malformed_responses_budgets_and_cancellation() {
     );
 }
 #[test]
-fn yk_get_serial_transcript_and_response_validation() {
-    // A protected applet does not gate the YubiKey OTP API commands.
-    let mut op = begin(Request::GetSerialYk, None);
+fn get_serial_transcript_and_response_validation() {
+    // A protected applet does not gate the vendor extension commands.
+    let mut op = begin(Request::GetSerial, None);
     op.advance(&selection(true)).unwrap();
     assert_eq!(op.command().unwrap().as_bytes(), &[0, 1, 0x10, 0]);
     assert_eq!(
         op.advance(&[1, 2, 3, 0x90, 0]).unwrap_err().kind,
         ErrorKind::InvalidResponse
     );
-    let mut op = begin(Request::GetSerialYk, None);
+    let mut op = begin(Request::GetSerial, None);
     op.advance(&selection(false)).unwrap();
     assert_eq!(op.command().unwrap().as_bytes(), &[0, 1, 0x10, 0]);
     assert_eq!(op.advance(&[1, 2, 3, 4, 0x90, 0]).unwrap(), Step::Done);
@@ -306,7 +306,7 @@ fn yk_get_serial_transcript_and_response_validation() {
     assert_eq!(
         operation(
             &profile(),
-            Request::GetSerialYk,
+            Request::GetSerial,
             Some(access()),
             Default::default()
         )
@@ -316,9 +316,9 @@ fn yk_get_serial_transcript_and_response_validation() {
     );
 }
 #[test]
-fn yk_challenge_response_transcripts_status_and_redaction() {
+fn challenge_response_transcripts_status_and_redaction() {
     let hmac = [7u8; 20];
-    for (slot, p1) in [(YkSlot::Slot1, 0x30), (YkSlot::Slot2, 0x38)] {
+    for (slot, p1) in [(HmacSlot::Short, 0x30), (HmacSlot::Long, 0x38)] {
         let mut op = begin(
             Request::ChallengeResponseHmac {
                 slot,
@@ -342,7 +342,7 @@ fn yk_challenge_response_transcripts_status_and_redaction() {
     }
     let mut op = begin(
         Request::ChallengeResponseHmac {
-            slot: YkSlot::Slot1,
+            slot: HmacSlot::Short,
             challenge: vec![],
         },
         None,
@@ -357,7 +357,7 @@ fn yk_challenge_response_transcripts_status_and_redaction() {
     );
     let mut op = begin(
         Request::ChallengeResponseHmac {
-            slot: YkSlot::Slot2,
+            slot: HmacSlot::Long,
             challenge: vec![1],
         },
         None,
@@ -369,7 +369,7 @@ fn yk_challenge_response_transcripts_status_and_redaction() {
     );
     // Construction bounds the challenge without any I/O.
     let challenge_response = |challenge| Request::ChallengeResponseHmac {
-        slot: YkSlot::Slot1,
+        slot: HmacSlot::Short,
         challenge,
     };
     operation(

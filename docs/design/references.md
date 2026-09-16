@@ -149,7 +149,8 @@ No firmware is linked or built as a dependency.
   6984 for a missing record and 6985 when the named credential is TOTP.
 
 - [`applets/oath/oath.c`](https://github.com/canokeys/canokey-core/blob/9e77287b2a272f6123d516790af93933dec72b78/applets/oath/oath.c#L682-L688)
-  dispatches the YubiKey OTP API commands under INS 0x01 (which collides with
+  dispatches the vendor extension commands (upstream names YK_CMD_*) under
+  INS 0x01 (which collides with
   OATH PUT) *before* the OATH access-validation gate, so KeePassXC-style
   clients work on an access-protected applet: P1 0x10 (GET SERIAL) returns the
   four-byte device serial, and P1 0x30/0x38 (`oath_yk_api_req`,

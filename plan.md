@@ -55,7 +55,7 @@ management including metadata-only) was validated against canokey-usbip
 virtual hardware on firmware 3.1.0, and the same run covered U2F
 register/authenticate, hmac-secret exchanges, largeBlobs round-trips
 and authenticatorConfig (including the alwaysUv gate disabling U2F).
-The OATH YubiKey-API challenge-response was validated there against a
+The OATH vendor extension challenge-response was validated there against a
 PASS HMAC slot with a host-side HMAC-SHA-1 cross-check. The NDEF and
 PASS applets are now covered by the library; they were validated on the
 same usbip runs described

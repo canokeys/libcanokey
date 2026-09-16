@@ -284,20 +284,20 @@ a TOTP name returns 6985 (ConditionsNotSatisfied), and a missing name returns
 6984, mapped to NotFound in command context like Delete/Rename/Calculate. As a
 mutation it is never replayed after a lost response.
 
-The OATH applet also answers two YubiKey OTP API commands under INS 0x01,
+The OATH applet also answers two vendor extension commands under INS 0x01,
 dispatched by the firmware before its access-validation gate (the INS collides
-with OATH PUT): `Request::GetSerialYk` (P1 0x10) returns the four-byte device
+with OATH PUT): `Request::GetSerial` (P1 0x10) returns the four-byte device
 serial as `Outcome::Serial`, and `Request::ChallengeResponseHmac { slot:
-YkSlot, challenge }` (P1 0x30/0x38 for the short/long slot) answers an
-at-most-64-byte challenge with the 20-byte HMAC-SHA1 of the corresponding PASS
-HMAC slot as `Outcome::ChallengeResponse`; an unconfigured slot returns 6A82,
-mapped to NotFound. This is the KeePassXC interop path; the HMAC key is
+HmacSlot, challenge }` (P1 0x30/0x38 for the short/long PASS HMAC slot) answers
+an at-most-64-byte challenge with the 20-byte HMAC-SHA1 of the corresponding
+PASS HMAC slot as `Outcome::ChallengeResponse`; an unconfigured slot returns
+6A82, mapped to NotFound. This is the KeePassXC interop path; the HMAC key is
 configured through the Admin typed PASS slot (HmacSha1). Because the dispatch
 precedes the gate these commands work on an access-protected applet, and
 supplying an access key with them is rejected with InvalidArgument before any
-I/O. They are gated by `Capability::OathYubiKeyApi` (3.1.0 only): introduced
-by canokey-core commit b0416d7 (2026-05), absent from every release tag up to
-3.0.3 and present at the pinned 3.1.0 evidence HEAD.
+I/O. They are gated by `Capability::OathChallengeResponse` (3.1.0 only):
+introduced by canokey-core commit b0416d7 (2026-05), absent from every release
+tag up to 3.0.3 and present at the pinned 3.1.0 evidence HEAD.
 
 ### Historical OATH commands
 

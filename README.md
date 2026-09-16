@@ -77,7 +77,7 @@ protocol state.
   full/truncated calculations and paged results with explicit HOTP/touch markers.
   Set-default marks an HOTP credential as the touch keyboard-emulation default,
   using the two-slot/append-enter dialect only on firmware 3.0.0 and newer.
-  The YubiKey OTP API commands the OATH applet answers (GET SERIAL and
+  The vendor extension commands the OATH applet answers (GET SERIAL and
   HMAC-SHA1 challenge-response from a PASS slot, dispatched before the
   access-validation gate) provide the KeePassXC interop path; they require
   3.1.0 firmware evidence.
