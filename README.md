@@ -20,7 +20,9 @@ FRB adapter would call the Rust facade directly.
 | `canokey-piv` | PIV operations and certificate container parsing | protocol, compat, key |
 | `canokey-oath` | OATH access, credentials and full/truncated calculations | protocol, compat |
 | `canokey-openpgp` | OpenPGP data, passwords, policies and key operations | protocol, compat, key |
-| `canokey` | Facade and device probing | protocol, compat, admin, piv, oath, openpgp |
+| `canokey-ndef` | NDEF capability reads and crash-consistent message writes | protocol |
+| `canokey-ctap` | CTAP/FIDO2 ISO 7816 transport envelope | protocol |
+| `canokey` | Facade and device probing | protocol, compat, admin, piv, oath, openpgp, ndef, ctap |
 | `canokey-c` | Copied C descriptors and results, operation dispatch | canokey |
 
 Arrows point from each crate to its dependencies; the dashed edge is optional.
@@ -32,6 +34,8 @@ flowchart TD
     F --> P[canokey-piv]
     F --> O[canokey-oath]
     F --> G[canokey-openpgp]
+    F --> N[canokey-ndef]
+    F --> T[canokey-ctap]
     F --> K[canokey-compat]
     F --> R[canokey-protocol]
     F -. x509 feature .-> X[x509-info]
@@ -46,6 +50,8 @@ flowchart TD
     P --> R
     O --> R
     G --> R
+    N --> R
+    T --> R
     Q --> R
     K --> R
 ```
@@ -62,8 +68,20 @@ protocol state.
   explicit Supported/Unsupported/Unknown evidence and narrow legacy quirks.
 - Admin identity/storage/configuration reads, PIN, NFC/NDEF, CTAP SM2 configuration
   and explicit applet/device resets; configuration patches retain confirmed writes on failure.
+  `admin::operation_with_access` adds an explicit selected-context policy
+  (`Access::Existing`) that reuses the caller's selected Admin transaction
+  without SELECT or implicit VERIFY. Typed PASS slots read both touch slots
+  (Off/Static/HmacSha1/Oath/Unknown) and write Off, static-password or
+  HMAC-SHA1 configurations; OATH slots stay with the OATH applet.
 - OATH SELECT/access-code validation, PBKDF2 password derivation, credential CRUD,
   full/truncated calculations and paged results with explicit HOTP/touch markers.
+  Set-default marks an HOTP credential as the touch keyboard-emulation default,
+  using the two-slot/append-enter dialect only on firmware 3.0.0 and newer.
+- NDEF capability-container reads and chunked message read/replace, with
+  zero-NLEN-first crash-consistent writes; profile-free.
+- CTAP/FIDO2 ISO 7816 transport envelope: explicit FIDO2 selection, `80 10`
+  message wrap and `80 C0` GET RESPONSE continuation; CBOR interpretation and
+  ClientPin remain host-side.
 - OpenPGP DO/certificate reads and writes, separate PW1/PW3 modes, password/reset
   management, explicit policies/fingerprints/timestamps, key generation/import,
   shared SPKI export, signatures, PKCS#1 v1.5 decipher and ECDH/X25519.

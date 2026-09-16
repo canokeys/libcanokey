@@ -179,8 +179,19 @@ documentation. FRB may map owned fields directly; JSON is not a required bridge.
 ## Admin
 
 `admin::operation` owns a Request and optional Admin PIN (6..64 unpadded bytes).
-It selects once and authenticates explicitly before protected commands. Empty VERIFY
-returns status data; submitted-PIN failures retain AdminPin and retries. Factory reset
+It selects once and authenticates explicitly before protected commands.
+`admin::operation_with_access` takes an explicit `Access` policy instead:
+`Access::Existing` sends no SELECT and no implicit VERIFY, reusing the caller's
+selected Admin transaction and card authorization. As in PIV, this is an
+execution policy, not proof of live authentication; firmware answers 6982 for a
+protected request without prior verification. `Request::VerifyPin` carries no
+PIN of its own and is rejected under `Existing`; PinStatus and ChangePin send
+only their own VERIFY or CHANGE PIN command. PinStatus under `Existing` is the
+no-SELECT Admin PIN status entry: a single empty VERIFY.
+Empty VERIFY
+returns status data; submitted-PIN failures retain AdminPin and retries. The
+corresponding PIV profile-free no-SELECT entry remains `piv::get_pin_status_selected`.
+Factory reset
 rejects a supplied PIN and requires the card's existing blocked/physical-presence state.
 Applet resets use Admin authorization and destroy the named applet's data/credentials.
 
@@ -191,6 +202,24 @@ All patch fields are checked before the first write. Writes persist separately:
 `reprobe_required` is set before a profile-affecting write is exposed. An unacknowledged
 write may still have changed the device. Invalidate credential/object caches on their
 mutation attempts too. Neither progress nor completion is an automatic refresh.
+
+Typed PASS slot operations layer on the raw PassConfiguration/SetPassConfiguration
+commands (INS 43/44) under baseline Admin capability evidence; writes require
+Admin PIN authentication like the raw write.
+`Request::PassSlots` parses the two-slot dump into `PassSlots`: each
+`PassSlotState` is Off, Static with only its append-enter flag, HmacSha1, Oath
+with the verbatim credential name and append-enter flag, or Unknown(raw type
+byte). Firmware never returns stored passwords or HMAC keys, so the typed read
+preserves exactly what the raw read carries. `Request::SetPassSlot` targets
+`PassSlotId::{Short, Long}` (wire P1 1/2) with a `PassSlotConfig` checked
+before any I/O: Off, Static with an at-most-32-byte printable-ASCII password
+(keyboard emulation cannot type other bytes), or HmacSha1 with an owned 20-byte
+key; passwords and keys are redacted and zeroized. OATH slots are rejected by
+firmware (6A80) and are configured through OATH set-default instead, so
+`PassSlotConfig` has no OATH variant. The typed write marks the outcome
+reprobe-required like the raw form. In C, `Value::PassSlots` maps to Admin
+outcome value_kind 10 and returns the raw two-slot dump bytes through
+`cnk_operation_result_copy_bytes`.
 
 The 3.1 CTAP SM2 configuration contains
 two signed big-endian i32 identifiers, without an enable flag. NFC commands are vendor
@@ -246,11 +275,23 @@ lack of progress. No OATH calculation, mutation or continuation retries 6C. Lost
 responses and later-page failures may leave HOTP/increasing-TOTP state changed;
 no result getter, retry, cancel or drop can recover or roll back that state.
 
+`Request::SetDefault` marks an existing HOTP credential as the default emitted on
+touch through keyboard emulation; it sends INS 55 with the name as
+`71 <len> <name>` and mutates the on-card PASS configuration state, so deleting
+the credential clears the slot firmware-side. Only HOTP credentials are eligible:
+a TOTP name returns 6985 (ConditionsNotSatisfied), and a missing name returns
+6984, mapped to NotFound in command context like Delete/Rename/Calculate. As a
+mutation it is never replayed after a lost response.
+
 ### Historical OATH commands
 
 `Capability::Oath` covers baseline operations. `OathLegacy` selects the 1.3
 instruction set; `OathModern` authorizes access codes, rename and SHA-512 from
-1.5.2. `OathFullResponse` and `OathRenameCollisionCheck` start at 2.0. Legacy
+1.5.2. `OathFullResponse` and `OathRenameCollisionCheck` start at 2.0.
+`OathSetDefaultSlots` selects the two-slot SET DEFAULT dialect from 3.0.0
+(P1 = touch slot 1/2, P2 = append-enter); older recognized firmware uses the
+legacy single-slot wire form with P1/P2 zero, and requesting a Long slot or
+append-enter there fails construction with InvalidArgument before any I/O. Legacy
 SELECT returns `Outcome::LegacySelection`, with an optional independently observed
 Admin serial and no synthetic version or password salt. Legacy LIST retains its
 digit metadata. C result kind 5 represents legacy selection; copy field 5 returns
@@ -316,6 +357,68 @@ bytes remain caller-supplied firmware bytes; the library never reverses them.
 Final historical APDUs use explicit Le. Certificate occurrences remain sig=0,
 dec=1, aut=2. Only explicit Activate accepts empty SELECT status 6285 and proceeds
 to 44; unrelated requests preserve the failure.
+
+## NDEF
+
+`ndef::read_capability`, `ndef::read_message` and `ndef::write_message` are
+profile-free: no NDEF behavior is known to vary across firmware versions, so no
+`DeviceProfile` or capability is consulted. The applet (AID D2 76 00 00 85 01
+01) stores one message in a Type 4 Tag style data file: bytes [0..2) hold the
+big-endian message length (NLEN), followed by NLEN message bytes. Operations
+select the applet, then select files by ID: the 15-byte capability container
+(CC, file 0xE103) and the NDEF data file (file 0x0001). Reads and writes use
+explicit-offset READ/UPDATE BINARY in chunks of at most 240 bytes, negotiated
+down to the caller's exchange budgets, so no APDU chaining or extended lengths
+are required. `ndef::MAX_MESSAGE_LENGTH` is the firmware hard maximum of 1022
+bytes; `read_message` rejects an NLEN above the CC-declared maximum before any
+allocation or message read.
+
+The CC parses into `NdefCapability`: the maximum storable message length (CC
+file size minus two, clamped to 1022) and a read-only flag taken from the CC
+write-access byte. `write_message` copies the message at construction, writes a
+zero NLEN first, then the message chunks, then the real NLEN: an interrupted
+write leaves the file with NLEN zero instead of a stale length pointing at a
+partially updated message. The CC is not read on writes; a read-only file is
+reported by the device as 6982, mapped to SecurityStatusNotSatisfied. This
+mutates device state, and a mid-write I/O failure may leave the message
+cleared; neither is replayed automatically.
+
+6A82 maps to UnsupportedDevice only on applet SELECT (the NDEF applet disabled
+in device configuration is indistinguishable from absent) and to NotFound on
+the CC/NDEF file selects. 6985 maps to ConditionsNotSatisfied. Malformed CCs,
+short or oversized NLEN values and short chunks fail as InvalidResponse in the
+Parsing phase, never as panics. The owned message is zeroized and redacted from
+Debug.
+
+## CTAP
+
+`ctap` implements only the ISO 7816 transport envelope of CTAP/FIDO2; CBOR
+encoding, CTAP2 subcommand semantics and ClientPin remain host-side. The caller
+supplies the complete raw CTAP message (first byte the CTAP command) and
+interprets the returned payload. `ctap::transceive` selects the FIDO2 applet by
+DF name (`ctap::FIDO2_AID` A0 00 00 06 47 2F 00 01, `00 A4 04 00 08`) and then
+sends the message; `ctap::transceive_selected` sends the wrapped command
+without SELECT for a caller-owned selected context; `ctap::select_application`
+performs selection only. `ctap::command::{select, msg}` are raw
+logical-command builders without status mapping for composition in other
+conversations. All factories are profile-free.
+
+A CTAP message is wrapped as `80 10 00 00 <Lc> <message>` with no Le. Messages
+up to 255 bytes use short Lc; longer messages use the extended three-byte Lc
+when the caller's options permit extended encoding, otherwise command chaining
+with CLA bit 0x10. Responses arriving with 61xx are reassembled through GET
+RESPONSE `80 C0 00 00 <SW2>` (`Continuation::Iso7816 { cla: 0x80 }`) until a
+terminal status word; the firmware has no 6C wrong-Le correction path. A
+successful response is one CTAP status byte (0x00 CTAP1_ERR_SUCCESS) followed
+by the payload, concatenated across continuation fragments.
+`CtapResponse::status` exposes non-success CTAP codes raw rather than mapping
+them to transport errors. The payload is zeroized and redacted from Debug.
+
+6A82 on SELECT maps to UnsupportedDevice, 6985 to ConditionsNotSatisfied and
+6D00 to UnsupportedFeature; other status words remain UnexpectedStatusWord with
+the raw value. A successful status word with an empty response body (no CTAP
+status byte) fails as InvalidResponse in the Parsing phase. An empty message
+fails construction with InvalidArgument before any I/O.
 
 ## Batch
 
@@ -385,7 +488,8 @@ C name validator supports caller-side preflight; UTF-16 validation stays in PIV.
 
 The C ABI exposes only `cnk_profile_t` and `cnk_operation_t` opaque handles.
 Rust callers use `Access::Existing` to omit SELECT and reuse the caller's live
-card authorization. C callers set `CNK_PIV_USE_EXISTING` in operation options;
+card authorization; PIV and Admin both offer this Rust policy.
+C callers set `CNK_PIV_USE_EXISTING` in operation options;
 access descriptors must then be empty. Explicit credential and management-auth
 operations still send their requested authentication, but omit SELECT. Other
 applets and standalone probe/bootstrap/selected-only factories reject the flag.

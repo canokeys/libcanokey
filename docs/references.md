@@ -21,6 +21,9 @@ Relevant implementations, regression tests, and conventions:
 - [lib/helper/utils/admin_card.dart](https://github.com/canokeys/canokey-console/blob/63863ef66ff0766754ee8f5bee28b9e977889f75/lib/helper/utils/admin_card.dart)
 - [lib/helper/utils/oath_card.dart](https://github.com/canokeys/canokey-console/blob/63863ef66ff0766754ee8f5bee28b9e977889f75/lib/helper/utils/oath_card.dart)
 - [lib/helper/utils/openpgp_card.dart](https://github.com/canokeys/canokey-console/blob/63863ef66ff0766754ee8f5bee28b9e977889f75/lib/helper/utils/openpgp_card.dart)
+- [lib/helper/utils/ndef_card.dart](https://github.com/canokeys/canokey-console/blob/63863ef66ff0766754ee8f5bee28b9e977889f75/lib/helper/utils/ndef_card.dart)
+- [lib/helper/utils/pass_card.dart](https://github.com/canokeys/canokey-console/blob/63863ef66ff0766754ee8f5bee28b9e977889f75/lib/helper/utils/pass_card.dart)
+- [lib/helper/utils/ctap_transmitter.dart](https://github.com/canokeys/canokey-console/blob/63863ef66ff0766754ee8f5bee28b9e977889f75/lib/helper/utils/ctap_transmitter.dart)
 - [lib/helper/utils/apdu_transport.dart](https://github.com/canokeys/canokey-console/blob/63863ef66ff0766754ee8f5bee28b9e977889f75/lib/helper/utils/apdu_transport.dart)
 - [test/helper/utils/piv_card_test.dart](https://github.com/canokeys/canokey-console/blob/63863ef66ff0766754ee8f5bee28b9e977889f75/test/helper/utils/piv_card_test.dart)
 - [test/helper/utils/piv_management_key_test.dart](https://github.com/canokeys/canokey-console/blob/63863ef66ff0766754ee8f5bee28b9e977889f75/test/helper/utils/piv_management_key_test.dart)
@@ -138,6 +141,33 @@ No firmware is linked or built as a dependency.
   1.5.2/1.6.2/2.0/3.0 sources confirm modern command formats and old pagination
   limitations. Semantic factories select these layouts only from actual firmware.
 
+- [`include/oath.h`](https://github.com/canokeys/canokey-core/blob/9e77287b2a272f6123d516790af93933dec72b78/include/oath.h)
+  defines OATH_INS_SET_DEFAULT (0x55) with data `71 <len> <name>`. Core
+  `5f1e95f`, 1.5.2 and 2.0.0 accept only the legacy single-slot form with
+  P1=P2=0; 3.0.0, 3.0.3 and the pinned HEAD add the two-slot dialect with
+  P1 in {1,2} (short/long touch) and P2 the append-enter flag. Firmware answers
+  6984 for a missing record and 6985 when the named credential is TOTP.
+
+- [`include/ndef.h`](https://github.com/canokeys/canokey-core/blob/9e77287b2a272f6123d516790af93933dec72b78/include/ndef.h)
+  defines the NDEF applet instructions A4/B0/D6, `NDEF_MSG_MAX_LENGTH` 1022 and
+  the CC file E103 / NDEF data file 0001, with read-only encoded in CC byte 14.
+  The AID table in
+  [`src/apdu.c`](https://github.com/canokeys/canokey-core/blob/9e77287b2a272f6123d516790af93933dec72b78/src/apdu.c)
+  maps NDEF_AID `D2760000850101` and FIDO_AID `A0000006472F0001`. NDEF UPDATE
+  accepts CLA-0x10 command chaining, and large reads are served through the
+  61xx response source.
+
+- [`include/pass.h`](https://github.com/canokeys/canokey-core/blob/9e77287b2a272f6123d516790af93933dec72b78/include/pass.h)
+  defines the PASS slot types OFF=0/OATH=1/STATIC=2/HMACSHA1=3,
+  `PASS_MAX_PASSWORD_LENGTH` 32 and a 20-byte HMAC-SHA1 key. The read/write
+  commands INS 43/44 are owned by the Admin applet behind its PIN gate per
+  `applets/admin/admin.c` and `include/admin.h`.
+
+- The pinned CTAP transport: CLA 80 INS 10 (CTAP_INS_MSG) carries the raw CTAP2
+  message while CLA 00 carries U2F; the response is one CTAP status byte plus
+  payload. GET RESPONSE (INS C0) accepts CLA 00 or 80, 61xx chains the
+  response, there is no 6C wrong-Le handling, and 6986 reports nothing pending.
+
 - `applets/openpgp/openpgp.c` and `src/key.c` at pinned HEAD establish independent
   PW1 usage modes, algorithm attributes nested in 6E/73, certificate occurrence state,
   F2 retry reset, separate E6/44 termination/activation and key import templates.
@@ -159,6 +189,7 @@ Development builds use the declared numeric base version while retaining their s
 | Console metadata_directory / piv_controller | Directory and individual metadata are distinct; entries may contain only certificates |
 | Console piv_card / manager piv.py | Certificate payload tag 70, information tag 71 and optional empty FE; manager supports gzip decoding |
 | Console oath_card | OATH uses 06/A5 continuation and may continue on nonempty 9000 |
+| Console ndef_card / pass_card / ctap_transmitter | NDEF reads/writes use 240-byte chunks with zero-NLEN-first writes; PASS slots dump as typed records behind Admin; CTAP wraps messages as 80 10 with 80 C0 continuation |
 | pkcs11 pcsc.c | PCSC and PIV encoding are mixed; RSA uses short command chaining; application owns authentication/mechanism state |
 | Console smartcard.dart / FRB configuration | Dart owns transport; process includes identity APDUs, raw paths log complete APDUs, bridge calls default to synchronous Dart methods |
 
