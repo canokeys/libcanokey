@@ -129,6 +129,22 @@ pub enum Format {
     /// Complete HMAC bytes, preceded on wire by the decimal digit count.
     Full,
 }
+/// Keyboard-emulation touch slot for the default HOTP credential.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DefaultSlot {
+    /// Short touch, wire value 0x01 in the two-slot dialect.
+    Short,
+    /// Long touch, wire value 0x02 in the two-slot dialect.
+    Long,
+}
+impl DefaultSlot {
+    pub(crate) fn wire(self) -> u8 {
+        match self {
+            Self::Short => 1,
+            Self::Long => 2,
+        }
+    }
+}
 /// Owned OATH operation request.
 #[derive(Debug)]
 pub enum Request {
@@ -179,6 +195,21 @@ pub enum Request {
     },
     /// Remove access code, validating the supplied current key when protected.
     ClearCode,
+    /// Mark an existing HOTP credential as the default emitted on touch through
+    /// keyboard emulation; only HOTP credentials are eligible. This mutates the
+    /// on-card PASS configuration; deleting the credential clears the slot
+    /// firmware-side. Firmware before 3.0.0 has one slot and no enter flag, so
+    /// `slot` must be Short and `append_enter` must be false there, or
+    /// construction fails with InvalidArgument before any I/O.
+    SetDefault {
+        /// Touch slot; Long requires firmware 3.0.0 or newer.
+        slot: DefaultSlot,
+        /// Append an Enter keystroke after the emitted code; requires firmware
+        /// 3.0.0 or newer.
+        append_enter: bool,
+        /// Existing credential name.
+        name: Name,
+    },
 }
 /// Listed credential with raw algorithm/type octet, preserving unknown values.
 #[derive(Clone, Debug, PartialEq, Eq)]

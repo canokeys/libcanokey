@@ -139,6 +139,9 @@ pub enum Capability {
     OathRenameCollisionCheck,
     /// LIST/CalculateAll continuation no longer drops exact-buffer-fit records.
     OathReliablePagination,
+    /// OATH SET DEFAULT accepts two touch slots and an append-enter flag from
+    /// 3.0.0. Older firmware accepts only the single-slot, no-enter form.
+    OathSetDefaultSlots,
     /// Baseline Admin commands; layouts and newer commands have separate gates.
     Admin,
     /// Admin NDEF/WebUSB availability flags introduced in 1.5.2.
@@ -533,6 +536,7 @@ impl DeviceProfile {
                 return self.firmware_range((2, 0, 0), (3, 1, 0))
             }
             Capability::OathReliablePagination => return self.firmware_range((3, 0, 1), (3, 1, 0)),
+            Capability::OathSetDefaultSlots => return self.firmware_range((3, 0, 0), (3, 1, 0)),
             Capability::OpenPgp => return self.firmware_range((1, 3, 0), (3, 1, 0)),
             Capability::OpenPgpWrappedData => return self.firmware_range((2, 0, 0), (3, 1, 0)),
             Capability::OpenPgpAlgorithmInformation | Capability::OpenPgpPublicKeyLengthFix => {

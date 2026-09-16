@@ -211,6 +211,42 @@ fn set_code_proof_and_password_derivation() {
     assert_eq!(op.command().unwrap().as_bytes(), &[0, 3, 0, 0, 2, 0x73, 0]);
 }
 #[test]
+fn set_default_transcripts_and_status_mapping() {
+    let set_default = |slot, append_enter| Request::SetDefault {
+        slot,
+        append_enter,
+        name: name(),
+    };
+    let mut op = begin(set_default(DefaultSlot::Short, true), None);
+    op.advance(&selection(false)).unwrap();
+    assert_eq!(
+        op.command().unwrap().as_bytes(),
+        b"\0\x55\x01\x01\x06\x71\x04test"
+    );
+    assert_eq!(op.advance(&[0x90, 0]).unwrap(), Step::Done);
+    assert!(matches!(op.take_result().unwrap(), Outcome::Unit));
+    let mut op = begin(set_default(DefaultSlot::Long, false), None);
+    op.advance(&selection(false)).unwrap();
+    assert_eq!(
+        op.command().unwrap().as_bytes(),
+        b"\0\x55\x02\x00\x06\x71\x04test"
+    );
+    assert_eq!(
+        op.advance(&[0x69, 0x84]).unwrap_err().kind,
+        ErrorKind::NotFound
+    );
+    let mut op = begin(set_default(DefaultSlot::Short, false), None);
+    op.advance(&selection(false)).unwrap();
+    assert_eq!(
+        op.command().unwrap().as_bytes(),
+        b"\0\x55\x01\x00\x06\x71\x04test"
+    );
+    assert_eq!(
+        op.advance(&[0x69, 0x85]).unwrap_err().kind,
+        ErrorKind::ConditionsNotSatisfied
+    );
+}
+#[test]
 fn malformed_responses_budgets_and_cancellation() {
     let mut op = begin(Request::Select, None);
     assert_eq!(

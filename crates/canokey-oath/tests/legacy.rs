@@ -184,6 +184,46 @@ fn firmware_boundaries_fail_before_any_colliding_or_downgraded_command() {
     );
 }
 #[test]
+fn legacy_set_default_single_slot_form_and_option_rejection() {
+    let mut op = operation(
+        &profile("2.0.0"),
+        Request::SetDefault {
+            slot: DefaultSlot::Short,
+            append_enter: false,
+            name: name(),
+        },
+        None,
+        Default::default(),
+    )
+    .unwrap();
+    op.start().unwrap();
+    op.advance(&[0x79, 3, 5, 5, 5, 0x71, 8, 1, 2, 3, 4, 5, 6, 7, 8, 0x90, 0])
+        .unwrap();
+    assert_eq!(
+        op.command().unwrap().as_bytes(),
+        &[0, 0x55, 0, 0, 3, 0x71, 1, b'a', 0]
+    );
+    assert_eq!(op.advance(&[0x90, 0]).unwrap(), Step::Done);
+    assert!(matches!(op.take_result().unwrap(), Outcome::Unit));
+    for version in ["1.3", "2.0.0"] {
+        for request in [
+            Request::SetDefault {
+                slot: DefaultSlot::Long,
+                append_enter: false,
+                name: name(),
+            },
+            Request::SetDefault {
+                slot: DefaultSlot::Short,
+                append_enter: true,
+                name: name(),
+            },
+        ] {
+            let e = operation(&profile(version), request, None, Default::default()).unwrap_err();
+            assert_eq!(e.kind, ErrorKind::InvalidArgument);
+        }
+    }
+}
+#[test]
 fn old_modern_firmware_uses_modern_select_and_truncated_calculate() {
     for version in ["1.5.2", "1.6.1", "1.6.2", "2.0.0", "3.0.1"] {
         let mut op = operation(
