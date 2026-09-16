@@ -217,7 +217,8 @@ before any I/O: Off, Static with an at-most-32-byte printable-ASCII password
 key; passwords and keys are redacted and zeroized. OATH slots are rejected by
 firmware (6A80) and are configured through OATH set-default instead, so
 `PassSlotConfig` has no OATH variant. The typed write marks the outcome
-reprobe-required like the raw form. In C, `Value::PassSlots` maps to Admin
+reprobe-required like the raw form. In C, the typed read is requested with
+`CNK_ADMIN_PASS_SLOTS` (kind 31); `Value::PassSlots` then maps to Admin
 outcome value_kind 10 and returns the raw two-slot dump bytes through
 `cnk_operation_result_copy_bytes`.
 
@@ -464,8 +465,10 @@ convention is stated in the crate documentation and in `ctap::status`, whose
 
 `make_credential` and `get_assertion` accept the caller's parameters as
 owned values; the caller computes pinUvAuthParam with
-`PinToken::authenticate` and passes it as `PinUvAuth` (16 bytes under
-protocol v1, 32 under v2); the library never authenticates implicitly.
+`PinToken::authenticate` and passes it as `PinUvAuth` (the CTAP2 widths are
+16 bytes under protocol v1 and 32 under v2; construction accepts either
+width for any protocol and a mismatch is rejected card-side); the library
+never authenticates implicitly.
 Enterprise attestation is accepted as a parameter; the firmware may reject
 it. Attestation statements are retained as the raw decoded CBOR map: no
 certificate trust, identity or attestation policy is enforced, consistent
@@ -628,7 +631,9 @@ keeps ADMIN DATA/PRINTED and certificate write framing consistent without
 reintroducing TLV parsing into consumers; malformed/trailing containers fail
 before a write operation is exposed.
 
-The C ABI builds all applet factories by default. Embedders that set
+The C ABI builds the PIV, Admin, OATH and OpenPGP applet factories by
+default; NDEF and CTAP have no C factories yet and remain Rust-only.
+Embedders that set
 `default-features = false, features = ["piv"]` retain PIV and device probing,
 but exclude Admin operation, OATH and OpenPGP C factories and their erased
 operation variants. This is a link-time API subset: declarations in the common

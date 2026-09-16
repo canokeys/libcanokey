@@ -25,6 +25,11 @@ retain their SELECT-first behavior.
   1.3, 1.5.2, 1.6.1, 1.6.2, 2.0.x, 3.0.x and 3.1.0. Check authentication,
   legacy TLV lengths, pagination boundaries, command chaining and cancellation.
   Offline transcript tests establish command behavior, not device interoperability.
+  Partial usbip coverage exists: the NDEF/PASS/OATH-set-default/Admin-Access/PIV-PQ
+  feature set ran against canokey-usbip virtual hardware on firmware 3.1.0 (full
+  suite, including ML-DSA/ML-KEM roundtrips), 3.0.0 (modern OATH set-default
+  accepted; ML import correctly gated), and 2.0.1/1.5.2 (legacy OATH
+  set-default dialect); the full ckman catalog above is not covered.
 - Establish legacy CTAP SM2 integer byte order for each target before offering
   typed identifier conversion; the existing raw nine-byte interface preserves data.
 - Split PIV Ed/X read/generate/import/private-operation evidence if enabling more
@@ -43,11 +48,14 @@ continuation) and the CTAP2 client layer (strict canonical CBOR, typed
 command operations, ClientPin protocols 1/2 and credential management) are
 implemented in canokey-ctap; WebAuthn ceremony and relying-party logic
 (clientDataJSON, attestation trust, rpId policy) remains host-side consumer
-scope. CTAP validation is pending the same hardware/usbip checks as the
-applets above. The NDEF and PASS applets are now covered by the
-library, pending the same hardware validation as the other applets above.
-Consumers must retain one connection lease per operation and disable
-transport continuation/retries. The C ABI remains experimental.
+scope. The CTAP2 layer (getInfo, ClientPin v1+v2, makeCredential,
+getAssertion with external ES256 and ML-DSA-65 verification, and credential
+management including metadata-only) was validated against canokey-usbip
+virtual hardware on firmware 3.1.0. The NDEF and PASS applets are now
+covered by the library; they were validated on the same usbip runs described
+in the compatibility section above. Consumers must retain one connection
+lease per operation and disable transport continuation/retries. The C ABI
+remains experimental.
 
 Follow [AGENTS.md](AGENTS.md) for implementation checks and staged commits. Retain
 existing APIs and extend bindings/examples with future protocol additions.
