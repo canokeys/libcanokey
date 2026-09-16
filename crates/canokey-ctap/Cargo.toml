@@ -1,0 +1,13 @@
+[package]
+name = "canokey-ctap"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+description = "Caller-owned CanoKey CTAP/FIDO2 ISO7816 transport envelope"
+publish = false
+
+[dependencies]
+canokey-protocol.workspace = true
