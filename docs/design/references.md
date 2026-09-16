@@ -175,9 +175,69 @@ No firmware is linked or built as a dependency.
   card and RSA decipher unpads PKCS#1 v1.5; EC signatures return r||s. Only certificate
   PUT, import and decipher accept command chaining. No F9 KDF DO/handler exists.
 
+### CTAP2 command layer
+
+- [`applets/ctap/ctap-internal.h`](https://github.com/canokeys/canokey-core/blob/9e77287b2a272f6123d516790af93933dec72b78/applets/ctap/ctap-internal.h)
+  names the command bytes dispatched in
+  [`applets/ctap/ctap.c`](https://github.com/canokeys/canokey-core/blob/9e77287b2a272f6123d516790af93933dec72b78/applets/ctap/ctap.c):
+  makeCredential 0x01, getAssertion 0x02, getInfo 0x04, clientPIN 0x06,
+  reset 0x07, getNextAssertion 0x08, credentialManagement 0x0A (the legacy
+  preview 0x41 maps onto the same handler for old libfido2), selection 0x0B,
+  largeBlobs 0x0C and config 0x0D with subcommands 2/3/4 (toggle always-UV,
+  set min PIN length, enable long-touch-for-reset). Commands outside this
+  set, including bioEnrollment and vendor commands, return the
+  vendor-range status CTAP2_ERR_UNHANDLED_REQUEST 0xF1.
+- ClientPIN subcommands are 01 getPINRetries, 02 getKeyAgreement, 03 setPIN,
+  04 changePIN, 05 getPINToken and 09 getPinUvAuthTokenUsingPinWithPermissions,
+  with getInfo advertising pinUvAuthProtocols [1, 2]. The legacy getPINToken
+  forces MC|GA permissions (`cp_set_permission(CP_PERMISSION_MC | CP_PERMISSION_GA)`),
+  and an unknown clientPIN or credentialManagement subcommand returns an empty
+  success, so hosts must require the expected response fields.
+- getInfo is emitted from a generated table
+  ([`scripts/gen_ctap_get_info.py`](https://github.com/canokeys/canokey-core/blob/9e77287b2a272f6123d516790af93933dec72b78/scripts/gen_ctap_get_info.py),
+  included as `ctap_get_info_cbor.inc`): versions U2F_V2/FIDO_2_0/FIDO_2_1/
+  FIDO_2_3, extensions credBlob, credProtect, hmac-secret, hmac-secret-mc,
+  largeBlobKey, minPinLength and thirdPartyPayment, algorithms ES256, EdDSA,
+  ML-DSA-65 (-49) and an SM2 entry whose algorithm identifier is patched at
+  runtime (default -54), and AAGUID 244eb29e-e090-4e49-81fe-1f20f8d3b8f4.
+- authenticatorReset is honored only within ten seconds of power-up
+  (`device_get_tick() > 10000` returns CTAP2_ERR_NOT_ALLOWED) and requires
+  touch confirmation (a long touch when so configured), while the
+  user-presence wait is skipped over NFC (`WAIT` breaks out when `is_nfc()`).
+- Version differences: [2.0.1](https://github.com/canokeys/canokey-core/blob/be6325b8c4e6d40e86b2943f65083ed6b71f8259/applets/ctap/ctap.c)
+  advertises FIDO_2_1 at most, pin/UV protocols 1 and 2, and
+  credentialManagement without the metadata-only extension, with ES256 and
+  EdDSA only. [1.5.2](https://github.com/canokeys/canokey-core/blob/b16e8c517ed72fe26e5101b450a99df2b3526aa1/applets/ctap/ctap.c)
+  advertises FIDO_2_0 and U2F_V2, implements pin protocol v1 only (zero-IV
+  AES-256-CBC with truncated 16-byte HMACs), and dispatches no
+  credentialManagement.
+
 These sources establish encoding and version rules, not hardware interoperability.
 Newer base versions and unrecognized versions remain Unknown for these mutations.
 Development builds use the declared numeric base version while retaining their suffix.
+
+## nfcim/fido2 (consumer-side)
+
+The Dart [fido2](https://github.com/nfcim/fido2) package is the
+consumer-side reference for the CTAP2 client layer, pinned at
+`5f01f44a6286627d8ced7b05a8465c62140eb8b8`; it is not cloned locally and is
+used as read-only reference material only.
+
+- [`lib/src/strict_cbor.dart`](https://github.com/nfcim/fido2/blob/5f01f44a6286627d8ced7b05a8465c62140eb8b8/lib/src/strict_cbor.dart)
+  enforces the strict decoding rules this library mirrors: nesting bounded at
+  64 levels, duplicate map keys detected before the generic decoder collapses
+  them, and rejection of truncated or oversized items.
+- [`lib/src/ctap2/pin.dart`](https://github.com/nfcim/fido2/blob/5f01f44a6286627d8ced7b05a8465c62140eb8b8/lib/src/ctap2/pin.dart)
+  is the reference for the ClientPIN wire cryptography: protocol v1 derives
+  the shared secret as SHA-256 of the ECDH X coordinate, encrypts the PIN
+  with zero-IV AES-256-CBC and truncates HMACs to 16 bytes; protocol v2
+  derives HKDF-SHA-256 "CTAP2 HMAC key"/"CTAP2 AES key" halves, encrypts with
+  a random-IV AES-256-CBC and uses full 32-byte HMACs.
+- [`doc/metadata-only-extension.md`](https://github.com/nfcim/fido2/blob/5f01f44a6286627d8ced7b05a8465c62140eb8b8/doc/metadata-only-extension.md)
+  documents the CanoKey credential-management metadata-only vendor extension:
+  subCommandParams key 0x80 in enumerateCredentialsBegin requests metadata-only
+  responses, which omit publicKey (key 8) and carry the raw COSE algorithm
+  identifier under response key 0x80.
 
 ## Observations informing the design
 
@@ -190,6 +250,8 @@ Development builds use the declared numeric base version while retaining their s
 | Console piv_card / manager piv.py | Certificate payload tag 70, information tag 71 and optional empty FE; manager supports gzip decoding |
 | Console oath_card | OATH uses 06/A5 continuation and may continue on nonempty 9000 |
 | Console ndef_card / pass_card / ctap_transmitter | NDEF reads/writes use 240-byte chunks with zero-NLEN-first writes; PASS slots dump as typed records behind Admin; CTAP wraps messages as 80 10 with 80 C0 continuation |
+| core ctap.c / gen_ctap_get_info.py | getInfo is a generated table with runtime-patched fields (SM2 algorithm id, maxMsgSize, PIN state); unhandled CTAP commands return vendor-range 0xF1; reset requires touch within ten seconds of power-up |
+| fido2 strict_cbor.dart / ctap2/pin.dart | The Dart consumer enforces strict CBOR (bounded nesting, duplicate-key rejection) and the ClientPIN wire crypto this library mirrors: v1 SHA-256 of ECDH-x with zero IV and truncated-16 HMAC, v2 HKDF-derived HMAC/AES halves with random IV and full HMAC; metadata-only enumeration is a CanoKey vendor extension |
 | pkcs11 pcsc.c | PCSC and PIV encoding are mixed; RSA uses short command chaining; application owns authentication/mechanism state |
 | Console smartcard.dart / FRB configuration | Dart owns transport; process includes identity APDUs, raw paths log complete APDUs, bridge calls default to synchronous Dart methods |
 

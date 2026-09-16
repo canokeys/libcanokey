@@ -37,10 +37,14 @@ six-container certificate propagation. Native ARM64 runtime is excluded from
 that acceptance; cross-builds are checked. See the companion
 [migration acceptance](https://github.com/canokeys/canokey-pkcs11/blob/codex/libcanokey/docs/libcanokey-piv-migration-plan.md).
 
-Console/ckman and general Python bindings remain separate scope. The CTAP
-ISO 7816 transport envelope (FIDO2 selection, message wrap and continuation) is
-implemented; CBOR interpretation, ClientPin and WebAuthn ceremonies remain
-host-side consumer scope. The NDEF and PASS applets are now covered by the
+Console/ckman and general Python bindings remain separate scope. In CTAP,
+both the ISO 7816 transport envelope (FIDO2 selection, message wrap and
+continuation) and the CTAP2 client layer (strict canonical CBOR, typed
+command operations, ClientPin protocols 1/2 and credential management) are
+implemented in canokey-ctap; WebAuthn ceremony and relying-party logic
+(clientDataJSON, attestation trust, rpId policy) remains host-side consumer
+scope. CTAP validation is pending the same hardware/usbip checks as the
+applets above. The NDEF and PASS applets are now covered by the
 library, pending the same hardware validation as the other applets above.
 Consumers must retain one connection lease per operation and disable
 transport continuation/retries. The C ABI remains experimental.

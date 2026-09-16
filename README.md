@@ -21,7 +21,7 @@ FRB adapter would call the Rust facade directly.
 | `canokey-oath` | OATH access, credentials and full/truncated calculations | protocol, compat |
 | `canokey-openpgp` | OpenPGP data, passwords, policies and key operations | protocol, compat, key |
 | `canokey-ndef` | NDEF capability reads and crash-consistent message writes | protocol |
-| `canokey-ctap` | CTAP/FIDO2 ISO 7816 transport envelope | protocol |
+| `canokey-ctap` | CTAP/FIDO2 ISO 7816 transport envelope and CTAP2 client (ClientPIN, credential management) | protocol |
 | `canokey` | Facade and device probing | protocol, compat, admin, piv, oath, openpgp, ndef, ctap |
 | `canokey-c` | Copied C descriptors and results, operation dispatch | canokey |
 
@@ -79,9 +79,13 @@ protocol state.
   using the two-slot/append-enter dialect only on firmware 3.0.0 and newer.
 - NDEF capability-container reads and chunked message read/replace, with
   zero-NLEN-first crash-consistent writes; profile-free.
-- CTAP/FIDO2 ISO 7816 transport envelope: explicit FIDO2 selection, `80 10`
-  message wrap and `80 C0` GET RESPONSE continuation; CBOR interpretation and
-  ClientPin remain host-side.
+- CTAP/FIDO2 ISO 7816 transport envelope (explicit FIDO2 selection, `80 10`
+  message wrap and `80 C0` GET RESPONSE continuation) plus a typed CTAP2
+  client layer: strict canonical CBOR, COSE key and authenticatorData parsing,
+  and getInfo/makeCredential/getAssertion/reset/selection operations. The
+  default `clientpin` feature adds ClientPIN protocols 1 and 2 and credential
+  management with bounded in-operation enumeration. WebAuthn ceremonies
+  (clientDataJSON, attestation trust, rpId policy) remain host-side.
 - OpenPGP DO/certificate reads and writes, separate PW1/PW3 modes, password/reset
   management, explicit policies/fingerprints/timestamps, key generation/import,
   shared SPKI export, signatures, PKCS#1 v1.5 decipher and ECDH/X25519.

@@ -392,16 +392,17 @@ Debug.
 
 ## CTAP
 
-`ctap` implements only the ISO 7816 transport envelope of CTAP/FIDO2; CBOR
-encoding, CTAP2 subcommand semantics and ClientPin remain host-side. The caller
-supplies the complete raw CTAP message (first byte the CTAP command) and
-interprets the returned payload. `ctap::transceive` selects the FIDO2 applet by
-DF name (`ctap::FIDO2_AID` A0 00 00 06 47 2F 00 01, `00 A4 04 00 08`) and then
-sends the message; `ctap::transceive_selected` sends the wrapped command
-without SELECT for a caller-owned selected context; `ctap::select_application`
-performs selection only. `ctap::command::{select, msg}` are raw
-logical-command builders without status mapping for composition in other
-conversations. All factories are profile-free.
+The CTAP crate implements the ISO 7816 transport envelope of CTAP/FIDO2 and,
+on top of it, a typed CTAP2 client layer; WebAuthn ceremonies remain
+host-side. At the envelope level the caller supplies the complete raw CTAP
+message (first byte the CTAP command) and interprets the returned payload.
+`ctap::transceive` selects the FIDO2 applet by DF name (`ctap::FIDO2_AID` A0
+00 00 06 47 2F 00 01, `00 A4 04 00 08`) and then sends the message;
+`ctap::transceive_selected` sends the wrapped command without SELECT for a
+caller-owned selected context; `ctap::select_application` performs selection
+only. `ctap::command::{select, msg}` are raw logical-command builders without
+status mapping for composition in other conversations. All factories are
+profile-free.
 
 A CTAP message is wrapped as `80 10 00 00 <Lc> <message>` with no Le. Messages
 up to 255 bytes use short Lc; longer messages use the extended three-byte Lc
@@ -419,6 +420,86 @@ them to transport errors. The payload is zeroized and redacted from Debug.
 the raw value. A successful status word with an empty response body (no CTAP
 status byte) fails as InvalidResponse in the Parsing phase. An empty message
 fails construction with InvalidArgument before any I/O.
+
+The typed CTAP2 layer lives in `ctap::ctap2`, `ctap::status`, `ctap::cbor`,
+`ctap::cose` and `ctap::authdata`, with ClientPin and credential management
+behind the default `clientpin` feature. `ctap2` provides the command-level
+operations `get_info`, `make_credential`, `get_assertion`,
+`get_next_assertion`, `reset` and `selection`. Every command-level operation
+sends the explicit SELECT of the FIDO2 application before its wrapped CTAP
+message: re-SELECT is idempotent for FIDO and does not invalidate
+pinUvAuthTokens, so the core owns SELECT and no CTAP2 operation needs a
+caller-held selected context. All factories are profile-free: they enforce
+the CTAP2 specification, not any authenticator's advertised capabilities.
+`AuthenticatorInfo` retains the raw getInfo map alongside its typed
+accessors, so fields the library does not interpret stay observable.
+
+`cbor` implements the strict canonical CBOR CTAP2 authenticators speak:
+definite-length items only, shortest-form integers and lengths, no tags, at
+most 64 nesting levels, duplicate map keys rejected, no trailing bytes;
+these rules mirror the strict decoder of the Dart fido2 consumer. The canonical
+encoder is security-relevant because pinUvAuthParam HMACs cover its exact
+output; byte-string contents are redacted from Debug. `cose` parses and
+encodes COSE public keys (ES256 -7/-9, Ed25519 -8/-19, ML-DSA-44/65/87
+-48/-49/-50 per RFC 9964, ECDH-ES+HKDF-256 -25 for key agreement), rejects
+maps carrying private-key labels and preserves unknown algorithms as their
+original CBOR map. `authdata` parses authenticatorData (flags UP/UV/BE/BS/
+AT/ED, attested credential data, extensions kept as raw CBOR) under explicit
+length bounds, with the BS flag implying BE.
+
+A non-success CTAP status byte is classified into a typed error kind in the
+Command phase: PIN_INVALID/PIN_POLICY_VIOLATION to InvalidPin,
+PIN_BLOCKED/PIN_AUTH_BLOCKED to PinBlocked, PIN_AUTH_INVALID to
+AuthenticationFailed, PIN_NOT_SET/PUAT_REQUIRED to
+SecurityStatusNotSatisfied, NO_CREDENTIALS/INVALID_CREDENTIAL to NotFound,
+UNSUPPORTED_ALGORITHM to UnsupportedAlgorithm, and further codes to
+ConditionsNotSatisfied, UnsupportedFeature, LimitExceeded or
+ProtocolViolation as their semantics dictate. Statuses without a specific
+kind, including the extension (0xE0..0xEF) and vendor (0xF0..0xFF) ranges,
+fall back to UnexpectedStatusWord. In every case the raw CTAP status byte is
+preserved in `Error::status_word` widened to `u16`: for CTAP-level failures
+that field carries the CTAP status byte, not an ISO 7816 status word. The
+convention is stated in the crate documentation and in `ctap::status`, whose
+`CtapErrorCode` types the full CTAP1/CTAP2 status table.
+
+`make_credential` and `get_assertion` accept the caller's parameters as
+owned values; the caller computes pinUvAuthParam with
+`PinToken::authenticate` and passes it as `PinUvAuth` (16 bytes under
+protocol v1, 32 under v2); the library never authenticates implicitly.
+Enterprise attestation is accepted as a parameter; the firmware may reject
+it. Attestation statements are retained as the raw decoded CBOR map: no
+certificate trust, identity or attestation policy is enforced, consistent
+with the workspace certificate-inspection rule. What remains host-side is
+WebAuthn ceremony logic: clientDataJSON construction, origin and rpId
+policy, attestation trust decisions and assertion signature verification.
+
+With the default `clientpin` feature, `ctap::pin` implements ClientPIN
+protocols 1 and 2: `get_key_agreement` takes a caller-supplied 32-byte
+ephemeral P-256 scalar and validates the authenticator's peer key as a P-256
+ECDH-ES+HKDF-256 COSE key; `get_pin_retries`; `set_pin`/`change_pin` with
+the 64-byte zero-padded PIN encoding (PINs are validated before any I/O:
+fewer than 4 Unicode code points, more than 63 UTF-8 bytes and invalid UTF-8
+are rejected); `get_pin_token` (legacy subcommand 0x05, which the CanoKey
+firmware restricts to makeCredential/getAssertion permissions) and
+`get_pin_token_with_permissions` (0x09 with a `Permissions` bitfield).
+Protocol v1 derives the shared secret as SHA-256 of the ECDH X coordinate,
+encrypts under a zero IV and truncates pinUvAuthParam HMACs to 16 bytes;
+protocol v2 derives HKDF-SHA-256 HMAC/AES halves, encrypts under a fresh
+caller-supplied 16-byte IV and uses full 32-byte HMACs. The module never
+generates randomness: ephemeral scalars and v2 IVs are caller-supplied.
+PINs, shared secrets and pinUvAuthTokens are redacted from Debug and
+zeroized.
+
+Also behind `clientpin`, `ctap::credmgmt` implements
+authenticatorCredentialManagement: `get_creds_metadata`, `enumerate_rps` and
+`enumerate_credentials` run their Begin/GetNext loops inside the operation,
+bounded by the authenticator-reported total and by the operation's exchange
+budget, with a 0x2E NO_CREDENTIALS status on Begin yielding an empty vector
+rather than an error; `delete_credential` and `update_user_information`
+complete the set. The CanoKey vendor metadata-only mode (subCommandParams
+key 0x80, returning the raw COSE algorithm identifier under response key
+0x80 instead of the public key) is caller opt-in; the legacy preview command
+0x41 is never emitted.
 
 ## Batch
 
