@@ -50,10 +50,15 @@ authenticatorConfig, largeBlobs, hmac-secret and the raw CTAP1/U2F commands)
 are implemented in canokey-ctap; WebAuthn ceremony and relying-party logic
 (clientDataJSON, attestation trust, rpId policy) remains host-side consumer
 scope. The CTAP2 layer (getInfo, ClientPin v1+v2, makeCredential,
-getAssertion with external ES256 and ML-DSA-65 verification, and credential
+getAssertion with external ES256 and ML-DSA-65 verification, credential
 management including metadata-only) was validated against canokey-usbip
-virtual hardware on firmware 3.1.0. The NDEF and PASS applets are now
-covered by the library; they were validated on the same usbip runs described
+virtual hardware on firmware 3.1.0, and the same run covered U2F
+register/authenticate, hmac-secret exchanges, largeBlobs round-trips
+and authenticatorConfig (including the alwaysUv gate disabling U2F).
+The OATH YubiKey-API challenge-response was validated there against a
+PASS HMAC slot with a host-side HMAC-SHA-1 cross-check. The NDEF and
+PASS applets are now covered by the library; they were validated on the
+same usbip runs described
 in the compatibility section above. Consumers must retain one connection
 lease per operation and disable transport continuation/retries. The C ABI
 remains experimental.
