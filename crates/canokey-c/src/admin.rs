@@ -2,9 +2,14 @@ use super::*;
 use canokey::admin;
 
 /// Copied Admin request descriptor; fields unused by a request must be zero/NULL.
+///
+/// `struct_size` accepts two sizes: the legacy layout ending at `algorithm_id`
+/// (`core::mem::offset_of!(CnkAdminRequest, layout_id)`), which treats the
+/// keymap fields as absent, or a size covering the keymap fields through
+/// `keymap_len`. Only SET_KEYBOARD_KEYMAP (kind 27) may use the latter.
 #[repr(C)]
 pub struct CnkAdminRequest {
-    /// Size of the complete supported descriptor.
+    /// Size of the supplied descriptor: legacy or full, see the struct docs.
     pub struct_size: u32,
     /// CNK_ADMIN_* request identifier, 1..31 (11 is reserved).
     pub kind: u32,
@@ -43,13 +48,31 @@ pub struct CnkAdminRequest {
 }
 unsafe fn request(d: &CnkAdminRequest) -> Result<admin::Request, u32> {
     use admin::Request as R;
-    if d.struct_size < std::mem::size_of::<CnkAdminRequest>() as u32
+    // Legacy descriptors end at algorithm_id; the keymap fields were appended
+    // later, so binaries built against the older header pass the smaller size.
+    const LEGACY_SIZE: u32 = core::mem::offset_of!(CnkAdminRequest, layout_id) as u32;
+    const FULL_SIZE: u32 =
+        (core::mem::offset_of!(CnkAdminRequest, keymap_len) + core::mem::size_of::<usize>()) as u32;
+    if d.struct_size < LEGACY_SIZE
         || d.reserved != [0; 2]
         || (!matches!(d.kind, 12 | 24 | 30) && (!d.data.is_null() || d.data_len != 0))
         || (d.kind != 13 && (d.feature_mask != 0 || d.feature_values != 0))
         || (d.kind != 17 && (d.curve_id != 0 || d.algorithm_id != 0))
         || (!matches!(d.kind, 13 | 17 | 23) && d.present != 0)
         || (!matches!(d.kind, 13 | 15 | 18 | 20..=23) && d.values != 0)
+    {
+        return Err(ARG);
+    }
+    // Reading the appended fields is valid only when the descriptor covers
+    // them. Kind 27 requires them; for every other kind a present field must
+    // be zero/NULL, mirroring the reserved-field rule above.
+    let has_keymap_fields = d.struct_size >= FULL_SIZE;
+    if d.kind == 27 && !has_keymap_fields {
+        return Err(ARG);
+    }
+    if d.kind != 27
+        && has_keymap_fields
+        && (d.layout_id != 0 || !d.keymap.is_null() || d.keymap_len != 0)
     {
         return Err(ARG);
     }

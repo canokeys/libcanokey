@@ -1,5 +1,6 @@
 #include "canokey.h"
 #include <assert.h>
+#include <stddef.h>
 #include <string.h>
 
 static const uint8_t ok[] = {0x90, 0};
@@ -60,7 +61,26 @@ int main(void) {
     uint8_t output[6]={0};len=5;assert(cnk_operation_result_copy_bytes(op,output,&len)==CNK_BUFFER_TOO_SMALL&&len==6&&output[0]==0);
     assert(cnk_operation_result_copy_bytes(op,output,&len)==CNK_OK&&memcmp(output,config,6)==0);
     cnk_operation_free(op);
-    p=profile();d.struct_size=sizeof(d);d.kind=CNK_ADMIN_PASS_SLOTS;
+    /* Legacy descriptor size (ending at algorithm_id) still works for kinds
+     * that do not use the appended keymap fields. */
+    p=profile();memset(&d,0,sizeof(d));
+    d.struct_size=offsetof(cnk_admin_request_v1,layout_id);d.kind=CNK_ADMIN_FIRMWARE;
+    assert(cnk_admin_new(p,&d,NULL,&op,NULL)==CNK_OK);cnk_profile_free(p);
+    assert(cnk_operation_start(op,&step,NULL)==CNK_OK);
+    expect(op,select,sizeof(select));feed(op,ok,2);
+    const uint8_t fwresp[]={'3','.','1','.','0',0x90,0};
+    feed(op,fwresp,sizeof(fwresp));
+    assert(cnk_operation_result_kind(op,&step)==CNK_OK&&step==CNK_RESULT_ADMIN);
+    cnk_operation_free(op);
+    /* The legacy size never suffices for SET_KEYBOARD_KEYMAP (27). */
+    p=profile();
+    d.struct_size=offsetof(cnk_admin_request_v1,layout_id);d.kind=CNK_ADMIN_SET_KEYBOARD_KEYMAP;
+    assert(cnk_admin_new(p,&d,NULL,&op,NULL)==CNK_INVALID_ARGUMENT);cnk_profile_free(p);
+    /* Present but unused keymap fields must be zero/NULL for other kinds. */
+    p=profile();memset(&d,0,sizeof(d));
+    d.struct_size=sizeof(d);d.kind=CNK_ADMIN_FIRMWARE;d.layout_id=1;
+    assert(cnk_admin_new(p,&d,NULL,&op,NULL)==CNK_INVALID_ARGUMENT);cnk_profile_free(p);
+    p=profile();d.struct_size=sizeof(d);d.kind=CNK_ADMIN_PASS_SLOTS;d.layout_id=0;
     memcpy(pin,"654321",6);d.pin=pin;d.pin_len=6;
     assert(cnk_admin_new(p,&d,NULL,&op,NULL)==CNK_OK);cnk_profile_free(p);
     assert(cnk_operation_start(op,&step,NULL)==CNK_OK);

@@ -285,7 +285,13 @@ cnk_status_t cnk_operation_error(const cnk_operation_t *,cnk_error_v1 *);
 cnk_status_t cnk_operation_result_kind(const cnk_operation_t *,uint32_t *);
 /* Admin requests (11 reserved). Inputs unused by a request must be zero/NULL.
  * PASS_SLOTS (31) is the typed counterpart of PASS_CONFIGURATION (29): same
- * card dump, parsed into value_kind 10; raw bytes via result_copy_bytes. */
+ * card dump, parsed into value_kind 10; raw bytes via result_copy_bytes.
+ * cnk_admin_request_v1.struct_size accepts two sizes: the legacy layout
+ * ending at algorithm_id (offsetof(cnk_admin_request_v1, layout_id)), which
+ * treats the keymap fields as absent, or the full sizeof including them.
+ * Only SET_KEYBOARD_KEYMAP (27) uses the keymap fields, so a legacy-size
+ * descriptor is invalid for it; when present for other kinds they must be
+ * zero/NULL. */
 enum { CNK_ADMIN_FIRMWARE=1, CNK_ADMIN_MODEL=2, CNK_ADMIN_SERIAL=3,
   CNK_ADMIN_CHIP_ID=4, CNK_ADMIN_CORE_COMMIT=5, CNK_ADMIN_CONFIGURATION=6,
   CNK_ADMIN_FLASH_USAGE=7, CNK_ADMIN_APPLET_USAGE=8, CNK_ADMIN_PIN_STATUS=9,
