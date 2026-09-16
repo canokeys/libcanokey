@@ -33,6 +33,21 @@
 //! deletion and user-information updates, all authenticated with a
 //! pinUvAuthToken from the `pin` module.
 //!
+//! # Authenticator configuration
+//!
+//! Also behind `clientpin`, the `config` module implements
+//! authenticatorConfig (0x0D): toggleAlwaysUv, setMinPINLength and
+//! enableLongTouchForReset, authenticated with a pinUvAuthToken carrying the
+//! authenticatorConfig permission. These are persistent device configuration
+//! changes.
+//!
+//! # U2F / CTAP1
+//!
+//! [`u2f`] implements the legacy CTAP1 raw commands (REGISTER, AUTHENTICATE
+//! with its check-only variant, and VERSION) as plain CLA-00 APDUs on the
+//! selected FIDO2 applet, without a `clientpin` gate: no resident keys and
+//! no PIN.
+//!
 //! # Cargo features
 //!
 //! - `clientpin` (default): the `pin` module and its RustCrypto
@@ -113,6 +128,8 @@ use std::fmt;
 
 pub mod authdata;
 pub mod cbor;
+#[cfg(feature = "clientpin")]
+pub mod config;
 pub mod cose;
 #[cfg(feature = "clientpin")]
 pub mod credmgmt;
@@ -120,6 +137,7 @@ pub mod ctap2;
 #[cfg(feature = "clientpin")]
 pub mod pin;
 pub mod status;
+pub mod u2f;
 
 pub use ctap2::{
     get_assertion, get_info, get_next_assertion, make_credential, reset, selection,
