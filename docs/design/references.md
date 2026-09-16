@@ -183,6 +183,20 @@ No firmware is linked or built as a dependency.
   commands INS 43/44 are owned by the Admin applet behind its PIN gate per
   `applets/admin/admin.c` and `include/admin.h`.
 
+- The Admin PASS configuration commands INS 43/44 have sat behind the
+  `pin.is_validated` gate since their introduction: the audited
+  [2.0.1](https://github.com/canokeys/canokey-core/blob/be6325b8c4e6d40e86b2943f65083ed6b71f8259/applets/admin/admin.c)
+  admin.c predates the commands entirely, and the pinned HEAD dispatches both
+  only after the gate. A bare read therefore fails on-card with 6982 on every
+  firmware that implements the commands.
+
+- `piv_algorithm_extension` in
+  [`piv.c` at 3.0.0](https://github.com/canokeys/canokey-core/blob/7cb33508/applets/piv/piv.c)
+  requires `in_admin_status` (management-key GENERAL AUTHENTICATE) for both
+  the algorithm-extension read (P1 01) and the write (P1 02); the pinned HEAD
+  narrows the check to the write only, leaving the EE read unauthenticated.
+  The library gates the host read at construction on 3.0.x only.
+
 - The pinned CTAP transport: CLA 80 INS 10 (CTAP_INS_MSG) carries the raw CTAP2
   message while CLA 00 carries U2F; the response is one CTAP status byte plus
   payload. GET RESPONSE (INS C0) accepts CLA 00 or 80, 61xx chains the

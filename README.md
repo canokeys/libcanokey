@@ -87,7 +87,8 @@ protocol state.
   message wrap and `80 C0` GET RESPONSE continuation) plus a typed CTAP2
   client layer: strict canonical CBOR, COSE key and authenticatorData parsing,
   and getInfo/makeCredential/getAssertion/reset/selection operations. The
-  default `clientpin` feature adds ClientPIN protocols 1 and 2, credential
+  optional `clientpin` feature (default in `canokey-ctap`, opt-in on the
+  facade) adds ClientPIN protocols 1 and 2, credential
   management with bounded in-operation enumeration, authenticatorConfig
   (toggle always-UV, set minimum PIN length, require long touch for reset)
   and fragmented largeBlobs reads/writes. The raw CTAP1/U2F

@@ -96,7 +96,15 @@ transition. Operations still authenticate explicitly and never assume SELECT log
 Probe SELECT and historical final APDUs carry short explicit Le. Intermediate
 command-chain fragments retain the protocol engine's ordinary chaining format.
 
-PIV EE configuration reads start at 3.0; probes omit EE on 2.x. After an acknowledged
+PIV EE configuration reads start at 3.0; probes omit EE on 2.x. On 3.0.x the
+read itself sits behind management-key authentication (`in_admin_status` gates
+both read and write at 3.0.0; the pinned 3.1.0 evidence gates only the write),
+so `read_algorithm_config` rejects `Access::None` and `Access::Pin` with
+SecurityStatusNotSatisfied at construction when
+`Capability::PivProtectedAlgorithmConfigRead` is Supported. `Existing`,
+`Management` and `PinAndManagement` remain allowed, unknown firmware is not
+rejected by this gate, and from 3.1.0 the unauthenticated read is unchanged.
+After an acknowledged
 2.x Admin 40/07 write, callers may create a new immutable snapshot using
 `with_legacy_piv_extensions(bool)` (C: `cnk_profile_with_legacy_piv_extensions`).
 This records caller-confirmed enablement and uses firmware-fixed IDs; it never
@@ -204,8 +212,11 @@ write may still have changed the device. Invalidate credential/object caches on 
 mutation attempts too. Neither progress nor completion is an automatic refresh.
 
 Typed PASS slot operations layer on the raw PassConfiguration/SetPassConfiguration
-commands (INS 43/44) under baseline Admin capability evidence; writes require
-Admin PIN authentication like the raw write.
+commands (INS 43/44) under baseline Admin capability evidence. Both reads and
+writes sit behind the firmware Admin-PIN gate: the gate predates the commands
+themselves (2.0.1 admin.c has no INS 43/44 at all), so no capability gate is
+needed and `Access::None` is rejected with SecurityStatusNotSatisfied at
+construction for the reads as for the writes.
 `Request::PassSlots` parses the two-slot dump into `PassSlots`: each
 `PassSlotState` is Off, Static with only its append-enter flag, HmacSha1, Oath
 with the verbatim credential name and append-enter flag, or Unknown(raw type
@@ -473,9 +484,10 @@ ConditionsNotSatisfied, UnsupportedFeature, LimitExceeded or
 ProtocolViolation as their semantics dictate. Statuses without a specific
 kind, including the extension (0xE0..0xEF) and vendor (0xF0..0xFF) ranges,
 fall back to UnexpectedStatusWord. In every case the raw CTAP status byte is
-preserved in `Error::status_word` widened to `u16`: for CTAP-level failures
-that field carries the CTAP status byte, not an ISO 7816 status word. The
-convention is stated in the crate documentation and in `ctap::status`, whose
+preserved in `Error::application_status`: for CTAP-level failures that field
+carries the CTAP status byte, while `Error::status_word` is reserved for
+ISO 7816 status words and stays unset. The convention is stated in the crate
+documentation and in `ctap::status`, whose
 `CtapErrorCode` types the full CTAP1/CTAP2 status table.
 
 `make_credential` and `get_assertion` accept the caller's parameters as
