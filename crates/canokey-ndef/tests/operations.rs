@@ -14,11 +14,15 @@ const READ_CC: [u8; 5] = [0x00, 0xb0, 0x00, 0x00, 0x0f];
 const READ_NLEN: [u8; 5] = [0x00, 0xb0, 0x00, 0x00, 0x02];
 const OK: [u8; 2] = [0x90, 0x00];
 
-/// A 15-byte capability container plus success status.
+/// A 15-byte capability container plus success status, advertising file 0x0001.
 fn cc_response(max_file_size: u16, read_only: bool) -> Vec<u8> {
-    let mut cc = vec![
-        0x00, 0x0f, 0x20, 0x00, 0xff, 0x00, 0xff, 0x04, 0x06, 0xe1, 0x04,
-    ];
+    cc_response_with_file(0x0001, max_file_size, read_only)
+}
+
+/// A 15-byte capability container advertising an arbitrary NDEF file ID.
+fn cc_response_with_file(file_id: u16, max_file_size: u16, read_only: bool) -> Vec<u8> {
+    let mut cc = vec![0x00, 0x0f, 0x20, 0x00, 0xff, 0x00, 0xff, 0x04, 0x06];
+    cc.extend(file_id.to_be_bytes());
     cc.extend(max_file_size.to_be_bytes());
     cc.push(0x00);
     cc.push(if read_only { 0xff } else { 0x00 });
@@ -56,10 +60,30 @@ fn read_capability_transcript() {
     assert_eq!(
         capability,
         NdefCapability {
+            file_id: 0x0001,
             max_message_length: 1022,
             read_only: false,
         }
     );
+}
+
+#[test]
+fn read_message_selects_cc_advertised_file_id() {
+    // The CC declares the NDEF file; honor an ID other than the usual 0x0001.
+    let mut op = read_message(Default::default()).unwrap();
+    op.start().unwrap();
+    op.advance(&OK).unwrap();
+    op.advance(&OK).unwrap();
+    op.advance(&cc_response_with_file(0xe104, 1024, false))
+        .unwrap();
+    assert_eq!(
+        op.command().unwrap().as_bytes(),
+        &[0x00, 0xa4, 0x00, 0x0c, 0x02, 0xe1, 0x04]
+    );
+    op.advance(&OK).unwrap();
+    assert_eq!(op.command().unwrap().as_bytes(), &READ_NLEN);
+    assert_eq!(op.advance(&[0x00, 0x00, 0x90, 0x00]).unwrap(), Step::Done);
+    assert!(op.take_result().unwrap().is_empty());
 }
 
 #[test]
@@ -244,6 +268,10 @@ fn write_message_single_chunk_transcript() {
     assert_eq!(op.start().unwrap(), Step::Exchange);
     assert_eq!(op.command().unwrap().as_bytes(), &SELECT_APPLET);
     op.advance(&OK).unwrap();
+    assert_eq!(op.command().unwrap().as_bytes(), &SELECT_CC);
+    op.advance(&OK).unwrap();
+    assert_eq!(op.command().unwrap().as_bytes(), &READ_CC);
+    op.advance(&cc_response(1024, false)).unwrap();
     assert_eq!(op.command().unwrap().as_bytes(), &SELECT_NDEF);
     op.advance(&OK).unwrap();
     // Zero NLEN first: an interrupted write leaves no stale message.
@@ -272,6 +300,8 @@ fn write_message_multi_chunk() {
     op.start().unwrap();
     op.advance(&OK).unwrap();
     op.advance(&OK).unwrap();
+    op.advance(&cc_response(1024, false)).unwrap();
+    op.advance(&OK).unwrap();
     assert_eq!(
         op.command().unwrap().as_bytes(),
         &[0x00, 0xd6, 0x00, 0x00, 0x02, 0x00, 0x00]
@@ -298,6 +328,8 @@ fn write_message_empty_skips_chunks() {
     op.start().unwrap();
     op.advance(&OK).unwrap();
     op.advance(&OK).unwrap();
+    op.advance(&cc_response(1024, false)).unwrap();
+    op.advance(&OK).unwrap();
     assert_eq!(
         op.command().unwrap().as_bytes(),
         &[0x00, 0xd6, 0x00, 0x00, 0x02, 0x00, 0x00]
@@ -311,10 +343,68 @@ fn write_message_empty_skips_chunks() {
 }
 
 #[test]
-fn write_message_read_only_is_security_status() {
+fn write_message_selects_cc_advertised_file_id() {
+    let mut op = write_message(b"hi", Default::default()).unwrap();
+    op.start().unwrap();
+    op.advance(&OK).unwrap();
+    op.advance(&OK).unwrap();
+    op.advance(&cc_response_with_file(0xe104, 1024, false))
+        .unwrap();
+    assert_eq!(
+        op.command().unwrap().as_bytes(),
+        &[0x00, 0xa4, 0x00, 0x0c, 0x02, 0xe1, 0x04]
+    );
+    op.advance(&OK).unwrap();
+    op.advance(&OK).unwrap();
+    assert_eq!(
+        op.command().unwrap().as_bytes(),
+        &[0x00, 0xd6, 0x00, 0x02, 0x02, b'h', b'i']
+    );
+    op.advance(&OK).unwrap();
+    assert_eq!(
+        op.command().unwrap().as_bytes(),
+        &[0x00, 0xd6, 0x00, 0x00, 0x02, 0x00, 0x02]
+    );
+    assert_eq!(op.advance(&OK).unwrap(), Step::Done);
+}
+
+#[test]
+fn write_message_read_only_cc_fails_before_any_update() {
     let mut op = write_message(b"hello", Default::default()).unwrap();
     op.start().unwrap();
     op.advance(&OK).unwrap();
+    op.advance(&OK).unwrap();
+    // The pending command is the CC read; a read-only CC fails the write
+    // before any UPDATE BINARY is emitted.
+    assert_eq!(op.command().unwrap().as_bytes(), &READ_CC);
+    let error = op.advance(&cc_response(1024, true)).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::SecurityStatusNotSatisfied);
+    assert_eq!(error.phase, Phase::Command);
+    assert_eq!(op.state(), OperationState::Failed);
+}
+
+#[test]
+fn write_message_beyond_cc_maximum_fails_before_any_update() {
+    let mut op = write_message(b"hello", Default::default()).unwrap();
+    op.start().unwrap();
+    op.advance(&OK).unwrap();
+    op.advance(&OK).unwrap();
+    assert_eq!(op.command().unwrap().as_bytes(), &READ_CC);
+    // CC maximum file size 6 allows only a four-byte message.
+    let error = op.advance(&cc_response(6, false)).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::LimitExceeded);
+    assert_eq!(error.phase, Phase::Command);
+    assert_eq!(op.state(), OperationState::Failed);
+}
+
+#[test]
+fn write_message_device_write_rejection_is_security_status() {
+    // A device that still rejects UPDATE BINARY with 0x6982 keeps the mapping.
+    let mut op = write_message(b"hello", Default::default()).unwrap();
+    op.start().unwrap();
+    op.advance(&OK).unwrap();
+    op.advance(&OK).unwrap();
+    op.advance(&cc_response(1024, false)).unwrap();
     op.advance(&OK).unwrap();
     let error = op.advance(&[0x69, 0x82]).unwrap_err();
     assert_eq!(error.kind, ErrorKind::SecurityStatusNotSatisfied);
