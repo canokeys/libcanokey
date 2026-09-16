@@ -1,12 +1,33 @@
-//! Caller-owned CTAP/FIDO2 ISO7816 transport envelope.
+//! Caller-owned CTAP/FIDO2 ISO7816 transport envelope plus CTAP2 foundations.
 //!
-//! This crate implements only the ISO 7816 envelope of the CTAP transport:
+//! This crate implements the ISO 7816 envelope of the CTAP transport:
 //! SELECT of the FIDO2 application by DF name, CTAP command wrapping with
 //! `CLA 80 / INS 10`, 61xx response continuation via GET RESPONSE with class
-//! byte 80, and status-word classification. CBOR encoding, CTAP2 subcommand
-//! semantics and ClientPin remain on the host side: the caller supplies the
-//! complete CTAP message (first byte the CTAP command, for example 0x01 for
+//! byte 80, and status-word classification. The caller supplies the complete
+//! CTAP message (first byte the CTAP command, for example 0x01 for
 //! authenticatorMakeCredential) and interprets the returned payload.
+//!
+//! # CTAP2 layer
+//!
+//! On top of the envelope, this crate provides the dependency-free building
+//! blocks of a CTAP2 client: [`status`] types the CTAP status byte and
+//! classifies failures, [`cbor`] implements the strict canonical CBOR
+//! authenticators speak, [`cose`] parses and encodes COSE public keys, and
+//! [`authdata`] parses `authenticatorData`. Note the convention used
+//! throughout: for CTAP-level failures
+//! [`Error::status_word`](canokey_protocol::Error::status_word) carries the
+//! raw CTAP status byte, not an ISO 7816 status word.
+//!
+//! # CTAP2 commands
+//!
+//! [`ctap2`] provides the typed command-level operations:
+//! [`ctap2::get_info`] (authenticatorGetInfo), [`ctap2::make_credential`],
+//! [`ctap2::get_assertion`] and [`ctap2::get_next_assertion`],
+//! [`ctap2::reset`] and [`ctap2::selection`]. Each operation sends the
+//! explicit SELECT followed by one wrapped CTAP message, classifies a
+//! non-success CTAP status byte into a typed error in the Command phase, and
+//! parses the response CBOR strictly. All factories are profile-free:
+//! capability policy stays with the caller.
 //!
 //! # Wire format
 //!
@@ -68,27 +89,22 @@ use canokey_protocol::{
 use std::collections::VecDeque;
 use std::fmt;
 
+pub mod authdata;
+pub mod cbor;
+pub mod cose;
+pub mod ctap2;
+pub mod status;
+
+pub use ctap2::{
+    get_assertion, get_info, get_next_assertion, make_credential, reset, selection,
+    AuthenticatorInfo, GetAssertionParams, GetAssertionResponse, MakeCredentialParams,
+    MakeCredentialResponse, PinUvAuth, PinUvAuthProtocol, PublicKeyCredentialDescriptor,
+    PublicKeyCredentialParameters, RelyingParty, UserEntity, MAX_USER_ID_LEN,
+};
+pub use status::{CtapErrorCode, CtapStatus};
+
 /// The FIDO2 application identifier (DF name): `A0 00 00 06 47 2F 00 01`.
 pub const FIDO2_AID: [u8; 8] = [0xa0, 0x00, 0x00, 0x06, 0x47, 0x2f, 0x00, 0x01];
-
-/// One-byte CTAP status from the start of a successful CTAP response.
-///
-/// Other CTAP1_ERR/CTAP2_ERR codes are surfaced raw through [`Self::raw`];
-/// interpreting them and any CBOR payload remains the host's responsibility.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct CtapStatus(u8);
-impl CtapStatus {
-    /// CTAP1_ERR_SUCCESS (0x00).
-    pub const SUCCESS: Self = Self(0x00);
-    /// Return whether this status is CTAP1_ERR_SUCCESS.
-    pub fn is_success(self) -> bool {
-        self == Self::SUCCESS
-    }
-    /// Return the raw status byte as sent by the authenticator.
-    pub fn raw(self) -> u8 {
-        self.0
-    }
-}
 
 /// Owned CTAP response: the status byte and the payload that follows it.
 ///
@@ -227,7 +243,7 @@ fn parse_response(response: ResponseData) -> Result<CtapResponse, Error> {
         .split_first()
         .ok_or_else(|| Error::new(ErrorKind::InvalidResponse).at(Phase::Parsing))?;
     Ok(CtapResponse {
-        status: CtapStatus(status),
+        status: CtapStatus::from_raw(status),
         payload: SecretBytes::new(payload.to_vec()),
     })
 }
@@ -277,18 +293,13 @@ pub fn transceive_selected(
     )
 }
 
-/// Select the FIDO2 applet and send one CTAP message within that selection.
-///
-/// The operation sends SELECT (Phase::Select, so 6A82 maps to
-/// [`ErrorKind::UnsupportedDevice`]) followed by the wrapped CTAP command
-/// (Phase::Command). Everything else matches [`transceive_selected`].
-///
-/// # Errors
-/// See [`transceive_selected`] and [`select_application`].
-pub fn transceive(
+/// Select the FIDO2 applet, send one CTAP message, and feed the response to
+/// a typed parser. Used by the command-level operations in [`ctap2`].
+pub(crate) fn select_then<T: 'static>(
     message: &[u8],
     options: OperationOptions,
-) -> Result<Operation<CtapResponse>, Error> {
+    parse: impl FnOnce(CtapResponse) -> Result<T, Error> + Send + 'static,
+) -> Result<Operation<T>, Error> {
     let options = options.validate()?;
     checked_message(message, options)?;
     let requests = vec![
@@ -308,8 +319,23 @@ pub fn transceive(
         Sequence {
             pending: requests.into(),
             current: None,
-            parse: Some(Box::new(parse_response)),
+            parse: Some(Box::new(move |response| parse(parse_response(response)?))),
         },
         options,
     )
+}
+
+/// Select the FIDO2 applet and send one CTAP message within that selection.
+///
+/// The operation sends SELECT (Phase::Select, so 6A82 maps to
+/// [`ErrorKind::UnsupportedDevice`]) followed by the wrapped CTAP command
+/// (Phase::Command). Everything else matches [`transceive_selected`].
+///
+/// # Errors
+/// See [`transceive_selected`] and [`select_application`].
+pub fn transceive(
+    message: &[u8],
+    options: OperationOptions,
+) -> Result<Operation<CtapResponse>, Error> {
+    select_then(message, options, Ok)
 }
