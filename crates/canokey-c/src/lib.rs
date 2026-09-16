@@ -91,6 +91,9 @@ pub struct CnkOperation {
     inner: Inner,
     poisoned: bool,
 }
+// Operation sizes differ by applet; the enum lives behind an opaque handle,
+// so boxing selected variants would not change observable behavior.
+#[allow(clippy::large_enum_variant)]
 enum Inner {
     #[cfg(feature = "openpgp")]
     OpenPgp(Operation<canokey::openpgp::Outcome>),

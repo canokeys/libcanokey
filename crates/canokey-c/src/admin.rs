@@ -120,7 +120,11 @@ unsafe fn request(d: &CnkAdminRequest) -> Result<admin::Request, u32> {
         ),
         25 => R::KeyboardLayout,
         26 => R::KeyboardKeymap,
-        27 => R::SetKeyboardKeymap { layout_id: d.layout_id, keymap: admin::KeyboardKeymap::from_bytes(bytes(d.keymap, d.keymap_len)?).map_err(|_| ARG)? },
+        27 => R::SetKeyboardKeymap {
+            layout_id: d.layout_id,
+            keymap: admin::KeyboardKeymap::from_bytes(bytes(d.keymap, d.keymap_len)?)
+                .map_err(|_| ARG)?,
+        },
         28 => R::ClearKeyboardKeymap,
         29 => R::PassConfiguration,
         30 => R::SetPassConfiguration(bytes(d.data, d.data_len)?.to_vec()),
@@ -255,6 +259,7 @@ pub unsafe extern "C" fn cnk_operation_admin_outcome(
                 value.algorithm_id = s.algorithm_id;
                 7
             }
+            Value::PassSlots(_) => 10,
         };
         ptr::write(out, value);
         OK
@@ -276,6 +281,29 @@ pub(super) fn result_bytes(value: &admin::Value) -> Option<Vec<u8>> {
         admin::Value::Sm2Configuration(s) => s.to_bytes().to_vec(),
         admin::Value::KeyboardLayout(id) => vec![*id],
         admin::Value::KeyboardKeymap(map) => map.as_bytes().to_vec(),
+        admin::Value::PassSlots(slots) => {
+            let encode = |slot: &admin::PassSlotState| -> Vec<u8> {
+                match slot {
+                    admin::PassSlotState::Off => vec![0x00],
+                    admin::PassSlotState::Static { append_enter } => {
+                        vec![0x02, u8::from(*append_enter)]
+                    }
+                    admin::PassSlotState::HmacSha1 => vec![0x03],
+                    admin::PassSlotState::Oath { name, append_enter } => {
+                        let mut v = Vec::with_capacity(name.len() + 3);
+                        v.push(0x01);
+                        v.push(name.len() as u8);
+                        v.extend_from_slice(name);
+                        v.push(u8::from(*append_enter));
+                        v
+                    }
+                    admin::PassSlotState::Unknown(t) => vec![*t],
+                }
+            };
+            let mut v = encode(&slots.short);
+            v.extend(encode(&slots.long));
+            v
+        }
         _ => return None,
     })
 }

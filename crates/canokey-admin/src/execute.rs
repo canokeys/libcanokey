@@ -58,6 +58,9 @@ fn sm2_valid(s: Sm2Configuration) -> Result<(), Error> {
 /// in `Operation::progress` after failure. Cancel/drop never roll back or send I/O.
 /// Invalidate application credential/data caches whenever their mutation is exposed.
 ///
+/// This is [`operation_with_access`] with `Some(pin)` mapped to [`Access::Pin`]
+/// and `None` to [`Access::None`].
+///
 /// # Errors
 /// Returns capability, invalid-input, missing-authentication or host-budget errors
 /// before execution where inputs are known. Unknown feature bits forbid a feature
@@ -66,6 +69,38 @@ pub fn operation(
     profile: &DeviceProfile,
     request: Request,
     pin: Option<Pin>,
+    options: OperationOptions,
+) -> Result<Operation<Outcome>, Error> {
+    operation_with_access(
+        profile,
+        request,
+        pin.map(Access::Pin).unwrap_or(Access::None),
+        options,
+    )
+}
+
+/// Build an Admin operation with an explicit selection and authentication policy.
+///
+/// Validation, capability gates, patch semantics and progress reporting match
+/// [`operation`]. [`Access::None`] and [`Access::Pin`] SELECT the Admin applet
+/// once; `Pin` also sends explicit VERIFY before the request. [`Access::Existing`]
+/// sends no SELECT and no implicit VERIFY: the caller asserts an already selected
+/// Admin applet and any required prior verification. That assertion is an
+/// execution policy, not proof of live authentication; firmware authorizes the
+/// actual command and a protected request without prior verification fails with
+/// 6982. Under `Existing`, PinStatus and ChangePin send only their own VERIFY
+/// or CHANGE PIN command; `Request::VerifyPin` has no PIN of its own and is
+/// rejected with `InvalidArgument`. PinStatus and FactoryReset reject
+/// [`Access::Pin`] to prevent hidden credential attempts.
+///
+/// # Errors
+/// Returns capability, invalid-input, missing-authentication or host-budget errors
+/// before execution where inputs are known. Unknown feature bits forbid a feature
+/// mask overwrite after the read; all patch values are checked before any write.
+pub fn operation_with_access(
+    profile: &DeviceProfile,
+    request: Request,
+    access: Access,
     options: OperationOptions,
 ) -> Result<Operation<Outcome>, Error> {
     profile.capability(Capability::Admin).require()?;
@@ -130,11 +165,17 @@ pub fn operation(
                 | Request::SetKeyboardKeymap { .. }
                 | Request::ClearKeyboardKeymap
                 | Request::SetPassConfiguration(_)
+                | Request::SetPassSlot { .. }
         );
-    if protected && pin.is_none() {
+    if protected && matches!(access, Access::None) {
         return Err(Error::new(ErrorKind::SecurityStatusNotSatisfied));
     }
-    if pin.is_some() && matches!(request, Request::PinStatus | Request::FactoryReset) {
+    if matches!(access, Access::Existing) && matches!(request, Request::VerifyPin) {
+        return Err(argument());
+    }
+    if matches!(access, Access::Pin(_))
+        && matches!(request, Request::PinStatus | Request::FactoryReset)
+    {
         return Err(argument());
     }
     if let Request::Configure(p) = &request {
@@ -149,8 +190,10 @@ pub fn operation(
         })?;
     }
     let mut queue = VecDeque::new();
-    queue.push_back((command::select(), Stage::Select));
-    if let Some(pin) = pin {
+    if !matches!(access, Access::Existing) {
+        queue.push_back((command::select(), Stage::Select));
+    }
+    if let Access::Pin(pin) = access {
         queue.push_back((
             write(0x20, 0, 0, pin.0.as_bytes().to_vec()),
             Stage::Authenticate,
@@ -167,10 +210,26 @@ pub fn operation(
         Request::AppletUsage => (Some(read(0x41, 1)), Stage::Read),
         Request::KeyboardLayout => (Some(command::read_keyboard_layout()), Stage::Read),
         Request::KeyboardKeymap => (Some(command::read_keyboard_keymap()), Stage::Read),
-        Request::SetKeyboardKeymap { layout_id, keymap } => (Some(command::write_keyboard_keymap(*layout_id, keymap.as_bytes())), Stage::Write(true)),
-        Request::ClearKeyboardKeymap => (Some(command::clear_keyboard_keymap()), Stage::Write(true)),
+        Request::SetKeyboardKeymap { layout_id, keymap } => (
+            Some(command::write_keyboard_keymap(
+                *layout_id,
+                keymap.as_bytes(),
+            )),
+            Stage::Write(true),
+        ),
+        Request::ClearKeyboardKeymap => {
+            (Some(command::clear_keyboard_keymap()), Stage::Write(true))
+        }
         Request::PassConfiguration => (Some(command::pass_configuration()), Stage::Read),
-        Request::SetPassConfiguration(data) => (Some(command::write_pass_configuration(data)), Stage::Write(true)),
+        Request::SetPassConfiguration(data) => (
+            Some(command::write_pass_configuration(data)),
+            Stage::Write(true),
+        ),
+        Request::PassSlots => (Some(command::pass_configuration()), Stage::Read),
+        Request::SetPassSlot { slot, config } => (
+            Some(write(0x44, slot.wire(), 0, config.encode()?)),
+            Stage::Write(true),
+        ),
         Request::PinStatus => (Some(write(0x20, 0, 0, vec![])), Stage::Read),
         Request::VerifyPin => (None, Stage::Read),
         Request::ChangePin(p) => (
@@ -450,13 +509,17 @@ impl Admin {
                 )
             }
             Request::KeyboardLayout => {
-                if raw.len() != 1 { return Err(invalid()); }
+                if raw.len() != 1 {
+                    return Err(invalid());
+                }
                 Value::KeyboardLayout(raw[0])
             }
             Request::KeyboardKeymap => Value::KeyboardKeymap(KeyboardKeymap::from_bytes(raw)?),
             Request::SetKeyboardKeymap { .. } | Request::ClearKeyboardKeymap => Value::None,
             Request::PassConfiguration => Value::Bytes(raw.to_vec()),
             Request::SetPassConfiguration(_) => Value::None,
+            Request::PassSlots => Value::PassSlots(PassSlots::parse(raw)?),
+            Request::SetPassSlot { .. } => Value::None,
             Request::NfcStatus => {
                 if raw.len() != 1 || raw[0] > 1 {
                     return Err(invalid());

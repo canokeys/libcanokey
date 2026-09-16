@@ -4,12 +4,26 @@ use canokey_protocol::{Error, ErrorKind, SecretBytes};
 /// Fixed 128-entry keyboard HID map (modifier/usage pairs).
 #[derive(Clone, PartialEq, Eq)]
 pub struct KeyboardKeymap([u8; 256]);
-impl std::fmt::Debug for KeyboardKeymap { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.debug_tuple("KeyboardKeymap").field(&"<redacted>").finish() } }
+impl std::fmt::Debug for KeyboardKeymap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("KeyboardKeymap")
+            .field(&"<redacted>")
+            .finish()
+    }
+}
 impl KeyboardKeymap {
     /// Copy exactly 256 mapping bytes.
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> { Ok(Self(bytes.try_into().map_err(|_| Error::new(ErrorKind::InvalidArgument))?)) }
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+        Ok(Self(
+            bytes
+                .try_into()
+                .map_err(|_| Error::new(ErrorKind::InvalidArgument))?,
+        ))
+    }
     /// Return the complete modifier/usage table.
-    pub fn as_bytes(&self) -> &[u8; 256] { &self.0 }
+    pub fn as_bytes(&self) -> &[u8; 256] {
+        &self.0
+    }
 }
 
 /// Owned unpadded Admin PIN, six through 64 bytes. Debug redacts its contents.
@@ -24,6 +38,29 @@ impl Pin {
         }
         Ok(Self(SecretBytes::new(bytes.to_vec())))
     }
+}
+
+/// Selection and authentication policy for one Admin operation.
+/// `None`/`Pin` SELECT the Admin applet first; `Existing` reuses the caller's
+/// selected transaction. This owns inputs, not a persistent authorization token.
+#[derive(Debug)]
+pub enum Access {
+    /// Reuse the caller's selected Admin transaction and existing card
+    /// authorization. No SELECT and no implicit VERIFY is sent; explicit
+    /// credential requests such as `Request::ChangePin` still send their own
+    /// PIN-bearing commands. The caller must retain the transaction through
+    /// completion; selecting another applet may reset card authorizations.
+    /// This is an execution policy, not proof of live authentication: firmware
+    /// authorizes the actual command and answers 6982 when prior verification
+    /// is missing. `Request::VerifyPin` carries no PIN of its own and is
+    /// rejected under this policy.
+    Existing,
+    /// Select the Admin applet first; no explicit authentication is sent.
+    /// Protected requests fail preflight with `SecurityStatusNotSatisfied`.
+    None,
+    /// Select the Admin applet, then VERIFY with the Admin PIN immediately
+    /// before the target request.
+    Pin(Pin),
 }
 
 /// Six-byte device configuration; reserved and unknown bits are retained.
@@ -250,7 +287,162 @@ pub enum Applet {
     /// Password applet data.
     Pass,
 }
+/// PASS slot identifier; the wire form is the P1 of the INS 44 slot write.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PassSlotId {
+    /// Slot 1 (wire P1 1), triggered by a short touch.
+    Short,
+    /// Slot 2 (wire P1 2), triggered by a long touch.
+    Long,
+}
+impl PassSlotId {
+    pub(crate) fn wire(self) -> u8 {
+        match self {
+            Self::Short => 1,
+            Self::Long => 2,
+        }
+    }
+}
+/// Observed PASS slot configuration from a typed read.
+///
+/// Firmware never returns secret material: a STATIC slot reports only its
+/// append-enter flag without the stored password, and an HMAC-SHA1 slot reports
+/// no key bytes. The uninterpreted OATH credential name is preserved verbatim.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PassSlotState {
+    /// Slot is disabled (type 0x00).
+    Off,
+    /// Static password slot (type 0x02); the password itself is not returned.
+    Static {
+        /// Whether firmware appends Return after typing the password.
+        append_enter: bool,
+    },
+    /// HMAC-SHA1 challenge-response slot (type 0x03); the key is never dumped.
+    HmacSha1,
+    /// OATH credential slot (type 0x01), configured through the OATH applet.
+    Oath {
+        /// Raw credential name bytes; no text encoding is assumed.
+        name: Vec<u8>,
+        /// Whether firmware appends Return after the OTP.
+        append_enter: bool,
+    },
+    /// Opaque slot of an unrecognized type byte; only the type is observable.
+    Unknown(u8),
+}
+/// Owned PASS slot configuration for a typed write.
+///
+/// Password and key bytes are redacted from Debug and zeroized on drop.
+/// OATH and unknown slots are not writable through Admin INS 44 (firmware
+/// rejects OATH with 6A80; it is configured via the OATH applet), so this
+/// enum has no such variants. A STATIC password is at most 32 bytes
+/// (firmware contract) and restricted to printable ASCII 0x20–0x7E because
+/// keyboard emulation cannot type other bytes (host-side guard).
+#[derive(Clone, Debug)]
+pub enum PassSlotConfig {
+    /// Disable the slot; encodes as exactly `[0x00]`.
+    Off,
+    /// Static password slot; encodes as `[0x02, len, password..., enter]`.
+    Static {
+        /// Owned password, at most 32 printable-ASCII bytes; may be empty.
+        password: SecretBytes,
+        /// Append Return after typing the password.
+        append_enter: bool,
+    },
+    /// HMAC-SHA1 slot; encodes as `[0x03, 0x14, <20 key bytes>]`.
+    HmacSha1 {
+        /// Owned 20-byte HMAC-SHA1 key.
+        key: SecretBytes,
+    },
+}
+impl PassSlotConfig {
+    pub(crate) fn encode(&self) -> Result<Vec<u8>, Error> {
+        fn argument() -> Error {
+            Error::new(ErrorKind::InvalidArgument)
+        }
+        Ok(match self {
+            Self::Off => vec![0x00],
+            Self::Static {
+                password,
+                append_enter,
+            } => {
+                let p = password.as_bytes();
+                if p.len() > 32 || !p.iter().all(|b| (0x20..=0x7e).contains(b)) {
+                    return Err(argument());
+                }
+                let mut data = Vec::with_capacity(p.len() + 3);
+                data.push(0x02);
+                data.push(p.len() as u8);
+                data.extend_from_slice(p);
+                data.push(u8::from(*append_enter));
+                data
+            }
+            Self::HmacSha1 { key } => {
+                let k = key.as_bytes();
+                if k.len() != 20 {
+                    return Err(argument());
+                }
+                let mut data = Vec::with_capacity(22);
+                data.push(0x03);
+                data.push(0x14);
+                data.extend_from_slice(k);
+                data
+            }
+        })
+    }
+}
+/// Typed result of a PASS slot read: both slot dumps, in touch-gesture order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PassSlots {
+    /// Short-touch slot (first dump in the INS 43 response).
+    pub short: PassSlotState,
+    /// Long-touch slot (second dump in the INS 43 response).
+    pub long: PassSlotState,
+}
+impl PassSlots {
+    pub(crate) fn parse(raw: &[u8]) -> Result<Self, Error> {
+        let (short, n) = PassSlotState::parse_prefix(raw)?;
+        let (long, m) = PassSlotState::parse_prefix(&raw[n..])?;
+        if n + m != raw.len() {
+            return Err(invalid());
+        }
+        Ok(Self { short, long })
+    }
+}
+impl PassSlotState {
+    fn parse_prefix(raw: &[u8]) -> Result<(Self, usize), Error> {
+        let (&ty, rest) = raw.split_first().ok_or_else(invalid)?;
+        Ok(match ty {
+            0x00 => (Self::Off, 1),
+            0x02 => {
+                let (&enter, _) = rest.split_first().ok_or_else(invalid)?;
+                (
+                    Self::Static {
+                        append_enter: enter != 0,
+                    },
+                    2,
+                )
+            }
+            0x03 => (Self::HmacSha1, 1),
+            0x01 => {
+                let (&len, rest) = rest.split_first().ok_or_else(invalid)?;
+                let len = usize::from(len);
+                if rest.len() < len + 1 {
+                    return Err(invalid());
+                }
+                (
+                    Self::Oath {
+                        name: rest[..len].to_vec(),
+                        append_enter: rest[len] != 0,
+                    },
+                    len + 3,
+                )
+            }
+            t => (Self::Unknown(t), 1),
+        })
+    }
+}
 /// Owned Admin request. Mutations require a supplied PIN, except factory reset.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum Request {
     /// Read original firmware text bytes.
@@ -286,6 +478,20 @@ pub enum Request {
     PassConfiguration,
     /// Replace raw PASS applet configuration bytes.
     SetPassConfiguration(Vec<u8>),
+    /// Read both typed PASS slot configurations. Uses the same INS 43 command
+    /// and Admin-PIN firmware gate as the raw read; the response is parsed into
+    /// [`PassSlots`]. Secret slot material is never returned by firmware.
+    PassSlots,
+    /// Replace one PASS slot configuration (INS 44, P1 = slot). Same capability
+    /// gate and Admin-PIN requirement as the raw write; the configuration is
+    /// validated before any I/O. The write takes effect for subsequent touch
+    /// events and, like the raw write, marks the outcome `reprobe_required`.
+    SetPassSlot {
+        /// Target slot; wire P1 is 1 (short) or 2 (long).
+        slot: PassSlotId,
+        /// Owned typed configuration; OATH and unknown slots are not writable.
+        config: PassSlotConfig,
+    },
     /// Query Admin verification/retries without submitting a PIN.
     PinStatus,
     /// Verify the separately supplied PIN without another target command.
@@ -330,6 +536,7 @@ pub struct PinStatus {
     pub blocked: bool,
 }
 /// Owned result data. Read bytes are preserved without interpreting text encoding.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum Value {
     /// No response payload, including the initial partial-write progress value.
@@ -352,6 +559,8 @@ pub enum Value {
     KeyboardKeymap(KeyboardKeymap),
     /// Empty-VERIFY observations.
     PinStatus(PinStatus),
+    /// Typed PASS slot read result.
+    PassSlots(PassSlots),
     /// Vendor NFC flag.
     NfcStatus(bool),
     /// SM2 identifier read result.

@@ -1,6 +1,8 @@
 use canokey_admin::*;
 use canokey_compat::{DeviceObservations, DeviceProfile};
-use canokey_protocol::{ErrorKind, Operation, OperationOptions, SecretReference, Step};
+use canokey_protocol::{
+    ErrorKind, Operation, OperationOptions, SecretBytes, SecretReference, Step,
+};
 fn profile() -> DeviceProfile {
     DeviceProfile::from_observations(DeviceObservations::new(b"3.1.0".to_vec())).unwrap()
 }
@@ -243,4 +245,281 @@ fn preflight_limits_and_unknown_firmware() {
     assert!(Configuration::parse(&[2, 0, 0, 1, 1, 0]).is_err());
     let p = Pin::from_bytes(b"super-secret").unwrap();
     assert!(!format!("{p:?}").contains("super-secret"));
+}
+#[test]
+fn existing_access_sends_target_without_select_or_verify() {
+    let mut op = operation_with_access(
+        &profile(),
+        Request::SetNfc(true),
+        Access::Existing,
+        Default::default(),
+    )
+    .unwrap();
+    assert_eq!(op.start().unwrap(), Step::Exchange);
+    assert_eq!(op.command().unwrap().as_bytes(), &[0, 0x14, 1, 1]);
+    assert!(op.progress().unwrap().reprobe_required);
+    assert_eq!(op.advance(&[0x90, 0]).unwrap(), Step::Done);
+    assert_eq!(op.result().unwrap().confirmed_writes, 1);
+
+    let mut op = operation_with_access(
+        &profile(),
+        Request::SetNfc(true),
+        Access::Existing,
+        Default::default(),
+    )
+    .unwrap();
+    op.start().unwrap();
+    let e = op.advance(&[0x69, 0x82]).unwrap_err();
+    assert_eq!(e.kind, ErrorKind::SecurityStatusNotSatisfied);
+    assert!(op.command().is_err());
+}
+#[test]
+fn existing_access_pin_status_and_change_pin_without_select() {
+    let mut op = operation_with_access(
+        &profile(),
+        Request::PinStatus,
+        Access::Existing,
+        Default::default(),
+    )
+    .unwrap();
+    assert_eq!(op.start().unwrap(), Step::Exchange);
+    assert_eq!(op.command().unwrap().as_bytes(), &[0, 0x20, 0, 0]);
+    op.advance(&[0x63, 0xc3]).unwrap();
+    assert!(matches!(
+        op.result().unwrap().value,
+        Value::PinStatus(PinStatus {
+            verified: false,
+            retries_remaining: Some(3),
+            blocked: false,
+        })
+    ));
+
+    let mut op = operation_with_access(
+        &profile(),
+        Request::ChangePin(Pin::from_bytes(b"newpin").unwrap()),
+        Access::Existing,
+        Default::default(),
+    )
+    .unwrap();
+    assert_eq!(op.start().unwrap(), Step::Exchange);
+    assert_eq!(op.command().unwrap().as_bytes(), b"\0\x21\0\0\x06newpin");
+    op.advance(&[0x90, 0]).unwrap();
+    assert_eq!(op.result().unwrap().confirmed_writes, 1);
+}
+#[test]
+fn access_preflight_rejections() {
+    assert_eq!(
+        operation_with_access(
+            &profile(),
+            Request::SetNfc(true),
+            Access::None,
+            Default::default()
+        )
+        .unwrap_err()
+        .kind,
+        ErrorKind::SecurityStatusNotSatisfied
+    );
+    assert_eq!(
+        operation_with_access(
+            &profile(),
+            Request::VerifyPin,
+            Access::Existing,
+            Default::default()
+        )
+        .unwrap_err()
+        .kind,
+        ErrorKind::InvalidArgument
+    );
+    for request in [Request::PinStatus, Request::FactoryReset] {
+        assert_eq!(
+            operation_with_access(&profile(), request, Access::Pin(pin()), Default::default())
+                .unwrap_err()
+                .kind,
+            ErrorKind::InvalidArgument
+        );
+    }
+    let mut op = operation_with_access(
+        &profile(),
+        Request::SetNfc(false),
+        Access::Pin(pin()),
+        Default::default(),
+    )
+    .unwrap();
+    assert_eq!(op.start().unwrap(), Step::Exchange);
+    assert_eq!(
+        op.command().unwrap().as_bytes(),
+        &[0, 0xa4, 4, 0, 5, 0xf0, 0, 0, 0, 0]
+    );
+    op.advance(&[0x90, 0]).unwrap();
+    assert_eq!(op.command().unwrap().as_bytes(), b"\0\x20\0\0\x06654321");
+    op.advance(&[0x90, 0]).unwrap();
+    assert_eq!(op.command().unwrap().as_bytes(), &[0, 0x14, 1, 0]);
+}
+#[test]
+fn pass_slots_typed_read_golden() {
+    let mut op = begin(Request::PassSlots, false);
+    assert_eq!(op.command().unwrap().as_bytes(), &[0, 0x43, 0, 0, 0]);
+    // short = STATIC with enter; long = OATH name "abc" without enter.
+    op.advance(&[0x02, 0x01, 0x01, 0x03, b'a', b'b', b'c', 0x00, 0x90, 0])
+        .unwrap();
+    let Value::PassSlots(slots) = &op.result().unwrap().value else {
+        panic!()
+    };
+    assert_eq!(slots.short, PassSlotState::Static { append_enter: true });
+    assert_eq!(
+        slots.long,
+        PassSlotState::Oath {
+            name: b"abc".to_vec(),
+            append_enter: false
+        }
+    );
+
+    // Off + HmacSha1.
+    let mut op = begin(Request::PassSlots, false);
+    op.advance(&[0x00, 0x03, 0x90, 0]).unwrap();
+    let Value::PassSlots(slots) = &op.result().unwrap().value else {
+        panic!()
+    };
+    assert_eq!(slots.short, PassSlotState::Off);
+    assert_eq!(slots.long, PassSlotState::HmacSha1);
+    // Unknown type byte remains observable and parsing continues.
+    let mut op = begin(Request::PassSlots, false);
+    op.advance(&[0x07, 0x00, 0x90, 0]).unwrap();
+    let Value::PassSlots(slots) = &op.result().unwrap().value else {
+        panic!()
+    };
+    assert_eq!(slots.short, PassSlotState::Unknown(0x07));
+    assert_eq!(slots.long, PassSlotState::Off);
+}
+#[test]
+fn pass_slots_malformed_reads() {
+    for dump in [
+        &[0x02][..],             // truncated STATIC dump
+        &[0x01, 0x05, b'a'][..], // OATH name_len overruns the buffer
+        &[0x00][..],             // single slot only
+        &[0x00, 0x00, 0x00][..], // trailing garbage after two slots
+        &[][..],                 // empty response
+    ] {
+        let mut op = begin(Request::PassSlots, false);
+        let mut response = dump.to_vec();
+        response.extend_from_slice(&[0x90, 0]);
+        assert_eq!(
+            op.advance(&response).unwrap_err().kind,
+            ErrorKind::InvalidResponse,
+            "dump {dump:?}"
+        );
+    }
+}
+#[test]
+fn pass_slot_typed_write_golden() {
+    let mut op = begin(
+        Request::SetPassSlot {
+            slot: PassSlotId::Short,
+            config: PassSlotConfig::Static {
+                password: SecretBytes::new(b"secret".to_vec()),
+                append_enter: true,
+            },
+        },
+        true,
+    );
+    assert_eq!(
+        op.command().unwrap().as_bytes(),
+        b"\0\x44\x01\0\x09\x02\x06secret\x01"
+    );
+    op.advance(&[0x90, 0]).unwrap();
+    assert_eq!(op.result().unwrap().confirmed_writes, 1);
+
+    let mut op = begin(
+        Request::SetPassSlot {
+            slot: PassSlotId::Long,
+            config: PassSlotConfig::Off,
+        },
+        true,
+    );
+    assert_eq!(op.command().unwrap().as_bytes(), &[0, 0x44, 2, 0, 1, 0]);
+    op.advance(&[0x90, 0]).unwrap();
+
+    let mut op = begin(
+        Request::SetPassSlot {
+            slot: PassSlotId::Short,
+            config: PassSlotConfig::HmacSha1 {
+                key: SecretBytes::new(vec![0xa5; 20]),
+            },
+        },
+        true,
+    );
+    let mut expected = vec![0, 0x44, 1, 0, 22, 0x03, 0x14];
+    expected.extend_from_slice(&[0xa5; 20]);
+    assert_eq!(op.command().unwrap().as_bytes(), &expected[..]);
+    op.advance(&[0x90, 0]).unwrap();
+    assert_eq!(op.result().unwrap().confirmed_writes, 1);
+}
+#[test]
+fn pass_slot_write_rejections_and_redaction() {
+    let protected = PassSlotConfig::Off;
+    assert_eq!(
+        operation(
+            &profile(),
+            Request::SetPassSlot {
+                slot: PassSlotId::Short,
+                config: protected,
+            },
+            None,
+            Default::default()
+        )
+        .unwrap_err()
+        .kind,
+        ErrorKind::SecurityStatusNotSatisfied
+    );
+    for config in [
+        PassSlotConfig::Static {
+            password: SecretBytes::new(vec![b'a'; 33]),
+            append_enter: false,
+        },
+        PassSlotConfig::Static {
+            password: SecretBytes::new(vec![0x7f]),
+            append_enter: false,
+        },
+        PassSlotConfig::Static {
+            password: SecretBytes::new(vec![0x1f]),
+            append_enter: false,
+        },
+        PassSlotConfig::HmacSha1 {
+            key: SecretBytes::new(vec![0; 19]),
+        },
+        PassSlotConfig::HmacSha1 {
+            key: SecretBytes::new(vec![0; 21]),
+        },
+    ] {
+        assert_eq!(
+            operation(
+                &profile(),
+                Request::SetPassSlot {
+                    slot: PassSlotId::Long,
+                    config,
+                },
+                Some(pin()),
+                Default::default()
+            )
+            .unwrap_err()
+            .kind,
+            ErrorKind::InvalidArgument
+        );
+    }
+    let request = Request::SetPassSlot {
+        slot: PassSlotId::Short,
+        config: PassSlotConfig::Static {
+            password: SecretBytes::new(b"s3cret-pass".to_vec()),
+            append_enter: true,
+        },
+    };
+    let debug = format!("{request:?}");
+    assert!(!debug.contains("s3cret-pass"));
+    let request = Request::SetPassSlot {
+        slot: PassSlotId::Long,
+        config: PassSlotConfig::HmacSha1 {
+            key: SecretBytes::new(b"0123456789abcdefABCD".to_vec()),
+        },
+    };
+    assert!(!format!("{request:?}").contains("0123456789abcdefABCD"));
 }

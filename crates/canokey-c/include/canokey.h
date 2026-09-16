@@ -310,7 +310,8 @@ typedef struct {
 typedef struct {
   uint32_t struct_size;
   /* 0 none, 1 bytes, 2 config, 3 flash, 4 usage, 5 PIN, 6 NFC, 7 SM2,
-   * 8 legacy config, 9 legacy SM2 (flags bit 0: enabled). */
+   * 8 legacy config, 9 legacy SM2 (flags bit 0: enabled),
+   * 10 PASS slots (raw two-slot dump via result_copy_bytes). */
   uint32_t value_kind;
   size_t confirmed_writes;
   uint32_t reprobe_required;
