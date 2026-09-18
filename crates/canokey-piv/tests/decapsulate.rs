@@ -98,7 +98,7 @@ fn decapsulation_stops_on_chain_errors_cancel_and_malformed_results() {
 }
 #[test]
 fn decapsulation_enforces_evidence_and_budgets_before_io() {
-    for version in ["3.0.3", "3.1.1", "3.1.0-dev"] {
+    for version in ["3.0.3", "3.1.1", "3.2.0-dev"] {
         assert!(decapsulate(
             &profile(version),
             Slot::KeyManagement,
@@ -141,7 +141,7 @@ fn decapsulation_enforces_evidence_and_budgets_before_io() {
         Access::None,
         Default::default()
     )
-    .is_err());
+    .is_ok());
     let mut options = OperationOptions::default();
     options.limits.max_input_bytes = 1097; // Ciphertext fits, complete template does not.
     assert_eq!(

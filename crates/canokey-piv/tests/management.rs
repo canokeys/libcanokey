@@ -138,7 +138,7 @@ fn external_and_mutual_known_answers() {
         for mutual in [false, true] {
             let p = profile(v.version);
             let mut op =
-                authenticate_management_key(&p, auth(v, mutual), Default::default()).unwrap();
+                authenticate_management_key(&p, auth(v, mutual), true, Default::default()).unwrap();
             drop(p);
             assert!(!format!("{op:?}").contains(v.key));
             selected(&mut op, v);
@@ -160,9 +160,13 @@ fn reject_wrong_card_and_malformed_authentication_fields() {
         hex("7c0080009000"),
         hex("9000"),
     ] {
-        let mut op =
-            authenticate_management_key(&profile(v.version), auth(v, true), Default::default())
-                .unwrap();
+        let mut op = authenticate_management_key(
+            &profile(v.version),
+            auth(v, true),
+            true,
+            Default::default(),
+        )
+        .unwrap();
         selected(&mut op, v);
         op.advance(&reply(0x80, &hex(v.cipher))).unwrap();
         let err = op.advance(&response).unwrap_err();
@@ -182,9 +186,13 @@ fn reject_wrong_card_and_malformed_authentication_fields() {
         reply(0x80, &[0; 15]),
         hex("7c128010019000"),
     ] {
-        let mut op =
-            authenticate_management_key(&profile(v.version), auth(v, true), Default::default())
-                .unwrap();
+        let mut op = authenticate_management_key(
+            &profile(v.version),
+            auth(v, true),
+            true,
+            Default::default(),
+        )
+        .unwrap();
         selected(&mut op, v);
         assert!(op.advance(&response).is_err());
         assert!(op.command().is_err());
@@ -200,9 +208,13 @@ fn management_failures_have_no_pin_retries_or_blocked_pin() {
         hex("6c10"),
     ] {
         let v = &VECTORS[0];
-        let mut op =
-            authenticate_management_key(&profile(v.version), auth(v, false), Default::default())
-                .unwrap();
+        let mut op = authenticate_management_key(
+            &profile(v.version),
+            auth(v, false),
+            true,
+            Default::default(),
+        )
+        .unwrap();
         selected(&mut op, v);
         let err = op.advance(&sw).unwrap_err();
         assert_eq!(err.reference, Some(SecretReference::ManagementKey));
@@ -220,10 +232,10 @@ fn capability_and_input_checks_precede_select() {
         ("3.1.0", tdes, ErrorKind::UnsupportedFeature),
         ("3.0.3", aes, ErrorKind::UnsupportedFeature),
         ("9.0.0", aes, ErrorKind::CapabilityUnknown),
-        ("3.1.0-dev", aes, ErrorKind::CapabilityUnknown),
+        ("3.2.0-dev", aes, ErrorKind::CapabilityUnknown),
     ] {
         assert_eq!(
-            authenticate_management_key(&profile(version), auth(v, true), Default::default())
+            authenticate_management_key(&profile(version), auth(v, true), true, Default::default())
                 .unwrap_err()
                 .kind,
             kind
@@ -244,7 +256,7 @@ fn capability_and_input_checks_precede_select() {
     let mut options = OperationOptions::default();
     options.exchange.max_command_bytes = 40;
     assert_eq!(
-        authenticate_management_key(&profile(aes.version), auth(aes, true), options)
+        authenticate_management_key(&profile(aes.version), auth(aes, true), true, options)
             .unwrap_err()
             .kind,
         ErrorKind::LimitExceeded
@@ -275,7 +287,7 @@ fn cancellation_and_select_failure_never_emit_authentication_or_target() {
         assert!(op.advance(&[0x90, 0]).is_err());
     }
     let mut op =
-        authenticate_management_key(&profile(v.version), auth(v, true), Default::default())
+        authenticate_management_key(&profile(v.version), auth(v, true), true, Default::default())
             .unwrap();
     op.start().unwrap();
     assert_eq!(op.advance(&[0x6a, 0x82]).unwrap_err().phase, Phase::Select);
@@ -316,7 +328,7 @@ fn authenticated_certificate_write_keeps_pin_next_to_target() {
 fn mutual_authentication_can_continue_but_never_correct_le() {
     let v = &VECTORS[0];
     let mut op =
-        authenticate_management_key(&profile(v.version), auth(v, true), Default::default())
+        authenticate_management_key(&profile(v.version), auth(v, true), true, Default::default())
             .unwrap();
     selected(&mut op, v);
     let response = reply(0x80, &hex(v.cipher));
@@ -402,6 +414,7 @@ fn certificate_deletion_and_management_replacement_are_explicit() {
         &profile(v.version),
         replacement,
         ManagementTouchPolicy::Always,
+        false,
         Access::Management(auth(v, false)),
         Default::default(),
     )
@@ -420,4 +433,67 @@ fn certificate_deletion_and_management_replacement_are_explicit() {
         Default::default()
     )
     .is_err());
+}
+
+#[test]
+fn selected_context_management_preserves_firmware_encoding_without_reselect() {
+    for v in &VECTORS {
+        for mutual in [false, true] {
+            let context = (profile(v.version)).clone();
+            let mut op =
+                authenticate_management_key(&context, auth(v, mutual), false, Default::default())
+                    .unwrap();
+            drop(context);
+            assert_eq!(op.start().unwrap(), Step::Exchange);
+            assert_eq!(authenticate(&mut op, v, mutual), Step::Done);
+            op.take_result().unwrap();
+            assert!(op.advance(&[0x90, 0]).is_err());
+        }
+    }
+}
+
+#[test]
+fn rotation_preserves_protected_data_and_stops_at_each_irreversible_boundary() {
+    let v = &VECTORS[1];
+    for failure in [0u8, 1, 2, 3] {
+        let key = ManagementKey::from_bytes(v.algorithm, &hex(v.key)).unwrap();
+        let mut op = set_management_key(
+            &profile(v.version),
+            key,
+            ManagementTouchPolicy::Never,
+            true,
+            Access::Existing,
+            Default::default(),
+        )
+        .unwrap();
+        op.start().unwrap();
+        assert_eq!(op.command().unwrap().as_bytes()[1], 0xcb);
+        op.advance(&hex("530580038101039000")).unwrap();
+        let mut printed = hex("531c881a8918");
+        printed.extend(hex(v.key));
+        printed.extend([0x90, 0]);
+        if failure == 1 {
+            assert!(op.advance(&[0x69, 0x82]).is_err());
+            assert!(op.command().is_err());
+            continue; // No replacement without PIN-protected read authorization.
+        }
+        op.advance(&printed).unwrap();
+        assert_eq!(op.command().unwrap().as_bytes()[1], 0xff);
+        if failure == 2 {
+            assert!(op.advance(&[0x6f, 0]).is_err());
+            assert!(op.command().is_err());
+            continue; // Uncertain replacement is never replayed.
+        }
+        op.advance(&[0x90, 0]).unwrap();
+        authenticate(&mut op, v, false);
+        let command = op.command().unwrap().as_bytes();
+        assert_eq!(&command[..11], &hex("00db3fff235c035fc10953"));
+        assert_eq!(&command[11..], &printed[..printed.len() - 2][1..]);
+        if failure == 3 {
+            assert!(op.advance(&[0x6f, 0]).is_err());
+            assert!(op.command().is_err()); // Caller must repair PRINTED with the new key.
+        } else {
+            assert_eq!(op.advance(&[0x90, 0]).unwrap(), Step::Done);
+        }
+    }
 }

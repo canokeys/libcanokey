@@ -1,6 +1,6 @@
 # PKCS#11 integration boundary
 
-This document is **application pseudocode**, not an implemented PKCS#11 integration. The [runnable C probe](../crates/canokey-c/examples/probe.c) uses today's ABI with complete cleanup. The [header](../crates/canokey-c/include/canokey.h) is authoritative for available functions. Shared contracts live in [design](api-design.md).
+This document is **application pseudocode**, not an implemented PKCS#11 integration. The [runnable C probe](../../crates/canokey-c/examples/probe.c) uses today's ABI with complete cleanup. The [header](../../crates/canokey-c/include/canokey.h) is authoritative for available functions. Shared contracts live in [design](../design/api-design.md).
 
 ## Caller-owned state
 
@@ -136,3 +136,9 @@ mechanism.
 | Disconnect/reconnect | Drain or isolate in-flight I/O, advance generation, clear credentials/affected caches, release profile, probe the new connection |
 | C_CloseSession | Clear session hash/context authorization; retain shared token profile as needed and follow standard login semantics |
 | Token destruction/C_Finalize | Block new calls, wait for in-flight calls, release C state/profile/PCSC resources; no Rust finalize |
+
+Use `CNK_PIV_USE_EXISTING` after the host has selected/authenticated under its
+PC/SC transaction. Borrow the immutable profile under its token lock only for
+factory construction, then release it before driving the operation. No separate
+context handle or caller-declared PIN/admin state is needed. Reservations and
+cached credentials remain host-owned; this flag never authorizes a PKCS11 call.

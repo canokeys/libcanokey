@@ -7,6 +7,9 @@
 //! directly. No layer here owns a transport, runtime, or mutable global state.
 //! The optional `x509` feature adds owned DER/PEM certificate inspection; `serde`
 //! additionally enables serialization of its results. Neither is enabled by default.
+//! The `clientpin` feature (also not default) enables the ClientPIN-dependent CTAP
+//! modules (`ctap::pin`, `ctap::credmgmt`, `ctap::config`, `ctap::largeblob` and
+//! the hmac-secret salt exchange) and their RustCrypto dependencies.
 //!
 //! # Quick start: offline probe
 //!
@@ -50,6 +53,8 @@
 pub use canokey_admin as admin;
 pub use canokey_compat as compatibility;
 pub use canokey_compat::DeviceProfile;
+pub use canokey_ctap as ctap;
+pub use canokey_ndef as ndef;
 pub use canokey_oath as oath;
 pub use canokey_openpgp as openpgp;
 pub use canokey_piv as piv;

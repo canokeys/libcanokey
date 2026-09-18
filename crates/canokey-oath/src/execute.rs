@@ -47,14 +47,19 @@ fn select() -> LogicalCommand {
         ExpectedLength::Absent,
     )
 }
-fn target(request: &Request, legacy: bool) -> Result<Option<LogicalCommand>, Error> {
+fn target(request: &Request, legacy: bool, slots: bool) -> Result<Option<LogicalCommand>, Error> {
     let mut data = SecretBytes::default();
     let mut paged = false;
-    let (ins, p2, le) = match request {
+    let (ins, p1, p2, le) = match request {
         Request::Select | Request::Validate => return Ok(None),
         Request::List => {
             paged = true;
-            (if legacy { 3 } else { 0xa1 }, 0, ExpectedLength::Exact(255))
+            (
+                if legacy { 3 } else { 0xa1 },
+                0,
+                0,
+                ExpectedLength::Exact(255),
+            )
         }
         Request::Put(c) => {
             if !(4..=8).contains(&c.digits)
@@ -83,16 +88,16 @@ fn target(request: &Request, legacy: bool) -> Result<Option<LogicalCommand>, Err
             if c.kind == Kind::Hotp {
                 field(&mut data, 0x7a, &c.initial_counter.to_be_bytes());
             }
-            (1, 0, ExpectedLength::Absent)
+            (1, 0, 0, ExpectedLength::Absent)
         }
         Request::Delete(name) => {
             field(&mut data, 0x71, name.as_bytes());
-            (2, 0, ExpectedLength::Absent)
+            (2, 0, 0, ExpectedLength::Absent)
         }
         Request::Rename { old, new } => {
             field(&mut data, 0x71, old.as_bytes());
             field(&mut data, 0x71, new.as_bytes());
-            (5, 0, ExpectedLength::Absent)
+            (5, 0, 0, ExpectedLength::Absent)
         }
         Request::Calculate {
             name,
@@ -110,6 +115,7 @@ fn target(request: &Request, legacy: bool) -> Result<Option<LogicalCommand>, Err
             }
             (
                 if legacy { 4 } else { 0xa2 },
+                0,
                 u8::from(!legacy && *format == Format::Truncated),
                 ExpectedLength::Absent,
             )
@@ -119,6 +125,7 @@ fn target(request: &Request, legacy: bool) -> Result<Option<LogicalCommand>, Err
             paged = true;
             (
                 if legacy { 5 } else { 0xa4 },
+                0,
                 u8::from(!legacy && *format == Format::Truncated),
                 ExpectedLength::Exact(255),
             )
@@ -128,14 +135,37 @@ fn target(request: &Request, legacy: bool) -> Result<Option<LogicalCommand>, Err
             data.extend(key.0.as_bytes());
             field(&mut data, 0x74, challenge);
             field(&mut data, 0x75, proof(key, challenge).as_bytes());
-            (3, 0, ExpectedLength::Absent)
+            (3, 0, 0, ExpectedLength::Absent)
         }
         Request::ClearCode => {
             field(&mut data, 0x73, &[]);
-            (3, 0, ExpectedLength::Absent)
+            (3, 0, 0, ExpectedLength::Absent)
+        }
+        Request::SetDefault {
+            slot,
+            append_enter,
+            name,
+        } => {
+            field(&mut data, 0x71, name.as_bytes());
+            // The single-slot dialect accepts only P1/P2 zero; construction
+            // already rejected any setting that does not fit that form.
+            let (p1, p2) = if slots {
+                (slot.wire(), u8::from(*append_enter))
+            } else {
+                (0, 0)
+            };
+            (0x55, p1, p2, ExpectedLength::Absent)
+        }
+        Request::GetSerial => (1, 0x10, 0, ExpectedLength::Absent),
+        Request::ChallengeResponseHmac { slot, challenge } => {
+            if challenge.len() > 64 {
+                return Err(argument());
+            }
+            data.extend(challenge);
+            (1, slot.wire(), 0, ExpectedLength::Absent)
         }
     };
-    let mut c = command(ins, 0, p2, data, le);
+    let mut c = command(ins, p1, p2, data, le);
     if paged {
         c.continuation = Continuation::Oath {
             instruction: if legacy { 6 } else { 0xa5 },
@@ -284,6 +314,15 @@ fn result(request: &Request, data: SecretBytes, legacy: bool) -> Result<Outcome,
             }
             Ok(Outcome::Calculations(output))
         }
+        Request::GetSerial => Ok(Outcome::Serial(
+            data.as_bytes().try_into().map_err(|_| invalid())?,
+        )),
+        Request::ChallengeResponseHmac { .. } => {
+            if data.as_bytes().len() != 20 {
+                return Err(invalid());
+            }
+            Ok(Outcome::ChallengeResponse(data))
+        }
         _ if data.is_empty() => Ok(Outcome::Unit),
         _ => Err(invalid()),
     }
@@ -302,6 +341,21 @@ fn result(request: &Request, data: SecretBytes, legacy: bool) -> Result<Outcome,
 /// terminal empty 6985 after that speculative poll. A later-page failure discards
 /// codes but cannot roll back counter/time-state changes.
 ///
+/// SetDefault uses the two-slot dialect only when the profile confirms firmware
+/// 3.0.0 or newer ([`Capability::OathSetDefaultSlots`]). Firmware without that
+/// confirmation uses the single-slot form with zero P1/P2 (unrecognized firmware
+/// already fails earlier at the OATH capability check), and a Long slot or
+/// append-enter request is then rejected with InvalidArgument before any I/O.
+///
+/// GetSerial and ChallengeResponseHmac are vendor extension commands the
+/// OATH applet answers for KeePassXC-style challenge-response (INS 0x01, P1
+/// 0x10/0x30/0x38). The firmware dispatches them before its access-validation
+/// gate, so the machine sends SELECT then the command without VALIDATE even
+/// when the applet reports an access challenge; supplying an access key is
+/// rejected with InvalidArgument. They require the pinned 3.1 evidence
+/// ([`Capability::OathChallengeResponse`]): audited 1.5.2 and 2.0.1 sources
+/// lack the dispatch.
+///
 /// # Errors
 /// Capability, input and known command-budget errors fail before execution.
 /// Authentication, malformed fields, unexpected status and cumulative budget
@@ -313,12 +367,33 @@ pub fn operation(
     options: OperationOptions,
 ) -> Result<Operation<Outcome>, Error> {
     profile.capability(Capability::Oath).require()?;
+    let challenge_response = matches!(
+        request,
+        Request::GetSerial | Request::ChallengeResponseHmac { .. }
+    );
     if matches!(request, Request::Select) && access.is_some()
         || matches!(request, Request::Validate) && access.is_none()
+        || challenge_response && access.is_some()
     {
         return Err(argument());
     }
+    if challenge_response {
+        profile
+            .capability(Capability::OathChallengeResponse)
+            .require()?;
+    }
     let legacy = profile.capability(Capability::OathLegacy).support == Support::Supported;
+    let slots = profile.capability(Capability::OathSetDefaultSlots).support == Support::Supported;
+    if !slots {
+        if let Request::SetDefault {
+            slot, append_enter, ..
+        } = &request
+        {
+            if *slot != DefaultSlot::Short || *append_enter {
+                return Err(argument());
+            }
+        }
+    }
     if access.is_some()
         || matches!(
             request,
@@ -351,7 +426,7 @@ pub fn operation(
         profile.capability(Capability::OathFullResponse).require()?;
     }
     let explicit_le = profile.legacy_explicit_le();
-    let mut target = target(&request, legacy)?;
+    let mut target = target(&request, legacy, slots)?;
     if explicit_le {
         if let Some(c) = &mut target {
             c.le = ExpectedLength::Exact(256);
@@ -455,8 +530,17 @@ impl Machine<Outcome> for Oath {
                 && response.status.raw() == 0x6984
                 && matches!(
                     self.request,
-                    Request::Delete(_) | Request::Rename { .. } | Request::Calculate { .. }
+                    Request::Delete(_)
+                        | Request::Rename { .. }
+                        | Request::Calculate { .. }
+                        | Request::SetDefault { .. }
                 )
+            {
+                e.kind = ErrorKind::NotFound;
+            }
+            if self.phase == 3
+                && response.status.raw() == 0x6a82
+                && matches!(self.request, Request::ChallengeResponseHmac { .. })
             {
                 e.kind = ErrorKind::NotFound;
             }
@@ -479,6 +563,15 @@ impl Machine<Outcome> for Oath {
                 let selection = selection(response.data)?;
                 if matches!(self.request, Request::Select) {
                     return Ok(Action::Done(Outcome::Selection(selection)));
+                }
+                // The firmware dispatches the vendor extension commands before
+                // its access-validation gate, so no VALIDATE is sent even when
+                // the selection reports an access challenge.
+                if matches!(
+                    self.request,
+                    Request::GetSerial | Request::ChallengeResponseHmac { .. }
+                ) {
+                    return self.target();
                 }
                 match (&self.access, selection.challenge) {
                     (None, None) => self.target(),

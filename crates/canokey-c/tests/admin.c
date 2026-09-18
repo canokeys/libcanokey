@@ -1,5 +1,6 @@
 #include "canokey.h"
 #include <assert.h>
+#include <stddef.h>
 #include <string.h>
 
 static const uint8_t ok[] = {0x90, 0};
@@ -59,5 +60,38 @@ int main(void) {
     size_t len=0;assert(cnk_operation_result_copy_bytes(op,NULL,&len)==CNK_OK&&len==6);
     uint8_t output[6]={0};len=5;assert(cnk_operation_result_copy_bytes(op,output,&len)==CNK_BUFFER_TOO_SMALL&&len==6&&output[0]==0);
     assert(cnk_operation_result_copy_bytes(op,output,&len)==CNK_OK&&memcmp(output,config,6)==0);
+    cnk_operation_free(op);
+    /* Legacy descriptor size (ending at algorithm_id) still works for kinds
+     * that do not use the appended keymap fields. */
+    p=profile();memset(&d,0,sizeof(d));
+    d.struct_size=offsetof(cnk_admin_request_v1,layout_id);d.kind=CNK_ADMIN_FIRMWARE;
+    assert(cnk_admin_new(p,&d,NULL,&op,NULL)==CNK_OK);cnk_profile_free(p);
+    assert(cnk_operation_start(op,&step,NULL)==CNK_OK);
+    expect(op,select,sizeof(select));feed(op,ok,2);
+    const uint8_t fwresp[]={'3','.','1','.','0',0x90,0};
+    feed(op,fwresp,sizeof(fwresp));
+    assert(cnk_operation_result_kind(op,&step)==CNK_OK&&step==CNK_RESULT_ADMIN);
+    cnk_operation_free(op);
+    /* The legacy size never suffices for SET_KEYBOARD_KEYMAP (27). */
+    p=profile();
+    d.struct_size=offsetof(cnk_admin_request_v1,layout_id);d.kind=CNK_ADMIN_SET_KEYBOARD_KEYMAP;
+    assert(cnk_admin_new(p,&d,NULL,&op,NULL)==CNK_INVALID_ARGUMENT);cnk_profile_free(p);
+    /* Present but unused keymap fields must be zero/NULL for other kinds. */
+    p=profile();memset(&d,0,sizeof(d));
+    d.struct_size=sizeof(d);d.kind=CNK_ADMIN_FIRMWARE;d.layout_id=1;
+    assert(cnk_admin_new(p,&d,NULL,&op,NULL)==CNK_INVALID_ARGUMENT);cnk_profile_free(p);
+    p=profile();d.struct_size=sizeof(d);d.kind=CNK_ADMIN_PASS_SLOTS;d.layout_id=0;
+    memcpy(pin,"654321",6);d.pin=pin;d.pin_len=6;
+    assert(cnk_admin_new(p,&d,NULL,&op,NULL)==CNK_OK);cnk_profile_free(p);
+    assert(cnk_operation_start(op,&step,NULL)==CNK_OK);
+    expect(op,select,sizeof(select));feed(op,ok,2);
+    const uint8_t verify2[]={0,0x20,0,0,6,'6','5','4','3','2','1'};expect(op,verify2,sizeof(verify2));feed(op,ok,2);
+    const uint8_t slots_read[]={0,0x43,0,0,0};expect(op,slots_read,sizeof(slots_read));
+    const uint8_t dump[]={0x02,0x01,0x01,0x03,'a','b','c',0x00,0x90,0};feed(op,dump,sizeof(dump));
+    assert(cnk_operation_result_kind(op,&step)==CNK_OK&&step==CNK_RESULT_ADMIN);
+    result.value_kind=0;
+    assert(cnk_operation_admin_outcome(op,&result)==CNK_OK&&result.value_kind==10);
+    len=0;assert(cnk_operation_result_copy_bytes(op,NULL,&len)==CNK_OK&&len==8);
+    uint8_t slots_bytes[8]={0};assert(cnk_operation_result_copy_bytes(op,slots_bytes,&len)==CNK_OK&&len==8&&memcmp(slots_bytes,dump,8)==0);
     cnk_operation_free(op);return 0;
 }

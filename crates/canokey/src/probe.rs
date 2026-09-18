@@ -24,12 +24,17 @@ pub enum ProbeMode {
 pub struct ProbeOptions {
     /// Applet discovery scope; defaults to Piv.
     pub mode: ProbeMode,
+    /// Four-byte serial already observed by a bootstrap conversation. When
+    /// present, the probe records it and skips its own serial read; the
+    /// optional-read downgrade warnings for that command are not reproduced.
+    pub observed_serial: Option<[u8; 4]>,
     /// Limits copied into the constructed operation.
     pub operation: OperationOptions,
 }
 struct Probe {
     stage: usize,
     mode: ProbeMode,
+    observed_serial: Option<[u8; 4]>,
     observations: DeviceObservations,
 }
 /// Construct a read-only probe yielding an immutable [`DeviceProfile`].
@@ -38,6 +43,8 @@ struct Probe {
 /// using [`Operation::start`] and [`Operation::advance`]. Probe changes applets,
 /// so never insert it between another operation's authentication and target command.
 /// It does not try credentials, write configuration, or establish a login.
+/// Supplying [`ProbeOptions::observed_serial`] skips the serial read; use it when
+/// a bootstrap conversation already observed the four serial bytes.
 ///
 /// # Errors
 /// Construction rejects invalid operation options. During execution, required
@@ -51,6 +58,7 @@ pub fn probe_device(options: ProbeOptions) -> Result<Operation<DeviceProfile>, E
         Probe {
             stage: 0,
             mode: options.mode,
+            observed_serial: options.observed_serial,
             observations: DeviceObservations::new(vec![]),
         },
         options.operation,
@@ -122,6 +130,13 @@ impl Machine<DeviceProfile> for Probe {
                     }
                 }
                 _ => return Err(Error::new(ErrorKind::ProtocolViolation)),
+            }
+        }
+        if self.stage == 3 {
+            if let Some(serial) = self.observed_serial.take() {
+                self.observations.serial = Some(serial.to_vec());
+                self.stage += 1;
+                return self.next(None);
             }
         }
         let mut command: LogicalCommand = match self.stage {

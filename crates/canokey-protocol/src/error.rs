@@ -37,7 +37,8 @@ pub enum ErrorKind {
     CapabilityUnknown,
     /// An observed format/version is not understood (including certificate encoding).
     UnsupportedProtocolVersion,
-    /// An unmapped status word was returned; inspect `Error::status_word`.
+    /// An unmapped status was returned; inspect `Error::status_word` or
+    /// `Error::application_status`.
     UnexpectedStatusWord,
     /// A local lifecycle method was called in an invalid state.
     OperationStateError,
@@ -91,6 +92,10 @@ pub struct Error {
     pub phase: Phase,
     /// Original status when the failure came from a card status word.
     pub status_word: Option<StatusWord>,
+    /// Applet-level non-ISO status byte reported in the response payload
+    /// (e.g. the CTAP status byte), when the failure came from such a status.
+    /// Distinct from `status_word`, which is always an ISO 7816 SW1-SW2.
+    pub application_status: Option<u8>,
     /// Credential reference when known; absent for non-authentication failures.
     pub reference: Option<SecretReference>,
     /// Retry count from an authentication 63Cx status; absent when not reported.
@@ -103,6 +108,7 @@ impl Error {
             kind,
             phase: Phase::Construction,
             status_word: None,
+            application_status: None,
             reference: None,
             retries_remaining: None,
         }
@@ -145,6 +151,7 @@ impl Error {
             kind,
             phase,
             status_word: Some(sw),
+            application_status: None,
             reference,
             retries_remaining: if pin_reference && sw.raw() & 0xfff0 == 0x63c0 {
                 Some((sw.raw() & 15) as u8)

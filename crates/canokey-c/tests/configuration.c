@@ -48,6 +48,17 @@ static void authenticate(cnk_operation_t *op) {
 
 int main(void) {
     cnk_profile_t *p=profile();
+    cnk_piv_capabilities_v1 caps={0};
+    assert(cnk_profile_piv_capabilities(p,&caps)==CNK_INVALID_ARGUMENT);
+    caps.struct_size=sizeof(caps);
+    assert(cnk_profile_piv_capabilities(NULL,&caps)==CNK_INVALID_ARGUMENT);
+    assert(cnk_profile_piv_capabilities(p,&caps)==CNK_OK);
+    assert((caps.algorithms & (1u<<CNK_ALGORITHM_ED25519)) && (caps.algorithms & (1u<<CNK_ALGORITHM_SM2)));
+    assert(caps.unknown_algorithms==0 && caps.unknown_features==0);
+    assert(caps.features & CNK_PIV_FEATURE_SM2_AGREEMENT);
+    assert(!(caps.features & CNK_PIV_FEATURE_RANDOM)); /* PIV 5.7, actual firmware 3.1 */
+    assert(caps.max_ed25519_message==512 && caps.max_streaming_message==65520);
+
     uint8_t key[24],challenge[16]={0};for(size_t i=0;i<24;++i)key[i]=(uint8_t)i;
     cnk_piv_management_v1 management={sizeof(management),CNK_MANAGEMENT_AES192,CNK_AUTH_MUTUAL,key,24,challenge,16};
     cnk_piv_access_v1 access={sizeof(access),NULL,0,&management};

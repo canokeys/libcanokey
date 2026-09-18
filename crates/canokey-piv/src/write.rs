@@ -22,7 +22,7 @@ pub(crate) fn mutation(response: ResponseData) -> Result<MutationResult, Error> 
 pub(crate) fn require_management(access: &Access) -> Result<(), Error> {
     if matches!(
         access,
-        Access::Management(_) | Access::PinAndManagement { .. }
+        Access::Existing | Access::Management(_) | Access::PinAndManagement { .. }
     ) {
         Ok(())
     } else {
@@ -62,7 +62,7 @@ fn put_command(
 /// Select, explicitly authenticate management (then optional PIN), and PUT DATA.
 /// `data` is the normalized object value, without the outer 53 container. This
 /// factory adds 5C/53 framing and owns the input. Access must contain management
-/// authentication; None/Pin returns InvalidArgument before SELECT.
+/// authentication or Existing; None/Pin returns InvalidArgument before SELECT.
 ///
 /// # Errors
 /// Unknown/unsupported write firmware, invalid budgets and oversized encoded
@@ -169,6 +169,11 @@ pub(crate) fn prepare_delete_certificate(
 /// algorithm-migration command. Both keys are owned and wiped when no longer needed.
 /// A successful Unchanged result still requires callers to discard cached key
 /// metadata/credentials. An uncertain write must not be automatically retried.
+/// With `update_protected`, inspect ADMIN DATA; protected mode also reads PRINTED
+/// before mutation (requiring PIN access), replaces the key, authenticates the new
+/// key, then updates PRINTED. Otherwise change only the management key. The two
+/// writes are not atomic: failure after replacement requires recovery using the
+/// supplied new key and repair of PRINTED. Drop never restores either value.
 ///
 /// # Errors
 /// Access without management authentication, unsupported algorithm/touch policy,
@@ -178,12 +183,33 @@ pub fn set_management_key(
     profile: &DeviceProfile,
     key: ManagementKey,
     touch: ManagementTouchPolicy,
+    update_protected: bool,
     access: Access,
     options: OperationOptions,
 ) -> Result<Operation<MutationResult>, Error> {
     require_management(&access)?;
-    let target = prepare_set_management_key(profile, key, touch, options)?;
-    access::with_access(profile, access, target, options)
+    let replacement = prepare_set_management_key(profile, key.clone(), touch, options)?;
+    if !update_protected {
+        return access::with_access(profile, access, replacement, options);
+    }
+    let printed = ObjectId::from_bytes(&[0x5f, 0xc1, 9])?;
+    let mut value = SecretBytes::new(vec![0x88, 26, 0x89, 24]);
+    value.extend(key.as_bytes());
+    let printed_write = prepare_write_object(profile, printed, value, options)?;
+    let auth = ManagementAuthentication::external(key);
+    auth.validate(profile, options)?;
+    access::with_access(
+        profile,
+        access,
+        RotateManagement {
+            stage: 0,
+            replacement,
+            printed_write,
+            authentication: management::ManagementMachine::new(auth),
+            protected: false,
+        },
+        options,
+    )
 }
 
 pub(crate) fn prepare_set_management_key(
@@ -199,4 +225,110 @@ pub(crate) fn prepare_set_management_key(
     }
     let command = key.replacement_command(touch == ManagementTouchPolicy::Always);
     access::prepare(command, options, mutation)
+}
+
+/// Write one complete 53 object container in a management-authorized transaction.
+/// Owns and validates the container, then emits exactly one 53 wrapper on PUT DATA.
+/// This compatibility form is for existing APIs passing framed PIV data, including
+/// certificates. Value consumers should use [`write_object`].
+///
+/// # Errors
+/// Existing delegates authorization to the card; other access must authenticate
+/// management. Invalid
+/// framing, a wrong outer tag, trailing fields, and input limits reject construction.
+/// Profile/options/card errors and uncertain-write behavior match [`write_object`].
+pub fn write_object_container(
+    profile: &DeviceProfile,
+    id: ObjectId,
+    container: SecretBytes,
+    access: Access,
+    options: OperationOptions,
+) -> Result<Operation<super::MutationResult>, Error> {
+    write::require_management(&access)?;
+    if container.len() > options.limits.max_input_bytes {
+        return Err(Error::new(ErrorKind::LimitExceeded));
+    }
+    let mut reader = canokey_protocol::tlv::TlvReader::new(
+        container.as_bytes(),
+        canokey_protocol::tlv::TlvLimits {
+            max_value_bytes: options.limits.max_input_bytes,
+            ..Default::default()
+        },
+    );
+    let value = reader
+        .next()?
+        .ok_or_else(|| Error::new(ErrorKind::InvalidArgument))?;
+    if value.tag.value() != 0x53 || reader.next()?.is_some() {
+        return Err(Error::new(ErrorKind::InvalidArgument));
+    }
+    let sequence = super::write::prepare_write_object(
+        profile,
+        id,
+        SecretBytes::new(value.value.to_vec()),
+        options,
+    )?;
+    crate::access::with_access(profile, access, sequence, options)
+}
+
+struct RotateManagement {
+    stage: u8,
+    protected: bool,
+    replacement: Sequence<MutationResult>,
+    authentication: management::ManagementMachine,
+    printed_write: Sequence<MutationResult>,
+}
+impl Machine<MutationResult> for RotateManagement {
+    fn next(&mut self, response: Option<ResponseData>) -> Result<Action<MutationResult>, Error> {
+        match self.stage {
+            0 => {
+                self.stage = 1;
+                Ok(Action::Command(command::get_data(ObjectId::from_bytes(
+                    &[0x5f, 0xff, 0],
+                )?)))
+            }
+            1 => {
+                let response = response.ok_or_else(|| Error::new(ErrorKind::ProtocolViolation))?;
+                if !matches!(response.status.raw(), 0x6a82 | 0x6a88) {
+                    response.ensure_success(Phase::Command)?;
+                    self.protected =
+                        ManagementProtection::from_admin_object(response.data.as_bytes())?
+                            .protects_management_key();
+                }
+                if self.protected {
+                    self.stage = 2;
+                    Ok(Action::Command(command::get_data(ObjectId::from_bytes(
+                        &[0x5f, 0xc1, 9],
+                    )?)))
+                } else {
+                    self.stage = 3;
+                    self.next(None)
+                }
+            }
+            2 => {
+                let response = response.ok_or_else(|| Error::new(ErrorKind::ProtocolViolation))?;
+                response.ensure_success(Phase::Command)?;
+                // Require a valid protected object before committing either write.
+                protected_management_key_from_object(response.data.as_bytes())?;
+                self.stage = 3;
+                self.next(None)
+            }
+            3 => match self.replacement.next(response)? {
+                Action::Command(c) => Ok(Action::Command(c)),
+                Action::Done(result) if !self.protected => Ok(Action::Done(result)),
+                Action::Done(_) => {
+                    self.stage = 4;
+                    self.next(None)
+                }
+            },
+            4 => match self.authentication.next(response)? {
+                Action::Command(c) => Ok(Action::Command(c)),
+                Action::Done(()) => {
+                    self.stage = 5;
+                    self.next(None)
+                }
+            },
+            5 => self.printed_write.next(response),
+            _ => Err(Error::new(ErrorKind::OperationStateError)),
+        }
+    }
 }

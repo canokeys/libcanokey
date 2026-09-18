@@ -251,3 +251,45 @@ fn nfc_read_authentication_and_sm2_layout_have_separate_boundaries() {
         ErrorKind::UnsupportedFeature
     );
 }
+
+#[test]
+fn pass_configuration_requires_3_0_firmware() {
+    for request in [
+        Request::PassSlots,
+        Request::SetPassSlot {
+            slot: PassSlotId::Short,
+            config: PassSlotConfig::Off,
+        },
+    ] {
+        // 2.0.1 predates INS 43/44 entirely: rejected at construction, no I/O.
+        assert_eq!(
+            operation(&profile("2.0.1"), request, pin(), Default::default())
+                .unwrap_err()
+                .kind,
+            ErrorKind::UnsupportedFeature
+        );
+    }
+    // Unrecognized firmware stays distinct from known-unsupported.
+    for v in ["9.9.9", "garbage"] {
+        assert_eq!(
+            operation(&profile(v), Request::PassSlots, pin(), Default::default())
+                .unwrap_err()
+                .kind,
+            ErrorKind::CapabilityUnknown
+        );
+    }
+    // 3.0.0 introduced the commands; the authenticated read still constructs.
+    assert!(operation(
+        &profile("3.0.0"),
+        Request::PassSlots,
+        pin(),
+        Default::default()
+    )
+    .is_ok());
+}
+#[test]
+fn keyboard_keymap_requires_fixed_wire_length() {
+    let map = [0u8; 256];
+    assert_eq!(KeyboardKeymap::from_bytes(&map).unwrap().as_bytes(), &map);
+    assert!(KeyboardKeymap::from_bytes(&map[..255]).is_err());
+}

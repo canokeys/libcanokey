@@ -77,7 +77,8 @@ fn ga(
 }
 fn fields(response: ResponseData, tags: &[u8], limit: usize) -> Result<Vec<SecretBytes>, Error> {
     response.ensure_success(Phase::Command)?;
-    let mut r = TlvReader::new(
+    // Firmware emits definite BER lengths with two octets even below 256.
+    let mut r = TlvReader::new_ber(
         response.data.as_bytes(),
         TlvLimits {
             max_value_bytes: limit,

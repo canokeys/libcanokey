@@ -50,13 +50,19 @@ fn sm2_valid(s: Sm2Configuration) -> Result<(), Error> {
 ///
 /// Baseline commands cover audited 1.3–3.1.0; individual requests and layouts
 /// have independent capability gates. Old configuration/flash reads require PIN;
-/// NFC reads require PIN on 3.0.0. Legacy SM2 identifier bytes stay uninterpreted.
+/// NFC reads require PIN on 3.0.0. PASS configuration/slot reads (INS 43)
+/// require PIN on every firmware that implements them: the firmware PIN gate
+/// predates the commands themselves, and the commands exist only from 3.0.0
+/// ([`Capability::AdminPassConfig`]). Legacy SM2 identifier bytes stay uninterpreted.
 /// SELECT
 /// occurs once; `Some(pin)` causes explicit VERIFY before the request. Protected
 /// requests require it. PinStatus and FactoryReset reject a PIN to prevent hidden
 /// credential attempts. Patches are sequential, not atomic; confirmed writes remain
 /// in `Operation::progress` after failure. Cancel/drop never roll back or send I/O.
 /// Invalidate application credential/data caches whenever their mutation is exposed.
+///
+/// This is [`operation_with_access`] with `Some(pin)` mapped to [`Access::Pin`]
+/// and `None` to [`Access::None`].
 ///
 /// # Errors
 /// Returns capability, invalid-input, missing-authentication or host-budget errors
@@ -66,6 +72,42 @@ pub fn operation(
     profile: &DeviceProfile,
     request: Request,
     pin: Option<Pin>,
+    options: OperationOptions,
+) -> Result<Operation<Outcome>, Error> {
+    operation_with_access(
+        profile,
+        request,
+        pin.map(Access::Pin).unwrap_or(Access::None),
+        options,
+    )
+}
+
+/// Build an Admin operation with an explicit selection and authentication policy.
+///
+/// Validation, capability gates, patch semantics and progress reporting match
+/// [`operation`]. [`Access::None`] and [`Access::Pin`] SELECT the Admin applet
+/// once; `Pin` also sends explicit VERIFY before the request. [`Access::Existing`]
+/// sends no SELECT and no implicit VERIFY: the caller asserts an already selected
+/// Admin applet and any required prior verification. That assertion is an
+/// execution policy, not proof of live authentication; firmware authorizes the
+/// actual command and a protected request without prior verification fails with
+/// 6982. Under `Existing`, PinStatus and ChangePin send only their own VERIFY
+/// or CHANGE PIN command; `Request::VerifyPin` has no PIN of its own and is
+/// rejected with `InvalidArgument`. PinStatus and FactoryReset reject
+/// [`Access::Pin`] to prevent hidden credential attempts. PASS
+/// configuration/slot reads and writes (INS 43/44) sit behind the firmware
+/// Admin-PIN gate on every firmware that implements them, so under
+/// [`Access::None`] they are rejected with `SecurityStatusNotSatisfied`
+/// before any I/O, like other protected requests.
+///
+/// # Errors
+/// Returns capability, invalid-input, missing-authentication or host-budget errors
+/// before execution where inputs are known. Unknown feature bits forbid a feature
+/// mask overwrite after the read; all patch values are checked before any write.
+pub fn operation_with_access(
+    profile: &DeviceProfile,
+    request: Request,
+    access: Access,
     options: OperationOptions,
 ) -> Result<Operation<Outcome>, Error> {
     profile.capability(Capability::Admin).require()?;
@@ -89,6 +131,12 @@ pub fn operation(
         Request::ResetApplet(Applet::Ctap | Applet::Pass) => profile
             .capability(Capability::AdminCtapPassReset)
             .require()?,
+        Request::PassConfiguration
+        | Request::SetPassConfiguration(_)
+        | Request::PassSlots
+        | Request::SetPassSlot { .. } => {
+            profile.capability(Capability::AdminPassConfig).require()?
+        }
         Request::NfcStatus | Request::SetNfc(_) => {
             profile.capability(Capability::AdminNfc).require()?
         }
@@ -105,11 +153,17 @@ pub fn operation(
         }
         _ => {}
     }
-    let protected_read = matches!(request, Request::Configuration | Request::FlashUsage)
-        && profile
-            .capability(Capability::AdminPublicConfiguration)
-            .support
-            == Support::Unsupported
+    // PASS configuration reads (INS 43) are unconditionally protected: the
+    // firmware `pin.is_validated` gate has covered INS 43/44 since their
+    // introduction in 3.0.0 (2.0.1 admin.c predates the commands entirely, so
+    // the AdminPassConfig gate above rejects them there), so a bare read would
+    // fail on-card with 6982.
+    let protected_read = matches!(request, Request::PassSlots | Request::PassConfiguration)
+        || matches!(request, Request::Configuration | Request::FlashUsage)
+            && profile
+                .capability(Capability::AdminPublicConfiguration)
+                .support
+                == Support::Unsupported
         || matches!(request, Request::NfcStatus)
             && profile.capability(Capability::AdminPublicNfcStatus).support == Support::Unsupported;
     let protected = protected_read
@@ -127,11 +181,20 @@ pub fn operation(
                 | Request::SetLegacyPivExtensions(_)
                 | Request::SetLegacyOpenPgpTouch(_)
                 | Request::WriteLegacySm2(_)
+                | Request::SetKeyboardKeymap { .. }
+                | Request::ClearKeyboardKeymap
+                | Request::SetPassConfiguration(_)
+                | Request::SetPassSlot { .. }
         );
-    if protected && pin.is_none() {
+    if protected && matches!(access, Access::None) {
         return Err(Error::new(ErrorKind::SecurityStatusNotSatisfied));
     }
-    if pin.is_some() && matches!(request, Request::PinStatus | Request::FactoryReset) {
+    if matches!(access, Access::Existing) && matches!(request, Request::VerifyPin) {
+        return Err(argument());
+    }
+    if matches!(access, Access::Pin(_))
+        && matches!(request, Request::PinStatus | Request::FactoryReset)
+    {
         return Err(argument());
     }
     if let Request::Configure(p) = &request {
@@ -146,8 +209,10 @@ pub fn operation(
         })?;
     }
     let mut queue = VecDeque::new();
-    queue.push_back((command::select(), Stage::Select));
-    if let Some(pin) = pin {
+    if !matches!(access, Access::Existing) {
+        queue.push_back((command::select(), Stage::Select));
+    }
+    if let Access::Pin(pin) = access {
         queue.push_back((
             write(0x20, 0, 0, pin.0.as_bytes().to_vec()),
             Stage::Authenticate,
@@ -162,6 +227,28 @@ pub fn operation(
         Request::Configuration | Request::Configure(_) => (Some(read(0x42, 0)), Stage::Read),
         Request::FlashUsage => (Some(read(0x41, 0)), Stage::Read),
         Request::AppletUsage => (Some(read(0x41, 1)), Stage::Read),
+        Request::KeyboardLayout => (Some(command::read_keyboard_layout()), Stage::Read),
+        Request::KeyboardKeymap => (Some(command::read_keyboard_keymap()), Stage::Read),
+        Request::SetKeyboardKeymap { layout_id, keymap } => (
+            Some(command::write_keyboard_keymap(
+                *layout_id,
+                keymap.as_bytes(),
+            )),
+            Stage::Write(true),
+        ),
+        Request::ClearKeyboardKeymap => {
+            (Some(command::clear_keyboard_keymap()), Stage::Write(true))
+        }
+        Request::PassConfiguration => (Some(command::pass_configuration()), Stage::Read),
+        Request::SetPassConfiguration(data) => (
+            Some(command::write_pass_configuration(data)),
+            Stage::Write(true),
+        ),
+        Request::PassSlots => (Some(command::pass_configuration()), Stage::Read),
+        Request::SetPassSlot { slot, config } => (
+            Some(write(0x44, slot.wire(), 0, config.encode()?)),
+            Stage::Write(true),
+        ),
         Request::PinStatus => (Some(write(0x20, 0, 0, vec![])), Stage::Read),
         Request::VerifyPin => (None, Stage::Read),
         Request::ChangePin(p) => (
@@ -440,6 +527,18 @@ impl Admin {
                         .collect(),
                 )
             }
+            Request::KeyboardLayout => {
+                if raw.len() != 1 {
+                    return Err(invalid());
+                }
+                Value::KeyboardLayout(raw[0])
+            }
+            Request::KeyboardKeymap => Value::KeyboardKeymap(KeyboardKeymap::from_bytes(raw)?),
+            Request::SetKeyboardKeymap { .. } | Request::ClearKeyboardKeymap => Value::None,
+            Request::PassConfiguration => Value::Bytes(raw.to_vec()),
+            Request::SetPassConfiguration(_) => Value::None,
+            Request::PassSlots => Value::PassSlots(PassSlots::parse(raw)?),
+            Request::SetPassSlot { .. } => Value::None,
             Request::NfcStatus => {
                 if raw.len() != 1 || raw[0] > 1 {
                     return Err(invalid());

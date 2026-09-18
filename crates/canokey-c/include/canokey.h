@@ -37,7 +37,7 @@ enum { CNK_PHASE_CONSTRUCTION=0, CNK_PHASE_SELECT=1, CNK_PHASE_COMMAND=2,
 enum { CNK_REFERENCE_NONE=0, CNK_REFERENCE_PIN=1, CNK_REFERENCE_PUK=2,
        CNK_REFERENCE_MANAGEMENT_KEY=3, CNK_REFERENCE_ADMIN_PIN=4, CNK_REFERENCE_OATH_ACCESS=5, CNK_REFERENCE_PW1_SIGN=6,
        CNK_REFERENCE_PW1_OTHER=7, CNK_REFERENCE_PW3=8, CNK_REFERENCE_RESET_CODE=9 };
-enum { CNK_ERROR_HAS_SW=1, CNK_ERROR_HAS_RETRIES=2 };
+enum { CNK_ERROR_HAS_SW=1, CNK_ERROR_HAS_RETRIES=2, CNK_ERROR_HAS_APP_STATUS=4 };
 enum { CNK_RESULT_PROFILE=1, CNK_RESULT_UNIT=2, CNK_RESULT_PIN_STATUS=3,
        CNK_RESULT_OBJECT=4, CNK_RESULT_CERTIFICATE=5, CNK_RESULT_MUTATION=6,
        CNK_RESULT_METADATA=7, CNK_RESULT_PUBLIC_KEY=8, CNK_RESULT_SIGNATURE=9,
@@ -46,12 +46,23 @@ enum { CNK_MANAGEMENT_TDES=1, CNK_MANAGEMENT_AES192=2 };
 enum { CNK_AUTH_EXTERNAL=1, CNK_AUTH_MUTUAL=2 };
 enum { CNK_MANAGEMENT_TOUCH_NEVER=0, CNK_MANAGEMENT_TOUCH_ALWAYS=1 };
 enum { CNK_PROFILE_UNCHANGED=0, CNK_PROFILE_REPROBE_REQUIRED=1 };
-enum { CNK_ALLOW_EXTENDED=1 };
+enum { CNK_ALLOW_EXTENDED=1, CNK_PIV_USE_EXISTING=2 };
+/* PIV operation factories with an access descriptor, public object/certificate
+ * reads, explicit management authentication, cnk_piv_credential_new and empty-slot factories
+ * accept USE_EXISTING: omit SELECT and reuse caller-owned card authorization.
+ * Access descriptors must be empty in this mode; explicit credential/management
+ * operations still send their requested authentication. Other applets and
+ * profile/bootstrap/selected-only factories reject this flag. NULL options
+ * retain the original selection behavior. Keep the PC/SC transaction through
+ * completion; this flag does not prove authentication or create a card session. */
 enum { CNK_PIN_HAS_VERIFIED=1, CNK_PIN_HAS_REMAINING=2, CNK_PIN_HAS_TOTAL=4 };
 typedef struct {
     uint32_t struct_size,kind,phase,reference,presence_flags;
     uint16_t status_word;
-    uint8_t retries_remaining,reserved;
+    /* retries_remaining: CNK_ERROR_HAS_RETRIES. application_status: applet-level
+     * non-ISO status byte (e.g. the CTAP status byte) when CNK_ERROR_HAS_APP_STATUS
+     * is set; written as zero otherwise. */
+    uint8_t retries_remaining,application_status;
 } cnk_error_v1;
 typedef struct {
     uint32_t struct_size,flags,max_command_bytes,max_response_bytes,
@@ -116,6 +127,33 @@ cnk_status_t cnk_piv_generate_key_new(const cnk_profile_t *,const cnk_piv_key_pa
 /* RSA: five components p/q/dP/dQ/qInv, implicit e=65537. Others: one scalar/seed. */
 cnk_status_t cnk_piv_import_key_new(const cnk_profile_t *,const cnk_piv_key_parameters_v1 *,const cnk_bytes_t *,size_t count,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_get_metadata_new(const cnk_profile_t *,uint32_t reference,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+enum { CNK_PIV_FEATURE_KEY_MOVE_DELETE=1, CNK_PIV_FEATURE_RETRY_RESET=2,
+       CNK_PIV_FEATURE_ATTESTATION=4, CNK_PIV_FEATURE_NAMES=8,
+       CNK_PIV_FEATURE_SM2_AGREEMENT=16, CNK_PIV_FEATURE_SM2_STREAMING=32,
+       CNK_PIV_FEATURE_RANDOM=64 };
+typedef struct {
+    uint32_t struct_size,algorithms,unknown_algorithms,features,unknown_features;
+    uint32_t max_ed25519_message,max_streaming_message;
+} cnk_piv_capabilities_v1;
+/* Algorithm masks use 1 << CNK_ALGORITHM_*. This reads the supplied profile only. */
+cnk_status_t cnk_profile_piv_capabilities(const cnk_profile_t *,cnk_piv_capabilities_v1 *);
+enum { CNK_PIV_CREDENTIAL_VERIFY_PIN=1, CNK_PIV_CREDENTIAL_LOGOUT=2,
+       CNK_PIV_CREDENTIAL_CHANGE_PIN=3, CNK_PIV_CREDENTIAL_CHANGE_PUK=4, CNK_PIV_CREDENTIAL_UNBLOCK_PIN=5 };
+cnk_status_t cnk_piv_credential_new(const cnk_profile_t *,uint32_t,const uint8_t *,size_t,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_piv_select_application_new(const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_piv_require_empty_key_slot_new(const cnk_profile_t *,uint32_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_piv_read_object_container_new(const cnk_profile_t *,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+/* Container-name references include ordinary key slots and F9. Validation is
+ * pure and retains no input. Writes require explicit management auth or USE_EXISTING. */
+/* Pure, bounded protection-object parsing; flags are claims, not authorization. */
+cnk_status_t cnk_piv_admin_data_flags(const uint8_t *,size_t,uint32_t *,cnk_error_v1 *);
+cnk_status_t cnk_piv_printed_management_key_copy(const uint8_t *,size_t,uint8_t *,size_t *,cnk_error_v1 *);
+cnk_status_t cnk_piv_read_version_selected_new(const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_piv_read_configuration_selected_new(const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_piv_random_selected_new(size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_operation_piv_configuration_copy(const cnk_operation_t *,uint8_t *,size_t *);
+cnk_status_t cnk_piv_container_name_validate(const uint8_t *,size_t,cnk_error_v1 *);
+cnk_status_t cnk_piv_write_object_container_new(const cnk_profile_t *,const uint8_t *,size_t,const uint8_t *,size_t,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_read_algorithm_config_new(const cnk_profile_t *,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_sign_new(const cnk_profile_t *,uint32_t slot,uint32_t algorithm,uint32_t kind,const uint8_t *,size_t,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 /* Explicit full-message signing. ML-DSA has empty context; only SM2 accepts
@@ -203,8 +241,10 @@ uint32_t cnk_abi_version(void);
 void cnk_profile_free(cnk_profile_t *);
 void cnk_operation_free(cnk_operation_t *);
 cnk_status_t cnk_probe_device_new(uint32_t mode,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_probe_device_with_serial_new(uint32_t mode,const uint8_t *serial,size_t serial_len,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_verify_pin_new(const cnk_profile_t *,const uint8_t *,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_get_pin_status_new(const cnk_profile_t *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_piv_get_pin_status_selected_new(const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_read_object_new(const cnk_profile_t *,const uint8_t *tag,size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 /* Public certificate read; slot is 9A/9C/9D/9E or 82..95.
  * Byte result getter returns unwrapped, bounded-decompressed bytes.
@@ -214,7 +254,10 @@ cnk_status_t cnk_piv_authenticate_management_key_new(const cnk_profile_t *,const
 cnk_status_t cnk_piv_write_object_new(const cnk_profile_t *,const uint8_t *tag,size_t tag_len,const uint8_t *data,size_t data_len,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_write_certificate_new(const cnk_profile_t *,uint32_t slot,const uint8_t *data,size_t data_len,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_delete_certificate_new(const cnk_profile_t *,uint32_t slot,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
-cnk_status_t cnk_piv_set_management_key_new(const cnk_profile_t *,uint32_t algorithm,const uint8_t *key,size_t key_len,uint32_t touch,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+/* NULL/0 entropy: validate already-blocked PIN-managed login. Eight CSPRNG bytes:
+ * authenticate first, then irreversibly block PUK. Result bytes are verified key. */
+cnk_status_t cnk_piv_pin_managed_new(const cnk_profile_t *,const uint8_t *entropy,size_t entropy_len,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+cnk_status_t cnk_piv_set_management_key_new(const cnk_profile_t *,uint32_t algorithm,const uint8_t *key,size_t key_len,uint32_t touch,uint32_t update_protected,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_operation_mutation_result(const cnk_operation_t *,cnk_mutation_result_v1 *);
 cnk_status_t cnk_operation_start(cnk_operation_t *,cnk_step_kind_t *,cnk_error_v1 *);
 cnk_status_t cnk_operation_advance(cnk_operation_t *,const uint8_t *,size_t,cnk_step_kind_t *,cnk_error_v1 *);
@@ -225,17 +268,31 @@ cnk_status_t cnk_operation_command(const cnk_operation_t *,uint8_t *,size_t *);
 cnk_status_t cnk_operation_take_profile(cnk_operation_t *,cnk_profile_t **);
 cnk_status_t cnk_operation_result_copy_bytes(const cnk_operation_t *,uint8_t *,size_t *);
 cnk_status_t cnk_operation_pin_status(const cnk_operation_t *,cnk_pin_status_v1 *);
+cnk_status_t cnk_profile_firmware_version(const cnk_profile_t *,uint32_t version[3]);
+cnk_status_t cnk_profile_model_copy(const cnk_profile_t *,uint8_t *,size_t *);
+cnk_status_t cnk_profile_serial_u32(const cnk_profile_t *,uint32_t *);
 cnk_status_t cnk_profile_firmware_text(const cnk_profile_t *,uint8_t *,size_t *);
 /* Copy a 2.x snapshot after a confirmed Admin 40/07 write on the same device.
  * enabled=0/1; never infer from lost responses. Caller owns the new *out. */
 cnk_status_t cnk_profile_with_legacy_piv_extensions(const cnk_profile_t *, uint32_t enabled,
  cnk_profile_t **out, cnk_error_v1 *error);
 cnk_status_t cnk_profile_piv_support(const cnk_profile_t *,uint32_t *);
+/* Resolution reports the profile's observed mapping, not authorization. */
+cnk_status_t cnk_profile_piv_algorithm_from_wire(const cnk_profile_t *,uint32_t,uint32_t *);
+cnk_status_t cnk_profile_piv_require_algorithm(const cnk_profile_t *,uint32_t,cnk_error_v1 *);
 cnk_status_t cnk_operation_cancel(cnk_operation_t *);
 cnk_status_t cnk_operation_state(const cnk_operation_t *,uint32_t *);
 cnk_status_t cnk_operation_error(const cnk_operation_t *,cnk_error_v1 *);
 cnk_status_t cnk_operation_result_kind(const cnk_operation_t *,uint32_t *);
-/* Admin requests (11 reserved). Inputs unused by a request must be zero/NULL. */
+/* Admin requests (11 reserved). Inputs unused by a request must be zero/NULL.
+ * PASS_SLOTS (31) is the typed counterpart of PASS_CONFIGURATION (29): same
+ * card dump, parsed into value_kind 10; raw bytes via result_copy_bytes.
+ * cnk_admin_request_v1.struct_size accepts two sizes: the legacy layout
+ * ending at algorithm_id (offsetof(cnk_admin_request_v1, layout_id)), which
+ * treats the keymap fields as absent, or the full sizeof including them.
+ * Only SET_KEYBOARD_KEYMAP (27) uses the keymap fields, so a legacy-size
+ * descriptor is invalid for it; when present for other kinds they must be
+ * zero/NULL. */
 enum { CNK_ADMIN_FIRMWARE=1, CNK_ADMIN_MODEL=2, CNK_ADMIN_SERIAL=3,
   CNK_ADMIN_CHIP_ID=4, CNK_ADMIN_CORE_COMMIT=5, CNK_ADMIN_CONFIGURATION=6,
   CNK_ADMIN_FLASH_USAGE=7, CNK_ADMIN_APPLET_USAGE=8, CNK_ADMIN_PIN_STATUS=9,
@@ -244,7 +301,11 @@ enum { CNK_ADMIN_FIRMWARE=1, CNK_ADMIN_MODEL=2, CNK_ADMIN_SERIAL=3,
   CNK_ADMIN_CONFIGURE_SM2=17, CNK_ADMIN_RESET_APPLET=18, CNK_ADMIN_FACTORY_RESET=19,
   CNK_ADMIN_SET_KEYBOARD_INTERFACE=20, CNK_ADMIN_SET_KEYBOARD_RETURN=21,
   CNK_ADMIN_SET_LEGACY_PIV_EXTENSIONS=22, CNK_ADMIN_SET_LEGACY_OPENPGP_TOUCH=23,
-  CNK_ADMIN_WRITE_LEGACY_SM2=24, CNK_RESULT_ADMIN=15 };
+  CNK_ADMIN_WRITE_LEGACY_SM2=24, CNK_ADMIN_KEYBOARD_LAYOUT=25,
+  CNK_ADMIN_KEYBOARD_KEYMAP=26, CNK_ADMIN_SET_KEYBOARD_KEYMAP=27,
+  CNK_ADMIN_CLEAR_KEYBOARD_KEYMAP=28, CNK_ADMIN_PASS_CONFIGURATION=29,
+  CNK_ADMIN_SET_PASS_CONFIGURATION=30, CNK_ADMIN_PASS_SLOTS=31,
+  CNK_RESULT_ADMIN=15 };
 typedef struct {
   uint32_t struct_size, kind;
   const uint8_t *pin; size_t pin_len;
@@ -257,11 +318,13 @@ typedef struct {
   uint32_t present, values;
   uint8_t feature_mask, feature_values, reserved[2];
   int32_t curve_id, algorithm_id;
+  uint8_t layout_id; const uint8_t *keymap; size_t keymap_len;
 } cnk_admin_request_v1;
 typedef struct {
   uint32_t struct_size;
   /* 0 none, 1 bytes, 2 config, 3 flash, 4 usage, 5 PIN, 6 NFC, 7 SM2,
-   * 8 legacy config, 9 legacy SM2 (flags bit 0: enabled). */
+   * 8 legacy config, 9 legacy SM2 (flags bit 0: enabled),
+   * 10 PASS slots (raw two-slot dump via result_copy_bytes). */
   uint32_t value_kind;
   size_t confirmed_writes;
   uint32_t reprobe_required;

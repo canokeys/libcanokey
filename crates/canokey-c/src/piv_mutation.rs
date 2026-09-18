@@ -20,8 +20,8 @@ pub struct CnkManagement {
     /// Mutual challenge length (8 or 16); must be zero for External.
     pub challenge_len: usize,
 }
-/// Copied PIV access descriptor. NULL means no authentication for read factories.
-/// Mutations require a management descriptor; PIN, if present, follows management.
+/// Copied PIV access descriptor. NULL supplies no implicit authentication.
+/// Mutations require management unless USE_EXISTING reuses card authorization.
 #[repr(C)]
 pub struct CnkPivAccess {
     /// Supported descriptor size in bytes.
@@ -30,9 +30,41 @@ pub struct CnkPivAccess {
     pub pin: *const u8,
     /// PIN length in bytes; nonzero requires a valid PIN range.
     pub pin_len: usize,
-    /// Optional management descriptor; must be present for mutation factories.
+    /// Management descriptor for default-mode writes; NULL for USE_EXISTING.
     pub management: *const CnkManagement,
 }
+// The PIV-only flag must not alter options accepted by other applets.
+pub(super) unsafe fn piv_options(p: *const CnkOptions) -> Result<OperationOptions, u32> {
+    if p.is_null() {
+        return options(p);
+    }
+    if (*p).struct_size < std::mem::size_of::<CnkOptions>() as u32 {
+        return Err(ARG);
+    }
+    let mut value = *p;
+    value.flags &= !2;
+    options(&value)
+}
+pub(super) unsafe fn select(p: *const CnkOptions) -> bool {
+    p.is_null() || (*p).flags & 2 == 0
+}
+pub(super) unsafe fn piv_access(
+    p: *const CnkPivAccess,
+    opts: *const CnkOptions,
+    error: *mut CnkError,
+) -> Result<piv::Access, u32> {
+    // Validate the version and flags before reading the selection bit.
+    piv_options(opts)?;
+    let access = access(p, error)?;
+    if select(opts) {
+        return Ok(access);
+    }
+    if !matches!(access, piv::Access::None) {
+        return Err(ARG);
+    }
+    Ok(piv::Access::Existing)
+}
+
 unsafe fn algorithm(value: u32) -> Result<piv::ManagementKeyAlgorithm, u32> {
     match value {
         1 => Ok(piv::ManagementKeyAlgorithm::Tdes),
@@ -117,10 +149,12 @@ pub unsafe extern "C" fn cnk_piv_authenticate_management_key_new(
     error: *mut CnkError,
 ) -> u32 {
     create(out, error, || {
+        let options = piv_options(opts)?;
         piv::authenticate_management_key(
             &profile.as_ref().ok_or(ARG)?.0,
             management(auth, error)?,
-            options(opts)?,
+            select(opts),
+            options,
         )
         .map(Inner::Unit)
         .map_err(|e| failure(e, error))
@@ -130,8 +164,8 @@ pub unsafe extern "C" fn cnk_piv_authenticate_management_key_new(
 /// Copies descriptors and payload; management access is required. Partial card
 /// writes can persist on failure; this operation never retries a mutation.
 /// # Safety
-/// Follow the crate pointer/aliasing contract. profile/access must be readable
-/// and non-NULL, including nested ranges; tag/data must cover declared lengths.
+/// Follow the crate pointer/aliasing contract. profile must be live/non-NULL.
+/// Optional auth/nested ranges are readable; tag/data cover declared lengths.
 /// out must be writable/non-NULL; optional opts/error must be valid structs.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_piv_write_object_new(
@@ -146,7 +180,7 @@ pub unsafe extern "C" fn cnk_piv_write_object_new(
     error: *mut CnkError,
 ) -> u32 {
     create(out, error, || {
-        let options = options(opts)?;
+        let options = piv_options(opts)?;
         if data_len > options.limits.max_input_bytes {
             return Err(failure(Error::new(ErrorKind::LimitExceeded), error));
         }
@@ -154,7 +188,7 @@ pub unsafe extern "C" fn cnk_piv_write_object_new(
             &profile.as_ref().ok_or(ARG)?.0,
             piv::ObjectId::from_bytes(bytes(tag, tag_len)?).map_err(|e| failure(e, error))?,
             SecretBytes::new(bytes(data, data_len)?.to_vec()),
-            access(auth, error)?,
+            piv_access(auth, opts, error)?,
             options,
         )
         .map(Inner::Mutation)
@@ -165,8 +199,8 @@ pub unsafe extern "C" fn cnk_piv_write_object_new(
 /// Copies the payload, adds 70/71/FE framing, and performs explicit management
 /// authentication. No certificate syntax/trust validation is performed.
 /// # Safety
-/// Follow the crate pointer/aliasing contract. profile/auth must be readable and
-/// non-NULL, including nested ranges. data must cover data_len bytes; out must
+/// Follow the crate pointer/aliasing contract. profile must be live/non-NULL;
+/// optional auth/nested ranges are readable. data covers data_len bytes; out must
 /// be writable/non-NULL. Optional opts/error must be valid versioned structs.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_piv_write_certificate_new(
@@ -180,7 +214,7 @@ pub unsafe extern "C" fn cnk_piv_write_certificate_new(
     error: *mut CnkError,
 ) -> u32 {
     create(out, error, || {
-        let options = options(opts)?;
+        let options = piv_options(opts)?;
         if data_len > options.limits.max_input_bytes {
             return Err(failure(Error::new(ErrorKind::LimitExceeded), error));
         }
@@ -188,7 +222,7 @@ pub unsafe extern "C" fn cnk_piv_write_certificate_new(
             &profile.as_ref().ok_or(ARG)?.0,
             slot(reference)?,
             SecretBytes::new(bytes(data, data_len)?.to_vec()),
-            access(auth, error)?,
+            piv_access(auth, opts, error)?,
             options,
         )
         .map(Inner::Mutation)
@@ -198,8 +232,8 @@ pub unsafe extern "C" fn cnk_piv_write_certificate_new(
 /// Construct explicit certificate deletion, without deleting its private key.
 /// Firmware without evidenced deletion support fails before an operation is exposed.
 /// # Safety
-/// Follow the crate pointer/aliasing contract. profile/auth must be readable and
-/// non-NULL, including nested ranges. out must be writable/non-NULL; optional
+/// Follow the crate pointer/aliasing contract. profile must be live/non-NULL;
+/// optional auth/nested ranges are readable. out is writable/non-NULL; optional
 /// opts/error must be valid versioned structs. Free the resulting handle once.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_piv_delete_certificate_new(
@@ -214,8 +248,8 @@ pub unsafe extern "C" fn cnk_piv_delete_certificate_new(
         piv::delete_certificate(
             &profile.as_ref().ok_or(ARG)?.0,
             slot(reference)?,
-            access(auth, error)?,
-            options(opts)?,
+            piv_access(auth, opts, error)?,
+            piv_options(opts)?,
         )
         .map(Inner::Mutation)
         .map_err(|e| failure(e, error))
@@ -223,10 +257,13 @@ pub unsafe extern "C" fn cnk_piv_delete_certificate_new(
 }
 /// Construct management-key replacement with explicit current-key authentication.
 /// Copies the new 24-byte key. Algorithm uses CNK_MANAGEMENT_* and touch uses
-/// CNK_MANAGEMENT_TOUCH_*; invalid values fail before SELECT.
+/// CNK_MANAGEMENT_TOUCH_*; invalid values fail before SELECT. update_protected=1
+/// checks ADMIN DATA and, when protected, requires a readable PRINTED object and
+/// updates it after rotation/new-key authentication. The writes are not atomic;
+/// callers retain the new key for recovery. Zero only replaces the key.
 /// # Safety
-/// Follow the crate pointer/aliasing contract. profile/auth and nested ranges
-/// must be readable/non-NULL; key must cover key_len bytes. out must be writable/
+/// Follow the crate pointer/aliasing contract. profile is live/non-NULL; optional
+/// auth/nested ranges are readable. key covers key_len bytes. out is writable/
 /// non-NULL. Optional opts/error must be valid versioned structs.
 #[no_mangle]
 pub unsafe extern "C" fn cnk_piv_set_management_key_new(
@@ -235,13 +272,14 @@ pub unsafe extern "C" fn cnk_piv_set_management_key_new(
     key: *const u8,
     key_len: usize,
     touch: u32,
+    update_protected: u32,
     auth: *const CnkPivAccess,
     opts: *const CnkOptions,
     out: *mut *mut CnkOperation,
     error: *mut CnkError,
 ) -> u32 {
     create(out, error, || {
-        if key_len != 24 {
+        if key_len != 24 || update_protected > 1 {
             return Err(ARG);
         }
         let key = piv::ManagementKey::from_bytes(algorithm(key_algorithm)?, bytes(key, key_len)?)
@@ -255,8 +293,9 @@ pub unsafe extern "C" fn cnk_piv_set_management_key_new(
             &profile.as_ref().ok_or(ARG)?.0,
             key,
             touch,
-            access(auth, error)?,
-            options(opts)?,
+            update_protected != 0,
+            piv_access(auth, opts, error)?,
+            piv_options(opts)?,
         )
         .map(Inner::Mutation)
         .map_err(|e| failure(e, error))
@@ -302,5 +341,101 @@ pub unsafe extern "C" fn cnk_operation_mutation_result(
             },
             _ => TYPE,
         }
+    })
+}
+
+/// Construct read object container. Honors CNK_PIV_USE_EXISTING.
+/// Inputs are copied; getters do not advance or retry the operation.
+/// # Safety
+/// Follow the crate pointer contract: profile is live, byte ranges readable,
+/// out writable/non-NULL, and optional descriptors cover initialized prefixes.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_read_object_container_new(
+    profile: *const CnkProfile,
+    tag: *const u8,
+    tag_len: usize,
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        let profile = &profile.as_ref().ok_or(ARG)?.0;
+        let options = piv_options(opts)?;
+        let access = piv_access(ptr::null(), opts, error)?;
+        let id = piv::ObjectId::from_bytes(bytes(tag, tag_len)?).map_err(|e| failure(e, error))?;
+        piv::read_object_container(profile, id, access, options)
+            .map(Inner::Object)
+            .map_err(|e| failure(e, error))
+    })
+}
+
+/// Construct write object container. Honors CNK_PIV_USE_EXISTING.
+/// Inputs are copied; getters do not advance or retry the operation.
+/// # Safety
+/// Follow the crate pointer contract: profile is live, byte ranges readable,
+/// out writable/non-NULL, and optional descriptors cover initialized prefixes.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_write_object_container_new(
+    profile: *const CnkProfile,
+    tag: *const u8,
+    tag_len: usize,
+    data: *const u8,
+    data_len: usize,
+    auth: *const CnkPivAccess,
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        let profile = &profile.as_ref().ok_or(ARG)?.0;
+        let options = piv_options(opts)?;
+        let access = piv_access(auth, opts, error)?;
+        if data_len > options.limits.max_input_bytes {
+            return Err(failure(Error::new(ErrorKind::LimitExceeded), error));
+        }
+        let id = piv::ObjectId::from_bytes(bytes(tag, tag_len)?).map_err(|e| failure(e, error))?;
+        piv::write_object_container(
+            profile,
+            id,
+            piv_input(data, data_len, options, error)?,
+            access,
+            options,
+        )
+        .map(Inner::Mutation)
+        .map_err(|e| failure(e, error))
+    })
+}
+
+/// Authenticate PIN-managed protection, optionally finalizing irreversible PUK blocking.
+/// A NULL/zero entropy range only logs in; eight random bytes explicitly request
+/// finalization. Returns the verified management key through the byte getter.
+/// Honors USE_EXISTING; otherwise Access must supply PIN authentication.
+/// # Safety
+/// Profile is live; input ranges are readable and copied. Optional descriptors
+/// cover initialized prefixes. out is writable/non-NULL; buffers do not alias.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_pin_managed_new(
+    profile: *const CnkProfile,
+    entropy: *const u8,
+    entropy_len: usize,
+    auth: *const CnkPivAccess,
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
+    create(out, error, || {
+        let profile = &profile.as_ref().ok_or(ARG)?.0;
+        let options = piv_options(opts)?;
+        let access = piv_access(auth, opts, error)?;
+        let block = if entropy.is_null() && entropy_len == 0 {
+            None
+        } else if entropy_len == 8 {
+            Some(SecretBytes::new(bytes(entropy, entropy_len)?.to_vec()))
+        } else {
+            return Err(ARG);
+        };
+        piv::protection::pin_managed(profile, block, access, options)
+            .map(Inner::Object)
+            .map_err(|e| failure(e, error))
     })
 }

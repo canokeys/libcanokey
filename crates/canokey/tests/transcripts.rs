@@ -37,6 +37,34 @@ fn minimal_probe_and_optional_statuses() {
     assert_eq!(p.warnings().len(), 1);
 }
 #[test]
+fn probe_skips_serial_read_when_bootstrap_observed() {
+    let mut op = probe_device(ProbeOptions {
+        observed_serial: Some([1, 2, 3, 4]),
+        ..Default::default()
+    })
+    .unwrap();
+    op.start().unwrap();
+    exchange(
+        &mut op,
+        &[0, 0xa4, 4, 0, 5, 0xf0, 0, 0, 0, 0, 0],
+        &[0x90, 0],
+    );
+    exchange(&mut op, &[0, 0x31, 0, 0, 0], b"2.0.0\x90\x00");
+    exchange(&mut op, &[0, 0x31, 1, 0, 0], b"CanoKey\x90\x00");
+    // The serial read is skipped: the next command is the PIV select.
+    exchange(
+        &mut op,
+        &[0, 0xa4, 4, 0, 5, 0xa0, 0, 0, 3, 8, 0],
+        &[0x90, 0],
+    );
+    assert_eq!(
+        exchange(&mut op, &[0, 0xfd, 0, 0, 0], &[5, 7, 0, 0x90, 0]),
+        Step::Done
+    );
+    let p = op.take_result().unwrap();
+    assert_eq!(p.info().serial(), Some(&[1, 2, 3, 4][..]));
+}
+#[test]
 fn full_probe_keeps_firmware_and_piv_version_separate() {
     let mut op = probe_device(ProbeOptions::default()).unwrap();
     op.start().unwrap();
@@ -295,6 +323,98 @@ fn reserved_extension_ids_cannot_change_private_operation_semantics() {
                 )
                 .is_err());
             }
+        }
+    }
+}
+
+#[test]
+fn development_probe_uses_base_rules_and_retains_actual_identity() {
+    let firmware = b"3.1.0-dev+gaa408988";
+    let config = [1, 0xe0, 5, 0x16, 0xe1, 0x53, 0x15, 0x54, 0xe2, 0xe3];
+    let mut op = probe_device(ProbeOptions::default()).unwrap();
+    op.start().unwrap();
+    op.advance(&[0x90, 0]).unwrap();
+    op.advance(&[firmware.as_slice(), &[0x90, 0]].concat())
+        .unwrap();
+    op.advance(b"CanoKey Dev\x90\x00").unwrap();
+    op.advance(&[0, 0, 0, 0, 0x90, 0]).unwrap();
+    op.advance(&[0x90, 0]).unwrap();
+    assert_eq!(op.advance(&[6, 0, 0, 0x90, 0]).unwrap(), Step::Exchange);
+    assert_eq!(
+        exchange(
+            &mut op,
+            &[0, 0xee, 1, 0, 0],
+            &[config.as_slice(), &[0x90, 0]].concat()
+        ),
+        Step::Done
+    );
+    let p = op.take_result().unwrap();
+    assert_eq!(p.info().firmware_text(), firmware);
+    assert_eq!(
+        p.info().firmware().unwrap().suffix.as_deref(),
+        Some("-dev+gaa408988")
+    );
+    assert!(p
+        .warnings()
+        .contains(&compatibility::CompatibilityWarning::DeclaredBaseVersion));
+    assert_eq!(
+        p.capability(Capability::MetadataDirectory).support,
+        Support::Supported
+    );
+    assert_eq!(p.algorithm_wire_id(Algorithm::MlDsa65), Some(0xe2));
+    assert_eq!(
+        p.key_algorithm_support(Algorithm::MlDsa65).support,
+        Support::Supported
+    );
+}
+
+#[test]
+fn development_firmware_obeys_base_feature_and_legacy_format_boundaries() {
+    for version in [
+        "1.3", "1.5.2", "1.6.2", "2.0.0", "3.0.3", "3.1.0", "3.2.0", "9.0.0",
+    ] {
+        let base = profile(version);
+        for suffix in ["-dev", "-dev+g12345678", "+build.7"] {
+            let declared = format!("{version}{suffix}");
+            let dev = profile(&declared);
+            assert_eq!(dev.info().firmware_text(), declared.as_bytes());
+            for feature in [
+                Capability::Metadata,
+                Capability::MetadataDirectory,
+                Capability::ContainerNames,
+                Capability::ObjectWrites,
+                Capability::CertificateDeletion,
+                Capability::Admin,
+                Capability::Oath,
+            ] {
+                assert_eq!(
+                    dev.capability(feature),
+                    base.capability(feature),
+                    "{declared}: {feature:?}"
+                );
+            }
+            for algorithm in [
+                compatibility::ManagementKeyAlgorithm::Tdes,
+                compatibility::ManagementKeyAlgorithm::Aes192,
+            ] {
+                assert_eq!(
+                    dev.management_key_support(algorithm),
+                    base.management_key_support(algorithm)
+                );
+            }
+            assert_eq!(dev.legacy_explicit_le(), base.legacy_explicit_le());
+            assert_eq!(
+                dev.legacy_unwrapped_objects(),
+                base.legacy_unwrapped_objects()
+            );
+            assert_eq!(
+                dev.legacy_empty_key_metadata(),
+                base.legacy_empty_key_metadata()
+            );
+            assert_eq!(
+                dev.sm2_uses_p1363_signatures(),
+                base.sm2_uses_p1363_signatures()
+            );
         }
     }
 }

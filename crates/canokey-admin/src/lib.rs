@@ -1,7 +1,10 @@
 //! Caller-owned CanoKey Admin operations and raw bootstrap builders.
 //!
 //! [`operation`] selects once, verifies only an explicitly supplied PIN, and
-//! executes an owned [`Request`]. Configuration patches read before writing;
+//! executes an owned [`Request`]. [`operation_with_access`] takes an explicit
+//! [`Access`] policy instead; [`Access::Existing`] sends no SELECT and no
+//! implicit VERIFY, reusing the caller's selected Admin transaction and card
+//! authorization. Configuration patches read before writing;
 //! [`Outcome`] retains confirmed writes on failure through `Operation::progress`.
 //! No operation stores a connection or changes the caller's immutable profile.
 //!
@@ -42,9 +45,45 @@ pub mod command {
     pub fn serial() -> LogicalCommand {
         read(0x32, 0)
     }
+    /// Build WRITE KBD keymap (layout id in P2, exactly 256 mapping bytes).
+    pub fn write_keyboard_keymap(layout: u8, keymap: &[u8; 256]) -> LogicalCommand {
+        LogicalCommand::new(
+            ApduHeader::new(0, 0x45, 0, layout),
+            keymap.to_vec(),
+            ExpectedLength::Absent,
+        )
+    }
+    /// Build READ KBD keymap layout-id query.
+    pub fn read_keyboard_layout() -> LogicalCommand {
+        read(0x46, 0)
+    }
+    /// Build READ KBD keymap table query.
+    pub fn read_keyboard_keymap() -> LogicalCommand {
+        read(0x46, 1)
+    }
+    /// Build CLEAR KBD keymap.
+    pub fn clear_keyboard_keymap() -> LogicalCommand {
+        LogicalCommand::new(
+            ApduHeader::new(0, 0x47, 0, 0),
+            vec![],
+            ExpectedLength::Absent,
+        )
+    }
+    /// Build READ PASS configuration (INS 43).
+    pub fn pass_configuration() -> LogicalCommand {
+        read(0x43, 0)
+    }
+    /// Build WRITE PASS configuration (INS 44).
+    pub fn write_pass_configuration(data: &[u8]) -> LogicalCommand {
+        LogicalCommand::new(
+            ApduHeader::new(0, 0x44, 0, 0),
+            data.to_vec(),
+            ExpectedLength::Absent,
+        )
+    }
 }
 
 mod types;
 pub use types::*;
 mod execute;
-pub use execute::operation;
+pub use execute::{operation, operation_with_access};

@@ -321,11 +321,11 @@ impl ConversationState {
         if sw >> 8 == 0x6c && self.correct_le && self.pending.is_empty() && !self.corrected {
             let le = if sw & 255 == 0 { 256 } else { sw & 255 } as u32;
             if le as usize > options.exchange.max_response_bytes - 2 {
-                return Err(Error::new(ErrorKind::LimitExceeded));
+                return Err(Error::new(ErrorKind::LimitExceeded).at(Phase::Conversation));
             }
             self.current = self.current.corrected(le)?;
             if self.current.as_bytes().len() > options.exchange.max_command_bytes {
-                return Err(Error::new(ErrorKind::LimitExceeded));
+                return Err(Error::new(ErrorKind::LimitExceeded).at(Phase::Conversation));
             }
             self.corrected = true;
             return Ok(None);
@@ -564,15 +564,15 @@ impl<T> Operation<T> {
     }
     fn advance_inner(&mut self, bytes: &[u8]) -> Result<Step, Error> {
         if bytes.len() > self.options.exchange.max_response_bytes {
-            return Err(Error::new(ErrorKind::LimitExceeded));
+            return Err(Error::new(ErrorKind::LimitExceeded).at(Phase::Conversation));
         }
         let response = ResponseApdu::parse(bytes)?;
         self.response_bytes = self
             .response_bytes
             .checked_add(response.data().len())
-            .ok_or_else(|| Error::new(ErrorKind::LimitExceeded))?;
+            .ok_or_else(|| Error::new(ErrorKind::LimitExceeded).at(Phase::Conversation))?;
         if self.response_bytes > self.options.limits.max_total_response_bytes {
-            return Err(Error::new(ErrorKind::LimitExceeded));
+            return Err(Error::new(ErrorKind::LimitExceeded).at(Phase::Conversation));
         }
         let result = self
             .conversation

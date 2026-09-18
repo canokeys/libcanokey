@@ -1,6 +1,6 @@
 //! Owned PIV metadata, preserving unknown values and extension fields.
 use crate::*;
-use canokey_compat::AlgorithmConfig;
+use canokey_compat::{AlgorithmConfig, Support};
 
 /// A known semantic value or its unrecognized raw byte; unknown values cannot
 /// be passed as command policies/algorithms by accident.
@@ -169,7 +169,7 @@ fn touch(value: u8) -> KnownOrUnknown<TouchPolicy> {
         v => KnownOrUnknown::Unknown(v),
     }
 }
-fn decode(
+pub(crate) fn decode(
     profile: &DeviceProfile,
     reference: MetadataReference,
     data: SecretBytes,
@@ -309,12 +309,33 @@ pub(crate) fn prepare_get_metadata(
 /// does not mutate the source profile; callers decide how to refresh observations.
 /// Unknown/proven-unsupported probe capability fails before SELECT; malformed IDs
 /// return InvalidResponse. No authentication is inferred or attempted implicitly.
+///
+/// On 3.0.x firmware ([`Capability::PivProtectedAlgorithmConfigRead`]) the INS EE
+/// read itself sits behind management-key GENERAL AUTHENTICATE, so [`Access::None`]
+/// and [`Access::Pin`] cannot authorize it and are rejected with
+/// [`ErrorKind::SecurityStatusNotSatisfied`] at construction, before any I/O.
+/// [`Access::Existing`], [`Access::Management`] and [`Access::PinAndManagement`]
+/// remain allowed; `Existing` stays an unproven caller assertion. From 3.1.0 the
+/// read is unauthenticated and no access mode is rejected. Unknown firmware is
+/// not rejected by this gate (no gate is invented without evidence); it still
+/// fails the probe-capability check above with CapabilityUnknown.
+///
+/// # Errors
+/// Returns capability, access-gate and host-budget errors before execution.
 pub fn read_algorithm_config(
     profile: &DeviceProfile,
     access: Access,
     options: OperationOptions,
 ) -> Result<Operation<AlgorithmConfig>, Error> {
     let target = prepare_read_algorithm_config(profile, options)?;
+    if profile
+        .capability(Capability::PivProtectedAlgorithmConfigRead)
+        .support
+        == Support::Supported
+        && matches!(access, Access::None | Access::Pin(_))
+    {
+        return Err(Error::new(ErrorKind::SecurityStatusNotSatisfied));
+    }
     access::with_access(profile, access, target, options)
 }
 

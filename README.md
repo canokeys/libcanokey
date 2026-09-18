@@ -20,7 +20,9 @@ FRB adapter would call the Rust facade directly.
 | `canokey-piv` | PIV operations and certificate container parsing | protocol, compat, key |
 | `canokey-oath` | OATH access, credentials and full/truncated calculations | protocol, compat |
 | `canokey-openpgp` | OpenPGP data, passwords, policies and key operations | protocol, compat, key |
-| `canokey` | Facade and device probing | protocol, compat, admin, piv, oath, openpgp |
+| `canokey-ndef` | NDEF capability reads and crash-consistent message writes | protocol |
+| `canokey-ctap` | CTAP/FIDO2 ISO 7816 transport envelope and CTAP2 client (ClientPIN, credential management) | protocol |
+| `canokey` | Facade and device probing | protocol, compat, admin, piv, oath, openpgp, ndef, ctap |
 | `canokey-c` | Copied C descriptors and results, operation dispatch | canokey |
 
 Arrows point from each crate to its dependencies; the dashed edge is optional.
@@ -32,6 +34,8 @@ flowchart TD
     F --> P[canokey-piv]
     F --> O[canokey-oath]
     F --> G[canokey-openpgp]
+    F --> N[canokey-ndef]
+    F --> T[canokey-ctap]
     F --> K[canokey-compat]
     F --> R[canokey-protocol]
     F -. x509 feature .-> X[x509-info]
@@ -46,6 +50,8 @@ flowchart TD
     P --> R
     O --> R
     G --> R
+    N --> R
+    T --> R
     Q --> R
     K --> R
 ```
@@ -62,14 +68,43 @@ protocol state.
   explicit Supported/Unsupported/Unknown evidence and narrow legacy quirks.
 - Admin identity/storage/configuration reads, PIN, NFC/NDEF, CTAP SM2 configuration
   and explicit applet/device resets; configuration patches retain confirmed writes on failure.
+  `admin::operation_with_access` adds an explicit selected-context policy
+  (`Access::Existing`) that reuses the caller's selected Admin transaction
+  without SELECT or implicit VERIFY. Typed PASS slots read both touch slots
+  (Off/Static/HmacSha1/Oath/Unknown) and write Off, static-password or
+  HMAC-SHA1 configurations; OATH slots stay with the OATH applet.
 - OATH SELECT/access-code validation, PBKDF2 password derivation, credential CRUD,
   full/truncated calculations and paged results with explicit HOTP/touch markers.
+  Set-default marks an HOTP credential as the touch keyboard-emulation default,
+  using the two-slot/append-enter dialect only on firmware 3.0.0 and newer.
+  The vendor extension commands the OATH applet answers (GET SERIAL and
+  HMAC-SHA1 challenge-response from a PASS slot, dispatched before the
+  access-validation gate) provide the KeePassXC interop path; they require
+  3.1.0 firmware evidence.
+- NDEF capability-container reads and chunked message read/replace, with
+  zero-NLEN-first crash-consistent writes; profile-free.
+- CTAP/FIDO2 ISO 7816 transport envelope (explicit FIDO2 selection, `80 10`
+  message wrap and `80 C0` GET RESPONSE continuation) plus a typed CTAP2
+  client layer: strict canonical CBOR, COSE key and authenticatorData parsing,
+  and getInfo/makeCredential/getAssertion/reset/selection operations. The
+  optional `clientpin` feature (default in `canokey-ctap`, opt-in on the
+  facade) adds ClientPIN protocols 1 and 2, credential
+  management with bounded in-operation enumeration, authenticatorConfig
+  (toggle always-UV, set minimum PIN length, require long touch for reset)
+  and fragmented largeBlobs reads/writes. The raw CTAP1/U2F
+  register/authenticate/check-only/version commands are ungated, and the
+  hmac-secret extension covers the makeCredential declaration plus the
+  encrypted salt exchange, including the CanoKey hmac-secret-mc variant.
+  WebAuthn ceremonies (clientDataJSON, attestation trust, rpId policy)
+  remain host-side.
 - OpenPGP DO/certificate reads and writes, separate PW1/PW3 modes, password/reset
   management, explicit policies/fingerprints/timestamps, key generation/import,
   shared SPKI export, signatures, PKCS#1 v1.5 decipher and ECDH/X25519.
 - PIV selection, PIN status/verification/logout, PIN/PUK changes and unblock.
 - External/Mutual 3DES or AES-192 management authentication, explicit caller-supplied
   mutual challenges; authenticated object/certificate writes and management-key replacement.
+  PIN-managed protection validation/finalization owns policy parsing, recovered-key
+  authentication and explicit PUK blocking. Key rotation can maintain PRINTED.
 - Object/certificate reads, bounded gzip decoding, certificate deletion, metadata
   and algorithm-configuration reads; compact directory with entry diagnostics,
   UTF-16 container names, key move/delete, explicit PIN/PUK retry reset, algorithm
@@ -87,8 +122,9 @@ protocol state.
 
 Firmware compatibility covers audited 1.3–3.1.0 layouts with per-operation gates.
 Legacy OATH commands, OpenPGP DO framing and Admin configuration fields are selected
-from actual Admin firmware; unknown/development versions do not enable mutations.
-See [compatibility contracts](docs/api-design.md#profiles-and-probing) for the model
+from actual Admin firmware; unknown base versions do not enable mutations; development builds follow their
+declared numeric base version while preserving the original version text.
+See [compatibility contracts](docs/design/api-design.md#profiles-and-probing) for the model
 and each applet's historical restrictions. Every factory checks required evidence. PIV `sign_streaming`
 handles ML-DSA and empty Ed25519 messages explicitly; SM2 initiators require PIN
 Never/Once and peer keys supplied at construction. See [plan](plan.md) for firmware
@@ -128,8 +164,8 @@ exchange with raw application I/O. Hold one connection lease across the operatio
 supply complete responses including SW1/SW2 and disable transport retries/continuation.
 Getters never send APDUs. On I/O failure, drop the operation and drain or isolate
 pending I/O before connection reuse. Cancel/drop never roll back device effects.
-Boundary sketches: [Console/Dart](docs/console-integration.md),
-[PKCS#11/C](docs/pkcs11-integration.md).
+Boundary sketches: [Console/Dart](docs/guides/console-integration.md),
+[PKCS#11/C](docs/guides/pkcs11-integration.md).
 
 ## Certificate inspection
 
@@ -167,9 +203,11 @@ are ignored.
 
 ## Documentation and license
 
-- [API contracts](docs/api-design.md): ownership, execution and binding rules.
+- [Documentation map](docs/README.md): design documents vs user guides, with an
+  architecture overview.
+- [API contracts](docs/design/api-design.md): ownership, execution and binding rules.
 - [Plan](plan.md): remaining work and acceptance criteria.
-- [Reference evidence](docs/references.md): pinned firmware and consumer sources.
+- [Reference evidence](docs/design/references.md): pinned firmware and consumer sources.
 - [Contributor instructions](AGENTS.md): language, architecture, checks and commits.
 
 Copyright 2026 canokeys.org. Licensed under [Apache-2.0](LICENSE). Each workspace

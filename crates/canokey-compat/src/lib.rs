@@ -79,7 +79,7 @@ pub enum Support {
 pub enum Evidence {
     /// A directly observed response or recorded discovery outcome.
     Observed,
-    /// A rule for a recognized firmware range.
+    /// A rule for a recognized numeric firmware range, including development builds.
     FirmwareMatrix,
     /// Conservative stable behavior for firmware outside the recognized matrix.
     LatestKnownFallback,
@@ -139,6 +139,16 @@ pub enum Capability {
     OathRenameCollisionCheck,
     /// LIST/CalculateAll continuation no longer drops exact-buffer-fit records.
     OathReliablePagination,
+    /// OATH SET DEFAULT accepts two touch slots and an append-enter flag from
+    /// 3.0.0. Older firmware accepts only the single-slot, no-enter form.
+    OathSetDefaultSlots,
+    /// OATH applet answers the vendor extension commands (INS 01 with P1
+    /// 10/30/38) dispatched before its access-validation gate; covers both the
+    /// serial read and the PASS HMAC-SHA1 challenge-response. Audited 1.5.2 and
+    /// 2.0.1 sources route INS 01 only to PUT; the dispatch appears in the
+    /// pinned 3.1 evidence (introduced by canokey-core b0416d7, in no release
+    /// tag).
+    OathChallengeResponse,
     /// Baseline Admin commands; layouts and newer commands have separate gates.
     Admin,
     /// Admin NDEF/WebUSB availability flags introduced in 1.5.2.
@@ -153,6 +163,11 @@ pub enum Capability {
     AdminLegacyOpenPgpTouch,
     /// CTAP and PASS resets introduced in 3.0.
     AdminCtapPassReset,
+    /// Admin PASS configuration read/write (INS 43/44), introduced in 3.0.0
+    /// (canokey-core 7cb33508 `ADMIN_INS_READ/WRITE_PASS_CONFIG`) and present
+    /// through the pinned 3.1.0; absent at 2.0.1. Every firmware with these
+    /// commands dispatches them behind the Admin-PIN gate.
+    AdminPassConfig,
     /// Vendor NFC switch introduced in 3.0.
     AdminNfc,
     /// Reading NFC status without Admin PIN from 3.0.1.
@@ -193,6 +208,12 @@ pub enum Capability {
     RetryReset,
     /// Replacement of the complete algorithm configuration.
     AlgorithmConfigWrite,
+    /// PIV INS EE algorithm-extension read (P1 01) requires management-key
+    /// authentication. At 3.0.0 (canokey-core 7cb33508) `piv_algorithm_extension`
+    /// gates both the read and the write behind `in_admin_status`; the pinned
+    /// 3.1.0 evidence (9e77287) gates only the write, leaving the read
+    /// unauthenticated.
+    PivProtectedAlgorithmConfigRead,
     /// SM2 key agreement with separate peer static and ephemeral points.
     Sm2Agreement,
     /// On-device PIV attestation certificate generation.
@@ -404,8 +425,10 @@ impl DeviceObservations {
 pub enum CompatibilityWarning {
     /// Firmware text could not be parsed; raw bytes remain available.
     UnrecognizedFirmware,
-    /// Firmware is newer or has a development suffix; conservative fallback applies.
+    /// Firmware is newer than the known matrix; conservative fallback applies.
     LatestKnownFallback,
+    /// A development/build suffix is retained; compatibility uses its numeric base version.
+    DeclaredBaseVersion,
     /// The named optional probe command reported an unsupported status.
     OptionalCommandUnsupported(&'static str),
     /// The named optional probe command requires authentication; no default was tried.
@@ -426,7 +449,9 @@ pub struct DeviceProfile {
 impl DeviceProfile {
     /// Normalize owned observations without contacting a device.
     ///
-    /// Unknown firmware remains usable under conservative capability decisions;
+    /// Development/build suffixes retain their identity but use the declared
+    /// numeric base version for compatibility. Unknown base versions remain
+    /// usable under conservative capability decisions;
     /// this does not attest that supplied observations came from the same device.
     ///
     /// # Errors
@@ -458,13 +483,14 @@ impl DeviceProfile {
             observations
                 .warnings
                 .push(CompatibilityWarning::UnrecognizedFirmware);
-        } else if firmware
-            .as_ref()
-            .is_some_and(|f| f.tuple() > (3, 1, 0) || f.suffix.is_some())
-        {
+        } else if firmware.as_ref().is_some_and(|f| f.tuple() > (3, 1, 0)) {
             observations
                 .warnings
                 .push(CompatibilityWarning::LatestKnownFallback);
+        } else if firmware.as_ref().is_some_and(|f| f.suffix.is_some()) {
+            observations
+                .warnings
+                .push(CompatibilityWarning::DeclaredBaseVersion);
         }
         Ok(Self {
             info: DeviceInfo {
@@ -528,6 +554,8 @@ impl DeviceProfile {
                 return self.firmware_range((2, 0, 0), (3, 1, 0))
             }
             Capability::OathReliablePagination => return self.firmware_range((3, 0, 1), (3, 1, 0)),
+            Capability::OathSetDefaultSlots => return self.firmware_range((3, 0, 0), (3, 1, 0)),
+            Capability::OathChallengeResponse => return self.firmware_range((3, 1, 0), (3, 1, 0)),
             Capability::OpenPgp => return self.firmware_range((1, 3, 0), (3, 1, 0)),
             Capability::OpenPgpWrappedData => return self.firmware_range((2, 0, 0), (3, 1, 0)),
             Capability::OpenPgpAlgorithmInformation | Capability::OpenPgpPublicKeyLengthFix => {
@@ -549,11 +577,15 @@ impl DeviceProfile {
             Capability::AdminLegacyOpenPgpTouch => {
                 return self.firmware_range((1, 3, 0), (1, 3, 0))
             }
-            Capability::AdminCtapPassReset | Capability::AdminNfc | Capability::AdminSm2 => {
-                return self.firmware_range((3, 0, 0), (3, 1, 0))
-            }
+            Capability::AdminCtapPassReset
+            | Capability::AdminNfc
+            | Capability::AdminSm2
+            | Capability::AdminPassConfig => return self.firmware_range((3, 0, 0), (3, 1, 0)),
             Capability::AdminPublicNfcStatus => return self.firmware_range((3, 0, 1), (3, 1, 0)),
             Capability::AdminLegacySm2 => return self.firmware_range((3, 0, 0), (3, 0, 3)),
+            Capability::PivProtectedAlgorithmConfigRead => {
+                return self.firmware_range((3, 0, 0), (3, 0, 3))
+            }
             Capability::AdminPublicConfiguration | Capability::AdminExtendedConfiguration => {
                 return self.firmware_range((3, 1, 0), (3, 1, 0))
             }
@@ -622,7 +654,7 @@ impl DeviceProfile {
             _ => (2, 0, 0),
         };
         if let Some(version) = self.info.firmware.as_ref() {
-            if version.suffix.is_none() && ((1, 3, 0)..=(3, 1, 0)).contains(&version.tuple()) {
+            if ((1, 3, 0)..=(3, 1, 0)).contains(&version.tuple()) {
                 return CapabilityStatus {
                     support: if version.tuple() >= threshold {
                         Supported
@@ -644,7 +676,8 @@ impl DeviceProfile {
     }
     /// Resolve management-key algorithm support for both External and Mutual modes.
     /// Firmware 1.3..=3.0.3 uses 3DES; 3.1.0 uses AES-192. Unrecognized,
-    /// development and newer firmware remain Unknown; no algorithm is tried implicitly.
+    /// and newer base versions remain Unknown. Development builds use their declared
+    /// numeric base version; no algorithm is tried implicitly.
     pub fn management_key_support(&self, algorithm: ManagementKeyAlgorithm) -> CapabilityStatus {
         match algorithm {
             ManagementKeyAlgorithm::Tdes => self.firmware_range((1, 3, 0), (3, 0, 3)),
@@ -654,9 +687,7 @@ impl DeviceProfile {
     fn firmware_range(&self, first: (u16, u16, u16), last: (u16, u16, u16)) -> CapabilityStatus {
         if let Some(version) = &self.info.firmware {
             let v = version.tuple();
-            if version.suffix.is_none()
-                && (v == (1, 3, 0) || ((1, 5, 2)..=(3, 0, 3)).contains(&v) || v == (3, 1, 0))
-            {
+            if v == (1, 3, 0) || ((1, 5, 2)..=(3, 0, 3)).contains(&v) || v == (3, 1, 0) {
                 return CapabilityStatus {
                     support: if (first..=last).contains(&v) {
                         Support::Supported
@@ -704,7 +735,7 @@ impl DeviceProfile {
         };
         self.firmware_range(first, (3, 1, 0))
     }
-    /// Select READ CONFIG framing, failing for unknown/development firmware.
+    /// Select READ CONFIG framing from the numeric base version, failing when unknown.
     pub fn admin_configuration_layout(&self) -> Result<AdminConfigurationLayout, Error> {
         self.capability(Capability::Admin).require()?;
         let v = self
@@ -902,7 +933,7 @@ impl DeviceProfile {
         self.info
             .firmware
             .as_ref()
-            .is_some_and(|v| v.suffix.is_none() && ((2, 0, 0)..(3, 0, 0)).contains(&v.tuple()))
+            .is_some_and(|v| ((2, 0, 0)..(3, 0, 0)).contains(&v.tuple()))
     }
     /// Whether the evidenced SM2 signature response is fixed-width r || s.
     /// Known 3.1.0 uses this encoding; earlier supported releases use DER.
@@ -912,7 +943,7 @@ impl DeviceProfile {
         self.info
             .firmware
             .as_ref()
-            .is_some_and(|v| v.suffix.is_none() && v.tuple() == (3, 1, 0))
+            .is_some_and(|v| v.tuple() == (3, 1, 0))
     }
     /// Whether proven legacy firmware returns unwrapped CCC/CHUID objects.
     /// Applet code applies this narrowly to those object types; callers should prefer
@@ -921,6 +952,6 @@ impl DeviceProfile {
         self.info
             .firmware
             .as_ref()
-            .is_some_and(|f| ((1, 3, 0)..(1, 6, 1)).contains(&f.tuple()) && f.suffix.is_none())
+            .is_some_and(|f| ((1, 3, 0)..(1, 6, 1)).contains(&f.tuple()))
     }
 }

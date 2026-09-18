@@ -9,6 +9,14 @@ pub fn profile(version: &str) -> DeviceProfile {
     );
     DeviceProfile::from_observations(o).unwrap()
 }
+#[allow(dead_code)]
+pub fn profile_without_ml() -> DeviceProfile {
+    let mut o = DeviceObservations::new(b"3.1.0".to_vec());
+    o.piv_version = Some(PivApplicationVersion([5, 7, 0]));
+    o.algorithm_config =
+        Some(AlgorithmConfig::parse(&[1, 0xe0, 5, 0x16, 0xe1, 0x53, 0x54, 0x55]).unwrap());
+    DeviceProfile::from_observations(o).unwrap()
+}
 pub fn hex(s: &str) -> Vec<u8> {
     (0..s.len())
         .step_by(2)
@@ -20,6 +28,32 @@ pub fn access() -> Access {
         ManagementKey::from_bytes(ManagementKeyAlgorithm::Aes192, &(0..24).collect::<Vec<_>>())
             .unwrap(),
     ))
+}
+#[allow(dead_code)]
+pub fn tdes_access() -> Access {
+    Access::Management(ManagementAuthentication::external(
+        ManagementKey::from_bytes(
+            ManagementKeyAlgorithm::Tdes,
+            &hex("0123456789abcdef23456789abcdef01456789abcdef0123"),
+        )
+        .unwrap(),
+    ))
+}
+/// SELECT (with legacy explicit Le) and Tdes External management authentication
+/// using the known-answer vector cross-checked in tests/management.rs.
+#[allow(dead_code)]
+pub fn authenticate_tdes<T>(op: &mut Operation<T>) {
+    selected_with_le(op, true);
+    assert_eq!(
+        op.command().unwrap().as_bytes(),
+        hex("0087039b047c02810000")
+    );
+    op.advance(&hex("7c0a8108fedcba98765432109000")).unwrap();
+    assert_eq!(
+        op.command().unwrap().as_bytes(),
+        hex("0087039b0c7c0a82080737f6c53750d4a400")
+    );
+    op.advance(&[0x90, 0]).unwrap();
 }
 pub fn selected<T>(op: &mut Operation<T>) {
     selected_with_le(op, false);
