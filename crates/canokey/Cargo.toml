@@ -7,6 +7,8 @@ authors.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 description = "Transport-free CanoKey host protocol library"
 readme = "README.md"
 
@@ -26,3 +28,6 @@ x509-info = { workspace = true, optional = true }
 x509 = ["dep:x509-info"]
 serde = ["x509", "x509-info/serde"]
 clientpin = ["canokey-ctap/clientpin"]
+
+[package.metadata.docs.rs]
+all-features = true

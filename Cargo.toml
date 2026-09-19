@@ -22,6 +22,8 @@ authors = ["canokeys.org"]
 license = "Apache-2.0"
 homepage = "https://canokeys.org"
 repository = "https://github.com/canokeys/libcanokey"
+keywords = ["canokey", "smartcard", "fido2", "openpgp", "piv"]
+categories = ["authentication", "cryptography", "hardware-support"]
 
 [workspace.dependencies]
 zeroize = "1.8"
