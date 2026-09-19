@@ -2,134 +2,132 @@
 
 [![CI](https://github.com/canokeys/libcanokey/actions/workflows/ci.yml/badge.svg)](https://github.com/canokeys/libcanokey/actions/workflows/ci.yml)
 
-A Rust host protocol library for CanoKey. It produces APDUs and consumes complete
-responses; callers own transport, connections and application state. The C ABI is
-experimental. There is no runtime, credential cache or mutable global state.
+A Rust host-side library for [CanoKey](https://canokeys.org) devices. It builds the
+command APDUs for each on-key applet (PIV, OpenPGP, OATH, FIDO2/CTAP, Admin, NDEF)
+and parses the responses — you bring the transport (PC/SC, USB, NFC) and drive each
+exchange. There is no runtime, no background thread, no credential cache and no
+mutable global state, so it embeds cleanly in desktop apps, mobile apps (via FRB)
+and C programs. A C ABI is available as `canokey-c` (experimental).
 
-## Crates
+## Quick start (Rust)
 
-Rust applications use **`canokey`**; C applications link **`canokey-c`**. A Console
-FRB adapter would call the Rust facade directly.
+Add the facade crate:
 
-| Crate | Responsibility | Workspace dependencies |
-| --- | --- | --- |
-| `canokey-protocol` | APDU/TLV, owned operations, continuation/chaining, limits, errors, secret buffers | None |
-| `canokey-compat` | Immutable profiles, capability evidence, firmware rules and algorithm IDs | protocol |
-| `canokey-key` | Shared public-key TLV fields and pure SPKI export | protocol, compat |
-| `canokey-admin` | Admin reads, configuration, PIN and explicit resets | protocol, compat |
-| `canokey-piv` | PIV operations and certificate container parsing | protocol, compat, key |
-| `canokey-oath` | OATH access, credentials and full/truncated calculations | protocol, compat |
-| `canokey-openpgp` | OpenPGP data, passwords, policies and key operations | protocol, compat, key |
-| `canokey-ndef` | NDEF capability reads and crash-consistent message writes | protocol |
-| `canokey-ctap` | CTAP/FIDO2 ISO 7816 transport envelope and CTAP2 client (ClientPIN, credential management) | protocol |
-| `canokey` | Facade and device probing | protocol, compat, admin, piv, oath, openpgp, ndef, ctap |
-| `canokey-c` | Copied C descriptors and results, operation dispatch | canokey |
-
-Arrows point from each crate to its dependencies; the dashed edge is optional.
-
-```mermaid
-flowchart TD
-    C[canokey-c] --> F[canokey]
-    F --> A[canokey-admin]
-    F --> P[canokey-piv]
-    F --> O[canokey-oath]
-    F --> G[canokey-openpgp]
-    F --> N[canokey-ndef]
-    F --> T[canokey-ctap]
-    F --> K[canokey-compat]
-    F --> R[canokey-protocol]
-    F -. x509 feature .-> X[x509-info]
-    P --> Q[canokey-key]
-    G --> Q
-    A --> K
-    P --> K
-    O --> K
-    G --> K
-    Q --> K
-    A --> R
-    P --> R
-    O --> R
-    G --> R
-    N --> R
-    T --> R
-    Q --> R
-    K --> R
+```sh
+cargo add canokey
 ```
 
-The facade optionally re-exports the independent crates.io package
-[`x509-info`](https://github.com/canokeys/x509-info) 0.1.1. PIV unwraps a certificate
-container; X.509 inspection is a separate pure call. Probe orchestration belongs in
-the facade so compat never depends on applet crates. Bindings do not duplicate
-protocol state.
+Every operation follows the same pattern: construct it, then loop over
+`start`/`command`/`advance`, performing one raw transport transmit per iteration:
 
-## Available features
+```rust,ignore
+use canokey::{probe_device, ProbeMode, ProbeOptions, Step};
 
-- Minimal/PIV probing; firmware and PIV version separation; observed algorithm IDs,
-  explicit Supported/Unsupported/Unknown evidence and narrow legacy quirks.
-- Admin identity/storage/configuration reads, PIN, NFC/NDEF, CTAP SM2 configuration
-  and explicit applet/device resets; configuration patches retain confirmed writes on failure.
-  `admin::operation_with_access` adds an explicit selected-context policy
-  (`Access::Existing`) that reuses the caller's selected Admin transaction
-  without SELECT or implicit VERIFY. Typed PASS slots read both touch slots
-  (Off/Static/HmacSha1/Oath/Unknown) and write Off, static-password or
-  HMAC-SHA1 configurations; OATH slots stay with the OATH applet.
-- OATH SELECT/access-code validation, PBKDF2 password derivation, credential CRUD,
-  full/truncated calculations and paged results with explicit HOTP/touch markers.
-  Set-default marks an HOTP credential as the touch keyboard-emulation default,
-  using the two-slot/append-enter dialect only on firmware 3.0.0 and newer.
-  The vendor extension commands the OATH applet answers (GET SERIAL and
-  HMAC-SHA1 challenge-response from a PASS slot, dispatched before the
-  access-validation gate) provide the KeePassXC interop path; they require
-  3.1.0 firmware evidence.
-- NDEF capability-container reads and chunked message read/replace, with
-  zero-NLEN-first crash-consistent writes; profile-free.
-- CTAP/FIDO2 ISO 7816 transport envelope (explicit FIDO2 selection, `80 10`
-  message wrap and `80 C0` GET RESPONSE continuation) plus a typed CTAP2
-  client layer: strict canonical CBOR, COSE key and authenticatorData parsing,
-  and getInfo/makeCredential/getAssertion/reset/selection operations. The
-  optional `clientpin` feature (default in `canokey-ctap`, opt-in on the
-  facade) adds ClientPIN protocols 1 and 2, credential
-  management with bounded in-operation enumeration, authenticatorConfig
-  (toggle always-UV, set minimum PIN length, require long touch for reset)
-  and fragmented largeBlobs reads/writes. The raw CTAP1/U2F
-  register/authenticate/check-only/version commands are ungated, and the
-  hmac-secret extension covers the makeCredential declaration plus the
-  encrypted salt exchange, including the CanoKey hmac-secret-mc variant.
-  WebAuthn ceremonies (clientDataJSON, attestation trust, rpId policy)
-  remain host-side.
-- OpenPGP DO/certificate reads and writes, separate PW1/PW3 modes, password/reset
-  management, explicit policies/fingerprints/timestamps, key generation/import,
-  shared SPKI export, signatures, PKCS#1 v1.5 decipher and ECDH/X25519.
-- PIV selection, PIN status/verification/logout, PIN/PUK changes and unblock.
-- External/Mutual 3DES or AES-192 management authentication, explicit caller-supplied
-  mutual challenges; authenticated object/certificate writes and management-key replacement.
-  PIN-managed protection validation/finalization owns policy parsing, recovered-key
-  authentication and explicit PUK blocking. Key rotation can maintain PRINTED.
-- Object/certificate reads, bounded gzip decoding, certificate deletion, metadata
-  and algorithm-configuration reads; compact directory with entry diagnostics,
-  UTF-16 container names, key move/delete, explicit PIN/PUK retry reset, algorithm
-  configuration replacement, attestation DER and explicit reset of blocked PIV.
-- Key generation/import and public-key SPKI export. Scalar import supports
-  P-256/P-384/P-521/secp256k1/SM2; RSA CRT and Ed25519/X25519/ML seeds are typed inputs.
-- Classic RSA/ECDSA/SM2/Ed25519 signing, original signature encoding and DER/P1363
-  conversion; explicit ML-DSA (empty context), randomized Ed25519 and SM2 full-message
-  streaming signing, including empty messages; raw RSA decryption,
-  P-256/P-384/P-521/secp256k1 ECDH, X25519 derivation, ML-KEM-768 decapsulation
-  and SM2 agreement with pre-exchanged peer keys. Classic PIV hashing/padding and
-  postprocessing KDF remain caller responsibilities.
-- Explicit Batch requests under one SELECT, with completed results retained after
-  a later failure; corresponding C factories and indexed result getters.
+let mut op = probe_device(ProbeOptions {
+    mode: ProbeMode::Piv, ..Default::default()
+})?;
+let mut step = op.start()?;
+while step == Step::Exchange {
+    // One raw transmit of your own: PC/SC SCardTransmit, USB CCID, NFC, ...
+    let response = my_card_transmit(op.command()?.as_bytes())?;
+    step = op.advance(&response)?; // response data including SW1/SW2
+}
+let profile = op.take_result()?; // owned; independent of the operation
+```
 
-Firmware compatibility covers audited 1.3–3.1.0 layouts with per-operation gates.
-Legacy OATH commands, OpenPGP DO framing and Admin configuration fields are selected
-from actual Admin firmware; unknown base versions do not enable mutations; development builds follow their
-declared numeric base version while preserving the original version text.
-See [compatibility contracts](docs/design/api-design.md#profiles-and-probing) for the model
-and each applet's historical restrictions. Every factory checks required evidence. PIV `sign_streaming`
-handles ML-DSA and empty Ed25519 messages explicitly; SM2 initiators require PIN
-Never/Once and peer keys supplied at construction. See [plan](plan.md) for firmware
-limitations and remaining hardware validation. Validation uses pinned sources and offline
-transcripts; hardware checks and consumer integration remain separate.
+Runnable offline versions of this loop (with fixture transcripts you can replace
+with real I/O) live in [crates/canokey/examples](crates/canokey/examples).
+
+## Quick start (C)
+
+C applications link `canokey-c` and include
+[`include/canokey.h`](crates/canokey-c/include/canokey.h). The runnable example
+[probe.c](crates/canokey-c/examples/probe.c) shows size queries, profile transfer
+and cleanup; build and run it with `bash scripts/run-c-example.sh`. The C ABI is
+experimental. See the [PKCS#11 integration guide](docs/guides/pkcs11-integration.md)
+for a complete session sketch.
+
+## How it works
+
+The library never touches a device itself. Your application owns the connection
+and follows five rules:
+
+- Implement one raw transmit: send a complete command APDU, return the complete
+  response **including SW1/SW2**.
+- Hold an exclusive connection lease for the whole operation loop.
+- Disable transport-level continuation (61xx/6Cxx handling) and retries — the
+  core performs those itself and must see the card's exact words.
+- Getters never send APDUs; only `start`/`advance` advance the exchange.
+- On I/O failure, drop the operation and drain or isolate pending I/O before
+  reusing the connection. Dropping or cancelling never rolls back card effects.
+
+## Features by applet
+
+**PIV** — selection, PIN status/verification/logout, PIN/PUK change and unblock;
+external/mutual 3DES or AES-192 management authentication with caller-supplied
+challenges; authenticated object/certificate writes and management-key replacement;
+PIN-managed protection validation/finalization with explicit PUK blocking; key
+rotation maintaining PRINTED. Object/certificate reads with bounded gzip decoding,
+certificate deletion, metadata and algorithm-configuration reads; compact directory
+with entry diagnostics and UTF-16 container names; key move/delete; explicit PIN/PUK
+retry reset; attestation DER; explicit reset of a blocked PIV application. Key
+generation/import (P-256/P-384/P-521/secp256k1/SM2 scalars, RSA CRT, Ed25519/X25519/ML
+seeds) with public-key SPKI export. Classic RSA/ECDSA/SM2/Ed25519 signing with DER/P1363
+conversion; explicit ML-DSA (empty context), randomized Ed25519 and SM2 full-message
+streaming signing, including empty messages; raw RSA decryption, ECDH
+(P-256/P-384/P-521/secp256k1), X25519, ML-KEM-768 decapsulation and SM2 agreement
+with pre-exchanged peer keys. Classic PIV hashing/padding and postprocessing KDF
+remain caller responsibilities. Batch requests run under one SELECT and retain
+completed results after a later failure.
+
+**OpenPGP** — data-object/certificate reads and writes, separate PW1-sign/PW1-other
+modes, password/reset management, explicit policies/fingerprints/timestamps, key
+generation/import, shared SPKI export, signatures, PKCS#1 v1.5 decipher and
+ECDH/X25519.
+
+**OATH** — SELECT/access-code validation, PBKDF2 password derivation, credential
+CRUD, full/truncated calculations and paged results with explicit HOTP/touch markers.
+Set-default marks an HOTP credential as the touch keyboard-emulation default
+(two-slot/append-enter dialect only on firmware 3.0.0+). The vendor extension
+commands (GET SERIAL, HMAC-SHA1 challenge-response from a PASS slot) provide the
+KeePassXC interop path on firmware 3.1.0.
+
+**CTAP/FIDO2** — ISO 7816 transport envelope (explicit FIDO2 selection, `80 10`
+message wrap, `80 C0` continuation) plus a typed CTAP2 client: strict canonical
+CBOR, COSE key and authenticatorData parsing, getInfo/makeCredential/getAssertion/
+reset/selection. The `clientpin` feature (default in `canokey-ctap`, opt-in on the
+facade) adds ClientPIN protocols 1/2, credential management with bounded enumeration,
+authenticatorConfig and fragmented largeBlobs. Raw CTAP1/U2F register/authenticate/
+check-only/version commands are ungated; the hmac-secret extension covers the
+makeCredential declaration and the encrypted salt exchange (including the CanoKey
+hmac-secret-mc variant). WebAuthn ceremonies (clientDataJSON, attestation trust,
+rpId policy) remain host-side.
+
+**Admin** — identity/storage/configuration reads, PIN, NFC/NDEF and CTAP SM2
+configuration, explicit applet/device resets; configuration patches retain confirmed
+writes on failure. `admin::operation_with_access` (`Access::Existing`) reuses the
+caller's selected Admin transaction without SELECT or implicit VERIFY. Typed PASS
+slots read both touch slots (Off/Static/HmacSha1/Oath/Unknown) and write Off,
+static-password or HMAC-SHA1 configurations.
+
+**NDEF** — capability-container reads and chunked message read/replace with
+zero-NLEN-first crash-consistent writes; profile-free.
+
+**Cross-cutting** — minimal/PIV device probing with firmware and PIV version
+separation; observed algorithm IDs with explicit Supported/Unsupported/Unknown
+evidence; optional X.509 certificate inspection (see below).
+
+## Firmware compatibility
+
+Audited firmware layouts 1.3–3.1.0 are covered with per-operation gates. Legacy
+OATH commands, OpenPGP DO framing and Admin configuration fields are selected from
+the actual firmware version; unknown base versions never enable mutations, and
+development builds follow their declared numeric base version. Every factory checks
+required capability evidence. PIV `sign_streaming` handles ML-DSA and empty Ed25519
+messages explicitly; SM2 initiators require PIN Never/Once and peer keys supplied at
+construction. See [compatibility contracts](docs/design/api-design.md#profiles-and-probing)
+for the model and each applet's historical restrictions. Validation uses pinned sources
+and offline transcripts; hardware checks and consumer integration remain separate.
 
 ## Examples
 
@@ -159,12 +157,8 @@ cargo run -p canokey --example batch --locked
 bash scripts/run-c-example.sh
 ```
 
-Replace the [example executor's](crates/canokey/examples/support/mod.rs) fixture
-exchange with raw application I/O. Hold one connection lease across the operation;
-supply complete responses including SW1/SW2 and disable transport retries/continuation.
-Getters never send APDUs. On I/O failure, drop the operation and drain or isolate
-pending I/O before connection reuse. Cancel/drop never roll back device effects.
-Boundary sketches: [Console/Dart](docs/guides/console-integration.md),
+Boundary sketches for real integrations:
+[Console/Dart](docs/guides/console-integration.md),
 [PKCS#11/C](docs/guides/pkcs11-integration.md).
 
 ## Certificate inspection
@@ -181,7 +175,30 @@ let json = serde_json::to_string(&info.summary())?;
 The [x509-info documentation](https://github.com/canokeys/x509-info) owns certificate
 models, CLI formats and schema. Parsing does not verify certificate trust or validity.
 
-## Build and validation
+## Crate map
+
+Rust applications depend on **`canokey`**; C applications link **`canokey-c`**.
+Depend on a lower-level crate directly only when you need it without the facade.
+
+| Crate | Responsibility |
+| --- | --- |
+| [`canokey`](crates/canokey) | Facade: re-exports all applets plus device probing |
+| [`canokey-c`](crates/canokey-c) | Experimental C ABI (copied descriptors, opaque handles) |
+| [`canokey-piv`](crates/canokey-piv) | PIV operations and certificate container parsing |
+| [`canokey-openpgp`](crates/canokey-openpgp) | OpenPGP data, passwords, policies and key operations |
+| [`canokey-oath`](crates/canokey-oath) | OATH access, credentials and calculations |
+| [`canokey-ctap`](crates/canokey-ctap) | CTAP/FIDO2 envelope and CTAP2 client (ClientPIN, credential management) |
+| [`canokey-admin`](crates/canokey-admin) | Admin reads, configuration, PIN and explicit resets |
+| [`canokey-ndef`](crates/canokey-ndef) | NDEF capability reads and crash-consistent message writes |
+| [`canokey-protocol`](crates/canokey-protocol) | APDU/TLV codecs, owned operations, limits, errors, secret buffers |
+| [`canokey-compat`](crates/canokey-compat) | Immutable profiles, capability evidence, firmware rules |
+| [`canokey-key`](crates/canokey-key) | Shared public-key TLV fields and pure SPKI export |
+
+The facade optionally re-exports the independent crates.io package
+[`x509-info`](https://github.com/canokeys/x509-info) 0.1.1. The full architecture
+and layering rationale live in the [documentation map](docs/README.md).
+
+## Building and contributing
 
 ```sh
 cargo fmt --all --check
@@ -198,17 +215,18 @@ bash scripts/test-c-abi.sh
 
 CI checks native/wasm builds, examples, doctests, strict rustdoc/clippy, dependency
 boundaries, licenses and C/C++ linking. Open `target/doc/canokey/index.html` for
-public API documentation. Cargo.lock is tracked; reference clones and build outputs
-are ignored.
+public API documentation. Contribution rules (language, architecture, checks,
+commits) are in [AGENTS.md](AGENTS.md).
 
-## Documentation and license
+## Documentation
 
 - [Documentation map](docs/README.md): design documents vs user guides, with an
   architecture overview.
 - [API contracts](docs/design/api-design.md): ownership, execution and binding rules.
-- [Plan](plan.md): remaining work and acceptance criteria.
 - [Reference evidence](docs/design/references.md): pinned firmware and consumer sources.
-- [Contributor instructions](AGENTS.md): language, architecture, checks and commits.
+- The companion [canokey-pkcs11 migration](https://github.com/canokeys/canokey-pkcs11/blob/codex/libcanokey/docs/libcanokey-piv-migration-plan.md)
+  validates the PIV C ABI against native Windows hardware. Console/ckman and
+  general Python bindings are separate projects, out of scope for this repository.
 
 Copyright 2026 canokeys.org. Licensed under [Apache-2.0](LICENSE). Each workspace
 crate inherits the metadata and includes a copy of the root license for packaging.

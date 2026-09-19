@@ -54,5 +54,4 @@ contracts. If a guide and a design document disagree, the design document wins.
 ## Project documents (repository root)
 
 - [README](../README.md) — implemented features, build and validation commands.
-- [plan](../plan.md) — milestones, remaining work and acceptance criteria.
 - [AGENTS](../AGENTS.md) — contributor instructions.

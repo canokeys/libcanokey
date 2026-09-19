@@ -3,7 +3,7 @@
 ## Scope and language
 
 - Write all repository content, documentation, comments, diagnostics, and commit messages in English. Conversation may follow the user's language.
-- `plan.md` owns milestones and acceptance criteria; `docs/design/api-design.md` owns API contracts; README describes implemented features and build commands. Never describe a design target as implemented.
+- `docs/design/api-design.md` owns API contracts; README describes implemented features and build commands. Never describe a design target as implemented.
 - Implement and test only this repository. `references/` contains read-only upstream clones: never modify, commit, or use them as build dependencies. Do not integrate consumers without instructions.
 - Original workspace code is Apache-2.0, authored by canokeys.org. New crates must inherit workspace license (SPDX), authors, and homepage metadata; do not also set license-file. Retain upstream notices for any third-party code. Keep the root LICENSE canonical and an identical regular-file copy in every crate for portable Cargo packaging; run scripts/check-licenses.py after license or package changes.
 - Deliver buildable, reviewable increments. Do not substitute empty implementations or constant Unsupported responses for unfinished protocols.

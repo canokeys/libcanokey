@@ -1,7 +1,6 @@
 # API contracts
 
-[README](../../README.md) lists implemented features and examples;
-[plan](../../plan.md) tracks remaining work. Rustdoc and the
+[README](../../README.md) lists implemented features and examples. Rustdoc and the
 [experimental C header](../../crates/canokey-c/include/canokey.h) define signatures.
 [References](references.md) records firmware and consumer evidence.
 
