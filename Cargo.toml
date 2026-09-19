@@ -21,18 +21,19 @@ rust-version = "1.85"
 authors = ["canokeys.org"]
 license = "Apache-2.0"
 homepage = "https://canokeys.org"
+repository = "https://github.com/canokeys/libcanokey"
 
 [workspace.dependencies]
 zeroize = "1.8"
 thiserror = "2"
-canokey-protocol = { path = "crates/canokey-protocol" }
-canokey-compat = { path = "crates/canokey-compat" }
-canokey-admin = { path = "crates/canokey-admin" }
-canokey-oath = { path = "crates/canokey-oath" }
-canokey-ndef = { path = "crates/canokey-ndef" }
-canokey-ctap = { path = "crates/canokey-ctap", default-features = false }
-canokey-key = { path = "crates/canokey-key" }
-canokey-openpgp = { path = "crates/canokey-openpgp" }
-canokey-piv = { path = "crates/canokey-piv" }
-canokey = { path = "crates/canokey" }
+canokey-protocol = { path = "crates/canokey-protocol", version = "0.1.0" }
+canokey-compat = { path = "crates/canokey-compat", version = "0.1.0" }
+canokey-admin = { path = "crates/canokey-admin", version = "0.1.0" }
+canokey-oath = { path = "crates/canokey-oath", version = "0.1.0" }
+canokey-ndef = { path = "crates/canokey-ndef", version = "0.1.0" }
+canokey-ctap = { path = "crates/canokey-ctap", version = "0.1.0", default-features = false }
+canokey-key = { path = "crates/canokey-key", version = "0.1.0" }
+canokey-openpgp = { path = "crates/canokey-openpgp", version = "0.1.0" }
+canokey-piv = { path = "crates/canokey-piv", version = "0.1.0" }
+canokey = { path = "crates/canokey", version = "0.1.0" }
 x509-info = "0.1.1"

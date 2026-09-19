@@ -6,9 +6,9 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 homepage.workspace = true
+repository.workspace = true
 description = "C ABI for caller-owned CanoKey host protocol operations"
 readme = "README.md"
-publish = false
 
 [features]
 # Preserve the complete standalone C API by default. Embedders can select PIV
