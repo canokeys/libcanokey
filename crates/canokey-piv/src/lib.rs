@@ -1,4 +1,11 @@
-//! PIV selection, PIN/PUK, management authentication, and object/certificate I/O.
+//! PIV card operations for CanoKey: selection, PIN/PUK management, management-key
+//! authentication, key generation/import, signing, key agreement and
+//! object/certificate I/O.
+//!
+//! Most applications should depend on the `canokey` facade, which re-exports this
+//! crate as `canokey::piv`; depend on this crate directly only to avoid the other
+//! applets.
+//!
 //! # High-level operations
 //!
 //! Factories such as [`verify_pin`], [`read_object`] and [`read_certificate`] return

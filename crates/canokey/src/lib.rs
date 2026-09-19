@@ -1,10 +1,15 @@
-//! CanoKey's caller-owned, transport-free host protocol library.
+//! Host-side protocol library for CanoKey devices.
 //!
-//! Most applications depend on this facade. [`piv`] provides semantic PIV factories,
-//! [`compatibility`] owns firmware/capability rules, and [`apdu`]/[`tlv`] expose
-//! low-level codecs. [`admin`] provides device configuration and explicit authentication/reset operations.
-//! C consumers use the separate `canokey-c` crate; a Rust/FRB wrapper uses this crate
-//! directly. No layer here owns a transport, runtime, or mutable global state.
+//! This facade re-exports every applet crate ([`piv`], [`openpgp`], [`oath`],
+//! [`ctap`], [`admin`], [`ndef`]) plus low-level codecs ([`apdu`], [`tlv`]) and
+//! firmware/capability rules ([`compatibility`]). Most applications depend on this
+//! crate alone; C consumers use the separate `canokey-c` crate.
+//!
+//! The library never performs I/O: it builds command APDUs and parses responses,
+//! while your application owns the transport and drives every exchange. There is
+//! no runtime, no credential cache and no mutable global state. See the quick
+//! start below for the driver loop every operation follows.
+//!
 //! The optional `x509` feature adds owned DER/PEM certificate inspection; `serde`
 //! additionally enables serialization of its results. Neither is enabled by default.
 //! The `clientpin` feature (also not default) enables the ClientPIN-dependent CTAP

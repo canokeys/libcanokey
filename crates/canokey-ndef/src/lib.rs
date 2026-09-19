@@ -1,4 +1,4 @@
-//! Caller-owned NDEF applet message reading and writing.
+//! Read and replace the NDEF message stored on a CanoKey.
 //!
 //! The NDEF applet (AID `D2 76 00 00 85 01 01`) stores one NDEF message in a
 //! Type 4 Tag style data file: bytes `[0..2)` hold the big-endian message
@@ -7,35 +7,23 @@
 //! `0xE103`) and read or replace the message in the NDEF data file selected
 //! by the ID the CC advertises (Type 4 Tag: the CC declares the file), using
 //! explicit offset chunks of at most 240 bytes, so no APDU chaining or
-//! extended length support is required. The caller drives the
-//! returned [`Operation`] and owns all transport I/O; cancellation or drop
-//! never sends further commands.
+//! extended length support is required. The crate performs no I/O itself.
+//!
+//! Most applications should depend on the `canokey` facade crate, which
+//! re-exports this API as `canokey::ndef` alongside device probing and the
+//! other applets. Depend on `canokey-ndef` directly only when you need NDEF
+//! access without the rest of the facade.
 //!
 //! These factories are profile-free: no NDEF behaviour is known to vary across
 //! firmware versions, so no `DeviceProfile` or compat capability is consulted.
 //! A failed applet SELECT reports 0x6A82 as [`ErrorKind::UnsupportedDevice`],
 //! which covers devices where the NDEF applet is disabled or absent.
 //!
-//! # Writes and crash consistency
+//! # Quick start: read an NDEF message
 //!
-//! [`write_message`] reads the CC first and fails before any UPDATE when the
-//! CC marks the file read-only or advertises a maximum below the message
-//! length. It then writes a zero NLEN, the message chunks, and the real NLEN.
-//! A crash or connection loss mid-write therefore leaves the file with NLEN
-//! zero (no message) instead of a stale length pointing at a partially
-//! updated message.
-//!
-//! # Status word mapping
-//!
-//! 0x6A82 maps to [`ErrorKind::UnsupportedDevice`] only for the initial applet
-//! SELECT ([`Phase::Select`]) and to [`ErrorKind::NotFound`] for the CC/NDEF
-//! file selects; 0x6982 maps to [`ErrorKind::SecurityStatusNotSatisfied`]
-//! (the read-only write check, also applied client-side from the CC) and
-//! 0x6985 to [`ErrorKind::ConditionsNotSatisfied`]
-//! (for example UPDATE BINARY without a selected data file). Unmapped status
-//! words remain [`ErrorKind::UnexpectedStatusWord`] with the raw status.
-//!
-//! # Example: read an empty NDEF message offline
+//! The example below drives a read against an offline transcript; on real
+//! hardware, send each command APDU over your own transport and advance with
+//! the complete response including the status word.
 //!
 //! ```
 //! use canokey_ndef::read_message;
@@ -60,6 +48,32 @@
 //! assert!(op.take_result()?.is_empty());
 //! # Ok::<(), canokey_protocol::Error>(())
 //! ```
+//!
+//! # Status word mapping
+//!
+//! 0x6A82 maps to [`ErrorKind::UnsupportedDevice`] only for the initial applet
+//! SELECT ([`Phase::Select`]) and to [`ErrorKind::NotFound`] for the CC/NDEF
+//! file selects; 0x6982 maps to [`ErrorKind::SecurityStatusNotSatisfied`]
+//! (the read-only write check, also applied client-side from the CC) and
+//! 0x6985 to [`ErrorKind::ConditionsNotSatisfied`]
+//! (for example UPDATE BINARY without a selected data file). Unmapped status
+//! words remain [`ErrorKind::UnexpectedStatusWord`] with the raw status.
+//!
+//! # Semantics you must know
+//!
+//! - Writes are crash-consistent: [`write_message`] reads the CC first and
+//!   fails before any UPDATE when the CC marks the file read-only or
+//!   advertises a maximum below the message length. It then writes a zero
+//!   NLEN, the message chunks, and the real NLEN. A crash or connection loss
+//!   mid-write therefore leaves the file with NLEN zero (no message) instead
+//!   of a stale length pointing at a partially updated message.
+//! - The caller drives every returned [`Operation`] and owns all transport
+//!   I/O: start the operation, send each command APDU, and advance with the
+//!   complete response. Command/result getters never send commands, and
+//!   cancellation or drop never sends further commands.
+//!
+//! See `docs/design/api-design.md` in the repository for the full ownership
+//! and execution contracts.
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 

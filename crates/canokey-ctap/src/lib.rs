@@ -1,4 +1,7 @@
-//! Caller-owned CTAP/FIDO2 ISO7816 transport envelope plus CTAP2 foundations.
+//! CTAP/FIDO2 client for CanoKey: the ISO 7816 transport envelope plus CTAP2 foundations.
+//!
+//! Most applications should depend on the `canokey` facade, which re-exports this
+//! crate as `canokey::ctap` (the `clientpin` feature is opt-in there, default here).
 //!
 //! This crate implements the ISO 7816 envelope of the CTAP transport:
 //! SELECT of the FIDO2 application by DF name, CTAP command wrapping with

@@ -1,10 +1,30 @@
-//! Experimental C ABI. No transport, global handles, or thread-local errors.
+//! Experimental C ABI to the CanoKey host protocol library.
+//!
+//! This crate exposes the `canokey` facade to C consumers: opaque caller-owned
+//! profile and operation handles, query-size/copy getters, and caller-owned POD
+//! errors. The ABI is experimental version 0.1 (see `cnk_abi_version`), which is
+//! independent of Rust crate and firmware versions.
+//!
+//! # Getting started
+//!
+//! The C header `include/canokey.h` in the crate source is the authoritative
+//! interface. The runnable example `examples/probe.c` drives a scripted offline
+//! device probe end to end; build and run it from the repository root with
+//! `bash scripts/run-c-example.sh`. For guidance on embedding the ABI in a
+//! larger module, see the integration guide `docs/guides/pkcs11-integration.md`.
+//!
+//! Feature flags select which applet factories are compiled. The default set is
+//! `piv`, `admin`, `oath`, and `openpgp`; embedders that need only PIV can
+//! select the `piv` feature alone.
 //!
 //! # Safety
 //! Every non-null pointer must be aligned, live, and valid for its declared length.
-//! Output ranges must not alias inputs or handles. Handles are created by this
-//! library, accessed without concurrent mutation, and freed exactly once.
-//! A non-null versioned struct must contain at least its declared supported prefix.
+//! Output ranges must not alias inputs or handles. Constructors copy their
+//! inputs, so caller buffers may be released after return. Handles are created
+//! by this library, freed exactly once with the matching free function — never
+//! with the C allocator — and each operation must be accessed without concurrent
+//! mutation. No function performs I/O. A non-null versioned struct must contain
+//! at least its declared supported prefix.
 #![deny(missing_docs)]
 mod piv_protection;
 pub use piv_protection::*;

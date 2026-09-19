@@ -1,4 +1,35 @@
-//! Owned public-key fields and pure SubjectPublicKeyInfo encoding.
+//! Shared public-key TLV field encodings and pure SPKI/DER export.
+//!
+//! CanoKey PIV and OpenPGP applets return public keys as simple inner TLV
+//! fields (RSA modulus/exponent, or an uncompressed point). This crate parses
+//! those fields into an owned [`PublicKey`] with encoding and size checks, and
+//! encodes any [`PublicKey`] as canonical DER SubjectPublicKeyInfo with
+//! [`PublicKey::to_spki_der`] using RustCrypto ASN.1 types. Everything here is
+//! pure: no device access, no cryptographic operations, and no trust or
+//! key-validity claims beyond encoding checks.
+//!
+//! Most applications should depend on the `canokey` facade crate, which
+//! returns keys through the PIV and OpenPGP applets. Depend on `canokey-key`
+//! directly when you hold public-key material obtained elsewhere and only need
+//! SPKI/DER export, or when you are writing an applet binding that must parse
+//! CanoKey public-key TLV fields:
+//!
+//! ```
+//! use canokey_compat::Algorithm;
+//! use canokey_key::PublicKey;
+//! let key = PublicKey::Raw {
+//!     algorithm: Algorithm::Ed25519,
+//!     bytes: [0x42; 32].to_vec(),
+//! };
+//! let der = key.to_spki_der()?;
+//! // RFC 8410 Ed25519 SubjectPublicKeyInfo framing.
+//! assert_eq!(&der[..12], &[0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65,
+//!     0x70, 0x03, 0x21, 0x00]);
+//! # Ok::<(), canokey_protocol::Error>(())
+//! ```
+//!
+//! The shared key-encoding contract lives in `docs/design/api-design.md` in
+//! the repository.
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 use canokey_compat::Algorithm;
