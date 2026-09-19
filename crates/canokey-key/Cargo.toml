@@ -7,6 +7,7 @@ authors.workspace = true
 license.workspace = true
 homepage.workspace = true
 description = "Shared CanoKey public key encodings and SPKI conversion"
+readme = "README.md"
 publish = false
 
 [dependencies]
