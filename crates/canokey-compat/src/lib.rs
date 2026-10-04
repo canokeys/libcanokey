@@ -502,7 +502,10 @@ impl DeviceProfile {
             observations
                 .warnings
                 .push(CompatibilityWarning::UnrecognizedFirmware);
-        } else if firmware.as_ref().is_some_and(|f| f.tuple() > (3, 1, 0)) {
+        } else if firmware
+            .as_ref()
+            .is_some_and(|f| f.tuple() > (3, 1, 0) && f.tuple() != (4, 0, 0))
+        {
             observations
                 .warnings
                 .push(CompatibilityWarning::LatestKnownFallback);
@@ -673,7 +676,7 @@ impl DeviceProfile {
             _ => (2, 0, 0),
         };
         if let Some(version) = self.info.firmware.as_ref() {
-            if ((1, 3, 0)..=(3, 1, 0)).contains(&version.tuple()) {
+            if ((1, 3, 0)..=(3, 1, 0)).contains(&version.tuple()) || version.tuple() == (4, 0, 0) {
                 return CapabilityStatus {
                     support: if version.tuple() >= threshold {
                         Supported
@@ -705,7 +708,13 @@ impl DeviceProfile {
     }
     fn firmware_range(&self, first: (u16, u16, u16), last: (u16, u16, u16)) -> CapabilityStatus {
         if let Some(version) = &self.info.firmware {
-            let v = version.tuple();
+            // Rust 4.0.0 retains the modern 3.1 APDU dialect and feature set.
+            // This exact audited release does not authorize unknown 3.x/4.x builds.
+            let v = if version.tuple() == (4, 0, 0) {
+                (3, 1, 0)
+            } else {
+                version.tuple()
+            };
             if v == (1, 3, 0) || ((1, 5, 2)..=(3, 0, 3)).contains(&v) || v == (3, 1, 0) {
                 return CapabilityStatus {
                     support: if (first..=last).contains(&v) {
@@ -962,7 +971,7 @@ impl DeviceProfile {
         self.info
             .firmware
             .as_ref()
-            .is_some_and(|v| v.tuple() == (3, 1, 0))
+            .is_some_and(|v| matches!(v.tuple(), (3, 1, 0) | (4, 0, 0)))
     }
     /// Whether proven legacy firmware returns unwrapped CCC/CHUID objects.
     /// Applet code applies this narrowly to those object types; callers should prefer
