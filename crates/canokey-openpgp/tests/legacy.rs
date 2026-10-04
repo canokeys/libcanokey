@@ -56,7 +56,7 @@ fn profile_aware_ber_preserves_original_and_does_not_guess_missing_wrappers() {
     )
     .is_err());
     assert_eq!(
-        ApplicationData::parse_with_profile(&profile("4.0"), &[], 128)
+        ApplicationData::parse_with_profile(&profile("4.0.1"), &[], 128)
             .unwrap_err()
             .kind,
         ErrorKind::CapabilityUnknown
