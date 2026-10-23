@@ -97,7 +97,7 @@ dependencies = [
 
 [[package]]
 name = "canokey"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "canokey-admin",
  "canokey-compat",
@@ -112,7 +112,7 @@ dependencies = [
 
 [[package]]
 name = "canokey-admin"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "canokey-compat",
  "canokey-protocol",
@@ -120,21 +120,21 @@ dependencies = [
 
 [[package]]
 name = "canokey-c"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "canokey",
 ]
 
 [[package]]
 name = "canokey-compat"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "canokey-protocol",
 ]
 
 [[package]]
 name = "canokey-ctap"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "aes",
  "canokey-protocol",
@@ -148,7 +148,7 @@ dependencies = [
 
 [[package]]
 name = "canokey-key"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "canokey-compat",
  "canokey-protocol",
@@ -159,14 +159,14 @@ dependencies = [
 
 [[package]]
 name = "canokey-ndef"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "canokey-protocol",
 ]
 
 [[package]]
 name = "canokey-oath"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "canokey-compat",
  "canokey-protocol",
@@ -178,7 +178,7 @@ dependencies = [
 
 [[package]]
 name = "canokey-openpgp"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "canokey-compat",
  "canokey-key",
@@ -187,7 +187,7 @@ dependencies = [
 
 [[package]]
 name = "canokey-piv"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "aes",
  "canokey-compat",
@@ -209,7 +209,7 @@ dependencies = [
 
 [[package]]
 name = "canokey-protocol"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "thiserror",
  "zeroize",
