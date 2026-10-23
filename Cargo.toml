@@ -15,7 +15,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 rust-version = "1.85"
 authors = ["canokeys.org"]
@@ -28,14 +28,14 @@ categories = ["authentication", "cryptography", "hardware-support"]
 [workspace.dependencies]
 zeroize = "1.8"
 thiserror = "2"
-canokey-protocol = { path = "crates/canokey-protocol", version = "0.1.0" }
-canokey-compat = { path = "crates/canokey-compat", version = "0.1.0" }
-canokey-admin = { path = "crates/canokey-admin", version = "0.1.0" }
-canokey-oath = { path = "crates/canokey-oath", version = "0.1.0" }
-canokey-ndef = { path = "crates/canokey-ndef", version = "0.1.0" }
-canokey-ctap = { path = "crates/canokey-ctap", version = "0.1.0", default-features = false }
-canokey-key = { path = "crates/canokey-key", version = "0.1.0" }
-canokey-openpgp = { path = "crates/canokey-openpgp", version = "0.1.0" }
-canokey-piv = { path = "crates/canokey-piv", version = "0.1.0" }
-canokey = { path = "crates/canokey", version = "0.1.0" }
+canokey-protocol = { path = "crates/canokey-protocol", version = "0.1.1" }
+canokey-compat = { path = "crates/canokey-compat", version = "0.1.1" }
+canokey-admin = { path = "crates/canokey-admin", version = "0.1.1" }
+canokey-oath = { path = "crates/canokey-oath", version = "0.1.1" }
+canokey-ndef = { path = "crates/canokey-ndef", version = "0.1.1" }
+canokey-ctap = { path = "crates/canokey-ctap", version = "0.1.1", default-features = false }
+canokey-key = { path = "crates/canokey-key", version = "0.1.1" }
+canokey-openpgp = { path = "crates/canokey-openpgp", version = "0.1.1" }
+canokey-piv = { path = "crates/canokey-piv", version = "0.1.1" }
+canokey = { path = "crates/canokey", version = "0.1.1" }
 x509-info = "0.1.1"
