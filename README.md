@@ -119,9 +119,10 @@ evidence; optional X.509 certificate inspection (see below).
 
 ## Firmware compatibility
 
-Audited firmware layouts 1.3–3.1.0 are covered with per-operation gates. Legacy
-OATH commands, OpenPGP DO framing and Admin configuration fields are selected from
-the actual firmware version; unknown base versions never enable mutations, and
+Historical firmware layouts and the 3.1.x/4.0.x compatibility series are covered
+with per-operation gates. Patch releases within these series reuse the same rules.
+OATH commands, OpenPGP DO framing and Admin configuration fields follow the actual
+firmware's compatibility rules; unknown series never enable mutations, and
 development builds follow their declared numeric base version. Every factory checks
 required capability evidence. PIV `sign_streaming` handles ML-DSA and empty Ed25519
 messages explicitly; SM2 initiators require PIN Never/Once and peer keys supplied at

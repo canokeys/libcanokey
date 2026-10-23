@@ -2,8 +2,8 @@
 //!
 //! This crate normalizes device observations (firmware text, PIV application
 //! version, algorithm configuration, discovery warnings) into a caller-owned,
-//! immutable [`DeviceProfile`], and answers compatibility questions against an
-//! audited firmware matrix covering releases 1.3 through 3.1.0. Every answer
+//! immutable [`DeviceProfile`], and answers compatibility questions against a
+//! firmware matrix covering historical releases and the 3.1.x/4.0.x series. Every answer
 //! is a [`CapabilityStatus`] pairing a three-valued [`Support`] decision with
 //! its [`Evidence`] provenance; `Unknown` is deliberately distinct from
 //! `Unsupported`. It also defines semantic [`Algorithm`] identifiers,
@@ -73,8 +73,13 @@ impl FirmwareVersion {
             suffix: (!suffix.is_empty()).then(|| suffix.to_owned()),
         })
     }
-    fn tuple(&self) -> (u16, u16, u16) {
-        (self.major, self.minor, self.patch)
+    fn compatibility_base(&self) -> (u16, u16, u16) {
+        // Patch releases in these series preserve the same protocol contract.
+        // Rust 4.0 currently shares the 3.1 rules; historical patch gates remain.
+        match (self.major, self.minor) {
+            (3, 1) | (4, 0) => (3, 1, 0),
+            _ => (self.major, self.minor, self.patch),
+        }
     }
 }
 /// PIV application major/minor/patch bytes; not the actual firmware version.
@@ -98,7 +103,7 @@ pub enum Support {
 pub enum Evidence {
     /// A directly observed response or recorded discovery outcome.
     Observed,
-    /// A rule for a recognized numeric firmware range, including development builds.
+    /// A rule for a recognized firmware range or compatible series, including development builds.
     FirmwareMatrix,
     /// Conservative stable behavior for firmware outside the recognized matrix.
     LatestKnownFallback,
@@ -444,7 +449,7 @@ impl DeviceObservations {
 pub enum CompatibilityWarning {
     /// Firmware text could not be parsed; raw bytes remain available.
     UnrecognizedFirmware,
-    /// Firmware is newer than the known matrix; conservative fallback applies.
+    /// Firmware is outside the known compatibility series/ranges; conservative fallback applies.
     LatestKnownFallback,
     /// A development/build suffix is retained; compatibility uses its numeric base version.
     DeclaredBaseVersion,
@@ -469,8 +474,9 @@ impl DeviceProfile {
     /// Normalize owned observations without contacting a device.
     ///
     /// Development/build suffixes retain their identity but use the declared
-    /// numeric base version for compatibility. Unknown base versions remain
-    /// usable under conservative capability decisions;
+    /// numeric version's compatibility rules. Patch releases in 3.1.x and 4.0.x
+    /// share their series rules; historical patch boundaries remain unchanged.
+    /// Unknown series remain usable under conservative capability decisions;
     /// this does not attest that supplied observations came from the same device.
     ///
     /// # Errors
@@ -504,7 +510,7 @@ impl DeviceProfile {
                 .push(CompatibilityWarning::UnrecognizedFirmware);
         } else if firmware
             .as_ref()
-            .is_some_and(|f| f.tuple() > (3, 1, 1) && f.tuple() != (4, 0, 0))
+            .is_some_and(|f| f.compatibility_base() > (3, 1, 0))
         {
             observations
                 .warnings
@@ -676,9 +682,9 @@ impl DeviceProfile {
             _ => (2, 0, 0),
         };
         if let Some(version) = self.info.firmware.as_ref() {
-            if ((1, 3, 0)..=(3, 1, 1)).contains(&version.tuple()) || version.tuple() == (4, 0, 0) {
+            if ((1, 3, 0)..=(3, 1, 0)).contains(&version.compatibility_base()) {
                 return CapabilityStatus {
-                    support: if version.tuple() >= threshold {
+                    support: if version.compatibility_base() >= threshold {
                         Supported
                     } else {
                         Unsupported
@@ -697,8 +703,8 @@ impl DeviceProfile {
         }
     }
     /// Resolve management-key algorithm support for both External and Mutual modes.
-    /// Firmware 1.3..=3.0.3 uses 3DES; 3.1.0 uses AES-192. Unrecognized,
-    /// and newer base versions remain Unknown. Development builds use their declared
+    /// Firmware 1.3..=3.0.3 uses 3DES; 3.1.x/4.0.x use AES-192. Unrecognized
+    /// and unknown series remain Unknown. Development builds use their declared
     /// numeric base version; no algorithm is tried implicitly.
     pub fn management_key_support(&self, algorithm: ManagementKeyAlgorithm) -> CapabilityStatus {
         match algorithm {
@@ -708,13 +714,7 @@ impl DeviceProfile {
     }
     fn firmware_range(&self, first: (u16, u16, u16), last: (u16, u16, u16)) -> CapabilityStatus {
         if let Some(version) = &self.info.firmware {
-            // C 3.1.1 and Rust 4.0.0 retain the audited 3.1.0 APDU feature set.
-            // These exact releases do not authorize unknown 3.x/4.x builds.
-            let v = if matches!(version.tuple(), (3, 1, 1) | (4, 0, 0)) {
-                (3, 1, 0)
-            } else {
-                version.tuple()
-            };
+            let v = version.compatibility_base();
             if v == (1, 3, 0) || ((1, 5, 2)..=(3, 0, 3)).contains(&v) || v == (3, 1, 0) {
                 return CapabilityStatus {
                     support: if (first..=last).contains(&v) {
@@ -763,7 +763,7 @@ impl DeviceProfile {
         };
         self.firmware_range(first, (3, 1, 0))
     }
-    /// Select READ CONFIG framing from the numeric base version, failing when unknown.
+    /// Select READ CONFIG framing from compatibility rules, failing when unknown.
     pub fn admin_configuration_layout(&self) -> Result<AdminConfigurationLayout, Error> {
         self.capability(Capability::Admin).require()?;
         let v = self
@@ -771,7 +771,7 @@ impl DeviceProfile {
             .firmware
             .as_ref()
             .ok_or_else(|| Error::new(ErrorKind::CapabilityUnknown))?
-            .tuple();
+            .compatibility_base();
         Ok(if v == (1, 3, 0) {
             AdminConfigurationLayout::TouchPolicies
         } else if v < (1, 6, 2) {
@@ -792,7 +792,7 @@ impl DeviceProfile {
             .info
             .firmware
             .as_ref()
-            .is_some_and(|f| f.tuple() >= (3, 1, 0))
+            .is_some_and(|f| f.compatibility_base() >= (3, 1, 0))
             && [0x0a, 0xff].contains(&id)
         {
             return None;
@@ -813,11 +813,9 @@ impl DeviceProfile {
                 if self.config.is_some() {
                     return self.extension_wire_id(algorithm);
                 }
-                let legacy = self
-                    .info
-                    .firmware
-                    .as_ref()
-                    .is_some_and(|f| f.tuple() >= (2, 0, 0) && f.tuple() < (3, 0, 0));
+                let legacy = self.info.firmware.as_ref().is_some_and(|f| {
+                    f.compatibility_base() >= (2, 0, 0) && f.compatibility_base() < (3, 0, 0)
+                });
                 match algorithm {
                     Algorithm::Ed25519 => Some(if legacy { 0x22 } else { 0xe0 }),
                     Algorithm::Rsa3072 => Some(if legacy { 0x50 } else { 0x05 }),
@@ -939,7 +937,7 @@ impl DeviceProfile {
     }
     /// Whether the firmware supports the explicit streaming signing protocol.
     /// Only ML-DSA-65 (empty context), randomized Ed25519 and SM2 are accepted.
-    /// Requires 3.1.0 and observed enabled algorithm IDs; future versions remain Unknown.
+    /// Requires 3.1.x/4.0.x and observed enabled algorithm IDs; unknown series remain Unknown.
     pub fn streaming_signing_support(&self, algorithm: Algorithm) -> CapabilityStatus {
         if !matches!(
             algorithm,
@@ -961,17 +959,17 @@ impl DeviceProfile {
         self.info
             .firmware
             .as_ref()
-            .is_some_and(|v| ((2, 0, 0)..(3, 0, 0)).contains(&v.tuple()))
+            .is_some_and(|v| ((2, 0, 0)..(3, 0, 0)).contains(&v.compatibility_base()))
     }
     /// Whether the evidenced SM2 signature response is fixed-width r || s.
-    /// Known 3.1.0 uses this encoding; earlier supported releases use DER.
+    /// The 3.1.x/4.0.x series use this encoding; earlier supported releases use DER.
     /// This encoding selector is not a support check: require key_algorithm_support
-    /// first, since unknown/newer firmware must not inherit a guessed encoding.
+    /// first, since unknown firmware series must not inherit a guessed encoding.
     pub fn sm2_uses_p1363_signatures(&self) -> bool {
         self.info
             .firmware
             .as_ref()
-            .is_some_and(|v| matches!(v.tuple(), (3, 1, 0) | (3, 1, 1) | (4, 0, 0)))
+            .is_some_and(|v| v.compatibility_base() == (3, 1, 0))
     }
     /// Whether proven legacy firmware returns unwrapped CCC/CHUID objects.
     /// Applet code applies this narrowly to those object types; callers should prefer
@@ -980,6 +978,6 @@ impl DeviceProfile {
         self.info
             .firmware
             .as_ref()
-            .is_some_and(|f| ((1, 3, 0)..(1, 6, 1)).contains(&f.tuple()))
+            .is_some_and(|f| ((1, 3, 0)..(1, 6, 1)).contains(&f.compatibility_base()))
     }
 }

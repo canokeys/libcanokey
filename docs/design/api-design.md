@@ -80,16 +80,23 @@ observations; ordinary key/certificate changes invalidate application caches.
 `MutationResult::profile_effect` does not refresh either cache automatically.
 
 The historical matrix follows ckman's pinned firmware changelog and executable
-feature rules, cross-checked against core sources. It recognizes 1.3 and the existing
-1.5.2–3.0.3/3.1.0 ranges; missing, unrecognized and newer base versions cannot authorize historical layouts.
-Development/build suffixes are retained in identity observations and use their
-declared numeric base version by default. Suffix-bearing parsed versions no newer
-than the latest known base receive a DeclaredBaseVersion warning; recognition of
-the base still determines feature support. Parsed newer bases,
-including 3.2.0-dev, receive LatestKnownFallback instead; the newer-version branch
-takes precedence and does not authorize historical layouts. Applet-reported
-versions never select a dialect. See each applet's historical subsection for
-command boundaries.
+feature rules, cross-checked against core sources. Historical 1.3 and
+1.5.2–3.0.3 rules retain their patch-specific boundaries. Modern firmware uses a
+compatibility-series contract: all `3.1.x` patches share the 3.1 rules, and all
+`4.0.x` patches share the existing 4.0 rules (currently the same protocol rules).
+Patch releases are assumed protocol-backward-compatible within these series;
+a newly released patch does not require a library update. A verified protocol
+exception may receive a narrow override rather than changing the whole series.
+
+One compatibility-base resolver selects capabilities, framing, configuration
+layouts, management algorithms, signature encodings and warnings. Original
+firmware bytes, parsed patch numbers and suffixes remain unchanged in identity.
+Series rules produce FirmwareMatrix evidence; optional algorithms still require
+observed PIV configuration or CTAP getInfo. Suffix-bearing versions use their
+numeric version's rules and receive DeclaredBaseVersion. Unknown modern series,
+such as `3.2.x` or `4.1.x`, receive LatestKnownFallback (instead of
+DeclaredBaseVersion) and cannot authorize mutations or historical layouts.
+Applet-reported versions never select a dialect.
 
 PIV baseline slots, 3DES management, key/object operations and blocked-credential
 reset extend to 1.3. Explicit generation policies require 2.0. PIV SELECT preserves
@@ -308,7 +315,7 @@ PASS HMAC slot as `Outcome::ChallengeResponse`; an unconfigured slot returns
 configured through the Admin typed PASS slot (HmacSha1). Because the dispatch
 precedes the gate these commands work on an access-protected applet, and
 supplying an access key with them is rejected with InvalidArgument before any
-I/O. They are gated by `Capability::OathChallengeResponse` (3.1.0 only):
+I/O. They are gated by `Capability::OathChallengeResponse` (3.1.x/4.0.x):
 introduced by canokey-core commit b0416d7 (2026-05), absent from every release
 tag up to 3.0.3 and present at the pinned 3.1.0 evidence HEAD.
 

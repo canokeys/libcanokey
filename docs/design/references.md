@@ -369,8 +369,10 @@ management and algorithm IDs/encodings unchanged. OpenPGP/PIV add session-yield
 predicates; the other changes concern USB/session lifecycle and crypto safety.
 PIV re-selection preservation and CTAP algorithm build restrictions already exist
 in `e558d5c`; existing 3.1.0/4.0.0 capability semantics are retained here.
-Thus exactly 3.1.1 reuses the existing 3.1.0 rules, including modern framing and
-SM2 P1363 signatures; later unknown versions remain conservative. CTAP algorithms
+These sources establish the baseline for the
+[3.1.x/4.0.x compatibility-series policy](api-design.md#profiles-and-probing):
+patch releases reuse existing rules, including modern framing and SM2 P1363
+signatures; unknown major/minor series remain conservative. CTAP algorithms
 and PIV extension enablement still require device observations. This is source
 and offline-transcript evidence: USB/IP execution, physical NFC/touch, persistence,
 and consumer integration were not verified; no physical device was accessed.

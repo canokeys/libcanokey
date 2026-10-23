@@ -503,24 +503,27 @@ fn pass_slot_write_rejections_and_redaction() {
 }
 
 #[test]
-fn firmware_3_1_1_pin_status_transcript() {
-    let profile =
-        DeviceProfile::from_observations(DeviceObservations::new(b"3.1.1".to_vec())).unwrap();
-    let mut op = operation(&profile, Request::PinStatus, None, Default::default()).unwrap();
-    assert_eq!(op.start().unwrap(), Step::Exchange);
-    assert_eq!(
-        op.command().unwrap().as_bytes(),
-        &[0, 0xa4, 4, 0, 5, 0xf0, 0, 0, 0, 0]
-    );
-    op.advance(&[0x90, 0]).unwrap();
-    assert_eq!(op.command().unwrap().as_bytes(), &[0, 0x20, 0, 0]);
-    assert_eq!(op.advance(&[0x63, 0xc3]).unwrap(), Step::Done);
-    assert!(matches!(
-        op.take_result().unwrap().value,
-        Value::PinStatus(PinStatus {
-            verified: false,
-            retries_remaining: Some(3),
-            blocked: false,
-        })
-    ));
+fn compatible_patch_pin_status_transcript() {
+    for firmware in ["3.1.1", "3.1.2", "3.1.65535", "4.0.1"] {
+        let profile =
+            DeviceProfile::from_observations(DeviceObservations::new(firmware.as_bytes().to_vec()))
+                .unwrap();
+        let mut op = operation(&profile, Request::PinStatus, None, Default::default()).unwrap();
+        assert_eq!(op.start().unwrap(), Step::Exchange);
+        assert_eq!(
+            op.command().unwrap().as_bytes(),
+            &[0, 0xa4, 4, 0, 5, 0xf0, 0, 0, 0, 0]
+        );
+        op.advance(&[0x90, 0]).unwrap();
+        assert_eq!(op.command().unwrap().as_bytes(), &[0, 0x20, 0, 0]);
+        assert_eq!(op.advance(&[0x63, 0xc3]).unwrap(), Step::Done);
+        assert!(matches!(
+            op.take_result().unwrap().value,
+            Value::PinStatus(PinStatus {
+                verified: false,
+                retries_remaining: Some(3),
+                blocked: false,
+            })
+        ));
+    }
 }
