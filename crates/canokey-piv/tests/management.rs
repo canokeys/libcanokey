@@ -29,7 +29,7 @@ struct Vector {
 }
 // AES-192 FIPS 197 example and three-key TDEA known-answer inputs. Both directions
 // and separate all-zero host challenges were cross-checked with OpenSSL 3 enc.
-const VECTORS: [Vector; 3] = [
+const VECTORS: [Vector; 4] = [
     Vector {
         algorithm: ManagementKeyAlgorithm::Tdes,
         version: "3.0.3",
@@ -41,6 +41,14 @@ const VECTORS: [Vector; 3] = [
     Vector {
         algorithm: ManagementKeyAlgorithm::Aes192,
         version: "3.1.0",
+        key: "000102030405060708090a0b0c0d0e0f1011121314151617",
+        plain: "00112233445566778899aabbccddeeff",
+        cipher: "dda97ca4864cdfe06eaf70a0ec0d7191",
+        encrypted_zero: "916251821c73a522c396d62738019607",
+    },
+    Vector {
+        algorithm: ManagementKeyAlgorithm::Aes192,
+        version: "3.1.1",
         key: "000102030405060708090a0b0c0d0e0f1011121314151617",
         plain: "00112233445566778899aabbccddeeff",
         cipher: "dda97ca4864cdfe06eaf70a0ec0d7191",

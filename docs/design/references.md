@@ -357,3 +357,20 @@ The 2.x Admin 40/07 enable flag and fixed IDs are distinct from PIV EE (3.0+);
 profiles record caller-confirmed enablement without fabricating response bytes.
 Probe and historical applet commands use explicit short Le per ckman's transport
 contract. No reference repository was modified or used as a build dependency.
+
+## C firmware 3.1.1 compatibility
+
+Compared core `cba7ea34c893eb6405620e9f2b562de0c441b1d6` with both the existing
+3.1.0 evidence (`9e77287`) and USB/IP's 3.1.0 baseline (`e558d5c`), as pinned by
+[USB/IP 993be95f's firmware catalog](https://github.com/canokeys/canokey-usbip/blob/993be95f50524d2e7cfd299bce960d1e3f5d6fb3/compat/config/firmwares.yaml).
+The [3.1.0-to-3.1.1 diff](https://github.com/canokeys/canokey-core/compare/e558d5cc6169acca1508238f7b584b8e00f8786d...cba7ea34c893eb6405620e9f2b562de0c441b1d6)
+leaves Admin/OATH/PASS/NDEF commands, configuration layouts, PIV AES-192
+management and algorithm IDs/encodings unchanged. OpenPGP/PIV add session-yield
+predicates; the other changes concern USB/session lifecycle and crypto safety.
+PIV re-selection preservation and CTAP algorithm build restrictions already exist
+in `e558d5c`; existing 3.1.0/4.0.0 capability semantics are retained here.
+Thus exactly 3.1.1 reuses the existing 3.1.0 rules, including modern framing and
+SM2 P1363 signatures; later unknown versions remain conservative. CTAP algorithms
+and PIV extension enablement still require device observations. This is source
+and offline-transcript evidence: USB/IP execution, physical NFC/touch, persistence,
+and consumer integration were not verified; no physical device was accessed.
