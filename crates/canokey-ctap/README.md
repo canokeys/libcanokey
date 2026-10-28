@@ -6,6 +6,10 @@ plus typed CTAP2 building blocks — strict canonical CBOR, COSE keys,
 authenticatorData parsing, getInfo/makeCredential/getAssertion/reset/selection,
 and the raw CTAP1/U2F commands.
 
+Standalone operations try the private USB management AID required by firmware
+3.1.2 on CCID/WebUSB, falling back to standard FIDO selection only on `6A82`
+for older firmware and NFC. No CTAP command is replayed.
+
 The default `clientpin` feature adds ClientPIN protocols 1/2, credential
 management, authenticatorConfig and fragmented largeBlobs. WebAuthn ceremonies
 (clientDataJSON, attestation trust, rpId policy) remain host-side.

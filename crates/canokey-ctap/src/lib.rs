@@ -91,7 +91,9 @@
 //! # Wire format
 //!
 //! SELECT is always explicit: `00 A4 04 00 08 <FIDO2 AID>`, where the AID is
-//! [`FIDO2_AID`] (`A0 00 00 06 47 2F 00 01`). A CTAP message is wrapped as
+//! [`FIDO2_USB_AID`] (`F0 43 41 4E 4F 46 49 44`). Only a `6A82` response
+//! triggers one fallback to [`FIDO2_AID`] (`A0 00 00 06 47 2F 00 01`) for
+//! NFC and legacy firmware. No CTAP command is replayed. A CTAP message is wrapped as
 //! `80 10 00 00 <Lc> <message>` with no Le byte. Messages up to 255 bytes use
 //! short Lc; longer messages use the extended three-byte Lc (`00 hi lo`) when
 //! the caller's exchange options permit extended encoding, otherwise command
@@ -117,7 +119,7 @@
 //! let mut op = transceive(&[0x04], OperationOptions::default())?;
 //! assert_eq!(op.start()?, Step::Exchange);
 //! assert_eq!(op.command()?.as_bytes(),
-//!     &[0x00, 0xa4, 0x04, 0x00, 0x08, 0xa0, 0x00, 0x00, 0x06, 0x47, 0x2f, 0x00, 0x01]);
+//!     &[0x00, 0xa4, 0x04, 0x00, 0x08, 0xf0, 0x43, 0x41, 0x4e, 0x4f, 0x46, 0x49, 0x44]);
 //! assert_eq!(op.advance(&[0x90, 0x00])?, Step::Exchange);
 //! assert_eq!(op.command()?.as_bytes(), &[0x80, 0x10, 0x00, 0x00, 0x01, 0x04]);
 //! assert_eq!(op.advance(&[0x00, 0x61, 0x02])?, Step::Exchange);
@@ -132,7 +134,7 @@
 //! # Errors
 //!
 //! Invalid arguments (including empty messages), option budgets and input
-//! limits fail before any I/O. During execution a 6A82 to SELECT maps to
+//! limits fail before any I/O. During execution a 6A82 to both SELECTs maps to
 //! [`ErrorKind::UnsupportedDevice`],
 //! 6985 to ConditionsNotSatisfied, and 6D00 to UnsupportedFeature; other
 //! status words are retained raw as UnexpectedStatusWord. Malformed responses
@@ -180,8 +182,15 @@ pub use pin::{
 };
 pub use status::{CtapErrorCode, CtapStatus};
 
-/// The FIDO2 application identifier (DF name): `A0 00 00 06 47 2F 00 01`.
+/// The standard NFC and legacy FIDO2 application identifier (DF name): `A0 00 00 06 47 2F 00 01`.
 pub const FIDO2_AID: [u8; 8] = [0xa0, 0x00, 0x00, 0x06, 0x47, 0x2f, 0x00, 0x01];
+
+/// CanoKey USB management AID (firmware 3.1.2 and later): `F0 43 41 4E 4F 46 49 44`.
+///
+/// CCID and WebUSB require this AID. Standalone operations try it first,
+/// falling back to [`FIDO2_AID`] only on SELECT status `6A82`, for older
+/// firmware and NFC. This constant does not imply a transport or firmware probe.
+pub const FIDO2_USB_AID: [u8; 8] = [0xf0, 0x43, 0x41, 0x4e, 0x4f, 0x46, 0x49, 0x44];
 
 /// Owned CTAP response: the status byte and the payload that follows it.
 ///
@@ -214,19 +223,30 @@ impl fmt::Debug for CtapResponse {
 
 /// Raw CTAP logical-command builders.
 ///
-/// Except for [`select`](command::select), these require the FIDO2 applet to
+/// Except for the SELECT builders, these require the FIDO2 applet to
 /// be selected already. They perform no status mapping or CBOR handling.
 /// Prefer the crate-level factories for complete standalone operations.
 pub mod command {
     use super::*;
-    /// Build SELECT FIDO2 by DF name, without Le.
+    /// Build SELECT for CanoKey USB management by DF name, without Le.
     ///
-    /// The firmware also switches to FIDO implicitly on bare 80/10 APDUs, but
-    /// this library always selects explicitly; the core owns SELECT.
+    /// This raw builder uses [`FIDO2_USB_AID`] and performs no fallback.
+    /// On `6A82`, composition callers may issue [`select_standard`].
     pub fn select() -> LogicalCommand {
+        select_aid(&FIDO2_USB_AID)
+    }
+
+    /// Build standard FIDO2 SELECT for NFC or legacy firmware, without Le.
+    ///
+    /// This raw builder uses [`FIDO2_AID`] and performs no status handling.
+    pub fn select_standard() -> LogicalCommand {
+        select_aid(&FIDO2_AID)
+    }
+
+    fn select_aid(aid: &[u8]) -> LogicalCommand {
         LogicalCommand::new(
             ApduHeader::new(0x00, 0xa4, 0x04, 0x00),
-            FIDO2_AID.to_vec(),
+            aid.to_vec(),
             ExpectedLength::Absent,
         )
     }
@@ -246,6 +266,43 @@ pub mod command {
         command.continuation = Continuation::Iso7816 { cla: 0x80 };
         command
     }
+}
+
+// Intercept only the first SELECT response. The inner machine sees the
+// negotiated selection result before it can send any CTAP/U2F command.
+struct SelectionFallback<M> {
+    inner: M,
+    pending: bool,
+}
+impl<T, M: Machine<T>> Machine<T> for SelectionFallback<M> {
+    fn next(&mut self, response: Option<ResponseData>) -> Result<Action<T>, Error> {
+        if self.pending && response.is_some() {
+            self.pending = false;
+            if response.as_ref().is_some_and(|r| r.status.raw() == 0x6a82) {
+                return Ok(Action::Command(command::select_standard()));
+            }
+        }
+        self.inner.next(response)
+    }
+    fn progress(&self) -> Option<&T> {
+        self.inner.progress()
+    }
+    fn take_progress(&mut self) -> Option<T> {
+        self.inner.take_progress()
+    }
+}
+
+fn selected_operation<T>(
+    machine: impl Machine<T> + 'static,
+    options: OperationOptions,
+) -> Result<Operation<T>, Error> {
+    Operation::from_machine(
+        SelectionFallback {
+            inner: machine,
+            pending: true,
+        },
+        options,
+    )
 }
 
 struct Request {
@@ -293,10 +350,13 @@ fn single<T: 'static>(
     let options = options.validate()?;
     canokey_protocol::operation::validate_command(&command, options)?;
     Operation::from_machine(
-        Sequence {
-            pending: vec![Request { command, phase }].into(),
-            current: None,
-            parse: Some(Box::new(parse)),
+        SelectionFallback {
+            inner: Sequence {
+                pending: vec![Request { command, phase }].into(),
+                current: None,
+                parse: Some(Box::new(parse)),
+            },
+            pending: phase == Phase::Select,
         },
         options,
     )
@@ -358,12 +418,13 @@ pub(crate) fn empty_payload(bytes: &[u8]) -> Result<(), Error> {
 
 /// Select the FIDO2 applet, returning no result beyond successful selection.
 ///
-/// This profile-free form emits only `00 A4 04 00 08 <FIDO2 AID>`; the caller
+/// This profile-free form tries [`FIDO2_USB_AID`], then [`FIDO2_AID`] only
+/// on `6A82`. Both SELECTs use `00 A4 04 00 08 <AID>` without Le; the caller
 /// owns the selected context. Successful selection does not authenticate
 /// anything and may invalidate other applet state on the card.
 ///
 /// # Errors
-/// Invalid options fail before I/O. A 6A82 response during selection maps to
+/// Invalid options fail before I/O. A 6A82 response to both selections maps to
 /// [`ErrorKind::UnsupportedDevice`]; other status, transport and budget
 /// failures are terminal and retained in the operation.
 pub fn select_application(options: OperationOptions) -> Result<Operation<()>, Error> {
@@ -423,7 +484,7 @@ pub(crate) fn select_then<T: 'static>(
     for request in &requests {
         canokey_protocol::operation::validate_command(&request.command, options)?;
     }
-    Operation::from_machine(
+    selected_operation(
         Sequence {
             pending: requests.into(),
             current: None,
@@ -435,7 +496,7 @@ pub(crate) fn select_then<T: 'static>(
 
 /// Select the FIDO2 applet and send one CTAP message within that selection.
 ///
-/// The operation sends SELECT (Phase::Select, so 6A82 maps to
+/// The operation negotiates SELECT (Phase::Select, so 6A82 from both AIDs maps to
 /// [`ErrorKind::UnsupportedDevice`]) followed by the wrapped CTAP command
 /// (Phase::Command). Everything else matches [`transceive_selected`].
 ///

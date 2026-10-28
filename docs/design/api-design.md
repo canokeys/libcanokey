@@ -437,11 +437,18 @@ The CTAP crate implements the ISO 7816 transport envelope of CTAP/FIDO2 and,
 on top of it, a typed CTAP2 client layer; WebAuthn ceremonies remain
 host-side. At the envelope level the caller supplies the complete raw CTAP
 message (first byte the CTAP command) and interprets the returned payload.
-`ctap::transceive` selects the FIDO2 applet by DF name (`ctap::FIDO2_AID` A0
-00 00 06 47 2F 00 01, `00 A4 04 00 08`) and then sends the message;
+`ctap::transceive` first selects the USB management AID
+(`ctap::FIDO2_USB_AID` F0 43 41 4E 4F 46 49 44), required on CCID/WebUSB
+from firmware 3.1.2. Only SELECT status 6A82 triggers one fallback to the
+standard AID (`ctap::FIDO2_AID` A0 00 00 06 47 2F 00 01) for legacy firmware
+and NFC. Both use `00 A4 04 00 08 <AID>` without Le. This negotiation applies
+to all standalone CTAP2, U2F and management operations, consumes the normal
+exchange budget, and never replays a CTAP command or reselects mid-operation.
+This follows [canokey-core PR #190](https://github.com/canokeys/canokey-core/pull/190).
+After successful selection the operation sends the message;
 `ctap::transceive_selected` sends the wrapped command without SELECT for a
 caller-owned selected context; `ctap::select_application` performs selection
-only. `ctap::command::{select, msg}` are raw logical-command builders without
+only. `ctap::command::{select, select_standard, msg}` are raw logical-command builders without
 status mapping for composition in other conversations. All factories are
 profile-free.
 
@@ -456,7 +463,7 @@ by the payload, concatenated across continuation fragments.
 `CtapResponse::status` exposes non-success CTAP codes raw rather than mapping
 them to transport errors. The payload is zeroized and redacted from Debug.
 
-6A82 on SELECT maps to UnsupportedDevice, 6985 to ConditionsNotSatisfied and
+6A82 on both SELECT attempts maps to UnsupportedDevice, 6985 to ConditionsNotSatisfied and
 6D00 to UnsupportedFeature; other status words remain UnexpectedStatusWord with
 the raw value. A successful status word with an empty response body (no CTAP
 status byte) fails as InvalidResponse in the Parsing phase. An empty message

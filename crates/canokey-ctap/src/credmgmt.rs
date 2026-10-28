@@ -472,7 +472,7 @@ fn enumerate<T: Send + 'static>(
     // this (chaining, continuation) are still caught by the operation's own
     // exchange budget.
     let max_get_next = options.limits.max_exchanges.saturating_sub(2) as u64;
-    Operation::from_machine(
+    crate::selected_operation(
         Enumerate {
             stage: Stage::Select,
             begin_message,

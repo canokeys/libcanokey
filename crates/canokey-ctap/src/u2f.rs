@@ -130,7 +130,7 @@ fn operation<T: 'static>(
     let options = options.validate()?;
     validate_command(&command::select(), options)?;
     validate_command(&command, options)?;
-    Operation::from_machine(
+    crate::selected_operation(
         SelectThen {
             command: Some(command),
             parse: Some(Box::new(parse)),

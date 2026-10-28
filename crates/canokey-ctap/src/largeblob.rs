@@ -336,7 +336,7 @@ impl Machine<()> for WriteArray {
 /// let mut op = read_array(OperationOptions::default())?;
 /// assert_eq!(op.start()?, Step::Exchange);
 /// assert_eq!(op.command()?.as_bytes(),
-///     &[0x00, 0xa4, 0x04, 0x00, 0x08, 0xa0, 0x00, 0x00, 0x06, 0x47, 0x2f, 0x00, 0x01]);
+///     &[0x00, 0xa4, 0x04, 0x00, 0x08, 0xf0, 0x43, 0x41, 0x4e, 0x4f, 0x46, 0x49, 0x44]);
 /// assert_eq!(op.advance(&[0x90, 0x00])?, Step::Exchange);
 /// // First fragment request: get 242 bytes at offset 0 (default options).
 /// assert_eq!(op.command()?.as_bytes(),
@@ -370,7 +370,7 @@ pub fn read_array(options: OperationOptions) -> Result<Operation<Vec<u8>>, Error
         validate_command(&command::msg(message), options)?;
     }
     validate_command(&command::select(), options)?;
-    Operation::from_machine(
+    crate::selected_operation(
         ReadArray {
             stage: Stage::Select,
             chunk: chunk as u64,
@@ -487,7 +487,7 @@ pub fn write_array(
         return Err(Error::new(ErrorKind::LimitExceeded));
     }
     validate_command(&command::select(), options)?;
-    Operation::from_machine(
+    crate::selected_operation(
         WriteArray {
             stage: Stage::Select,
             messages,
