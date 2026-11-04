@@ -805,3 +805,16 @@ mutation. Metadata uses the same bounded decoder as ordinary keys; the
 certificate reads object 5FFF01 with the standard bounded container decoder.
 Key and certificate presence remain independent. Signatures, public-key
 agreement, attestation identity and trust policy belong to the caller.
+
+
+### PIV F9 key provisioning
+
+`generate_attestation_key` and `import_attestation_key` use dedicated
+`AttestationKeyParameters` and never widen ordinary `Slot`. The algorithm is
+fixed to P-256. Both require evidenced Attestation support and explicit
+management access before I/O, sharing bounded encoding, authentication and
+response parsing with ordinary provisioning. Imported material must be P-256.
+Keys may change even when the response fails; operations never retry or roll
+back. Certificates are retained. Overwrite consent, public-key export from
+metadata, certificate replacement and trust changes remain caller policy.
+No F9 key move/delete or general private-operation API is added.

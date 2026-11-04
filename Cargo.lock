@@ -97,7 +97,7 @@ dependencies = [
 
 [[package]]
 name = "canokey"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "canokey-admin",
  "canokey-compat",
@@ -187,7 +187,7 @@ dependencies = [
 
 [[package]]
 name = "canokey-piv"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "aes",
  "canokey-compat",

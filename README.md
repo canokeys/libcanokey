@@ -72,7 +72,9 @@ certificate deletion, metadata and algorithm-configuration reads; compact direct
 with entry diagnostics and UTF-16 container names; key move/delete; explicit PIN/PUK
 retry reset; attestation DER; explicit reset of a blocked PIV application. Key
 generation/import (P-256/P-384/P-521/secp256k1/SM2 scalars, RSA CRT, Ed25519/X25519/ML
-seeds) with public-key SPKI export. Classic RSA/ECDSA/SM2/Ed25519 signing with DER/P1363
+seeds) with public-key SPKI export. Dedicated F9 attestation-signer P-256
+generation/import and read-only metadata/certificate observations are available
+on evidenced firmware; callers own overwrite consent and trust policy. Classic RSA/ECDSA/SM2/Ed25519 signing with DER/P1363
 conversion; explicit ML-DSA (empty context), randomized Ed25519 and SM2 full-message
 streaming signing, including empty messages; raw RSA decryption, ECDH
 (P-256/P-384/P-521/secp256k1), X25519, ML-KEM-768 decapsulation and SM2 agreement

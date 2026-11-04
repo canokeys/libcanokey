@@ -131,19 +131,17 @@ pub(crate) fn key_id(
 }
 fn policies(
     profile: &DeviceProfile,
-    parameters: KeyParameters,
+    policies: (PinPolicy, TouchPolicy),
     writer: &mut TlvWriter,
 ) -> Result<(), Error> {
-    if parameters.pin_policy != PinPolicy::Default
-        || parameters.touch_policy != TouchPolicy::Default
-    {
+    if policies.0 != PinPolicy::Default || policies.1 != TouchPolicy::Default {
         profile.capability(Capability::Metadata).require()?;
     }
-    if parameters.pin_policy != PinPolicy::Default {
-        writer.push(Tag::from_bytes(&[0xaa])?, &[parameters.pin_policy.wire()])?;
+    if policies.0 != PinPolicy::Default {
+        writer.push(Tag::from_bytes(&[0xaa])?, &[policies.0.wire()])?;
     }
-    if parameters.touch_policy != TouchPolicy::Default {
-        writer.push(Tag::from_bytes(&[0xab])?, &[parameters.touch_policy.wire()])?;
+    if policies.1 != TouchPolicy::Default {
+        writer.push(Tag::from_bytes(&[0xab])?, &[policies.1.wire()])?;
     }
     Ok(())
 }
@@ -205,19 +203,32 @@ pub(crate) fn prepare_generate_key(
     options: OperationOptions,
 ) -> Result<Sequence<PublicKey>, Error> {
     let id = key_id(profile, parameters.slot, parameters.algorithm)?;
+    prepare_generate_key_at(
+        profile,
+        parameters.algorithm,
+        (id, parameters.slot.reference()),
+        (parameters.pin_policy, parameters.touch_policy),
+        options,
+    )
+}
+
+pub(crate) fn prepare_generate_key_at(
+    profile: &DeviceProfile,
+    algorithm: Algorithm,
+    target: (u8, u8),
+    policy: (PinPolicy, TouchPolicy),
+    options: OperationOptions,
+) -> Result<Sequence<PublicKey>, Error> {
+    let (id, reference) = target;
     let mut fields = TlvWriter::new(options.limits.max_input_bytes);
     fields.push(Tag::from_bytes(&[0x80])?, &[id])?;
-    policies(profile, parameters, &mut fields)?;
+    policies(profile, policy, &mut fields)?;
     let mut data = TlvWriter::new(options.limits.max_input_bytes);
     data.push(Tag::from_bytes(&[0xac])?, fields.into_bytes().as_bytes())?;
-    let mut command = key_command(0x47, 0, parameters.slot.reference(), data.into_bytes());
+    let mut command = key_command(0x47, 0, reference, data.into_bytes());
     command.allow_chaining = false;
     access::prepare(command, options, move |r| {
-        generated(
-            parameters.algorithm,
-            r,
-            options.limits.max_total_response_bytes,
-        )
+        generated(algorithm, r, options.limits.max_total_response_bytes)
     })
 }
 /// Select, authenticate management, and import caller-owned private material.
@@ -250,8 +261,30 @@ pub(crate) fn prepare_import_key(
         return Err(Error::new(ErrorKind::InvalidArgument));
     }
     let id = key_id(profile, parameters.slot, parameters.algorithm)?;
+    prepare_import_key_at(
+        profile,
+        parameters.algorithm,
+        (id, parameters.slot.reference()),
+        (parameters.pin_policy, parameters.touch_policy),
+        material,
+        options,
+    )
+}
+
+pub(crate) fn prepare_import_key_at(
+    profile: &DeviceProfile,
+    algorithm: Algorithm,
+    target: (u8, u8),
+    policies_value: (PinPolicy, TouchPolicy),
+    material: PrivateKeyMaterial,
+    options: OperationOptions,
+) -> Result<Sequence<MutationResult>, Error> {
+    if material.algorithm != algorithm {
+        return Err(Error::new(ErrorKind::InvalidArgument));
+    }
+    let (id, reference) = target;
     let mut policy = TlvWriter::new(options.limits.max_input_bytes);
-    policies(profile, parameters, &mut policy)?;
+    policies(profile, policies_value, &mut policy)?;
     let policy = policy.into_bytes();
     if material
         .fields
@@ -264,7 +297,7 @@ pub(crate) fn prepare_import_key(
     let mut fields = material.fields;
     fields.extend(policy.as_bytes());
     access::prepare(
-        key_command(0xfe, id, parameters.slot.reference(), fields),
+        key_command(0xfe, id, reference, fields),
         options,
         write::mutation,
     )

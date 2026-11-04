@@ -20,3 +20,8 @@ License: Apache-2.0
 Read-only F9 signer access is available through `read_attestation_metadata` and
 `read_attestation_certificate` on 3.1.x. These do not validate attestation trust
 or expose F9 as an ordinary private-operation slot.
+
+Dedicated `generate_attestation_key` and `import_attestation_key` provision F9
+with P-256 on supported firmware. They require explicit management access and
+retain existing certificates. Callers must obtain overwrite consent and update
+certificate/trust bindings; mutations are never retried automatically.
