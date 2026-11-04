@@ -175,6 +175,26 @@ pub(crate) fn decode(
     data: SecretBytes,
     limit: usize,
 ) -> Result<Metadata, Error> {
+    let fields = decode_fields(
+        profile,
+        data,
+        limit,
+        matches!(reference, MetadataReference::Key(_)),
+    )?;
+    Ok(match reference {
+        MetadataReference::Key(slot) => Metadata::Key { slot, fields },
+        MetadataReference::Pin => Metadata::Pin(fields),
+        MetadataReference::Puk => Metadata::Puk(fields),
+        MetadataReference::Management => Metadata::Management(fields),
+    })
+}
+
+pub(crate) fn decode_fields(
+    profile: &DeviceProfile,
+    data: SecretBytes,
+    limit: usize,
+    key: bool,
+) -> Result<MetadataFields, Error> {
     let invalid = || Error::new(ErrorKind::InvalidResponse).at(Phase::Parsing);
     let mut fields = MetadataFields {
         raw: SecretBytes::default(),
@@ -244,7 +264,7 @@ pub(crate) fn decode(
     if data.is_empty() {
         return Err(invalid());
     }
-    if matches!(reference, MetadataReference::Key(_)) {
+    if key {
         if let (Some(id), Some(bytes)) = (fields.algorithm_id, &fields.public_key_tlv) {
             if let Some(algorithm) = profile.algorithm_from_wire_id(id) {
                 fields.public_key = Some(PublicKey::from_tlv(algorithm, bytes.as_bytes(), limit)?);
@@ -252,12 +272,7 @@ pub(crate) fn decode(
         }
     }
     fields.raw = data;
-    Ok(match reference {
-        MetadataReference::Key(slot) => Metadata::Key { slot, fields },
-        MetadataReference::Pin => Metadata::Pin(fields),
-        MetadataReference::Puk => Metadata::Puk(fields),
-        MetadataReference::Management => Metadata::Management(fields),
-    })
+    Ok(fields)
 }
 /// Select, optionally authenticate, and read one key/PIN/PUK/management metadata
 /// record. Returned values own their bytes; no discovered defaults are used as

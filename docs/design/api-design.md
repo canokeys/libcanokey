@@ -795,3 +795,13 @@ Attestation accepts the common selection policy (`select=false` in Rust,
 responses accept definite BER length encodings, including the actual firmware's
 non-minimal two-octet lengths for 128-byte secrets. Exact fields, point validity,
 requested secret length and the common response/depth budgets remain enforced.
+
+### Read-only PIV F9 observations (0.1.4)
+
+`read_attestation_metadata` and `read_attestation_certificate` expose the
+3.1.x F9 signer without adding it to ordinary `Slot`. Both select PIV, require
+evidenced Attestation support before I/O, and perform no authentication or
+mutation. Metadata uses the same bounded decoder as ordinary keys; the
+certificate reads object 5FFF01 with the standard bounded container decoder.
+Key and certificate presence remain independent. Signatures, public-key
+agreement, attestation identity and trust policy belong to the caller.

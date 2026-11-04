@@ -64,6 +64,9 @@ pub use credentials::{credential, CredentialAction};
 pub mod discovery;
 pub use discovery::{random_selected, read_configuration_selected, read_version_selected};
 mod access;
+/// Read-only access to the F9 attestation signer, separate from ordinary slots.
+pub mod attestation;
+pub use attestation::{read_attestation_certificate, read_attestation_metadata};
 /// SM2 agreement with explicitly pre-exchanged peer keys.
 pub mod sm2_agreement;
 pub use sm2_agreement::{agree_sm2, Sm2Agreement, Sm2AgreementInput, Sm2Role};

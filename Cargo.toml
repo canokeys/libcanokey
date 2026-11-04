@@ -36,6 +36,6 @@ canokey-ndef = { path = "crates/canokey-ndef", version = "0.1.3" }
 canokey-ctap = { path = "crates/canokey-ctap", version = "0.1.3", default-features = false }
 canokey-key = { path = "crates/canokey-key", version = "0.1.3" }
 canokey-openpgp = { path = "crates/canokey-openpgp", version = "0.1.3" }
-canokey-piv = { path = "crates/canokey-piv", version = "0.1.3" }
-canokey = { path = "crates/canokey", version = "0.1.3" }
+canokey-piv = { path = "crates/canokey-piv", version = "0.1.4" }
+canokey = { path = "crates/canokey", version = "0.1.4" }
 x509-info = "0.1.1"
