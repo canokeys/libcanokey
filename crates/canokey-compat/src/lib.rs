@@ -386,7 +386,7 @@ impl AlgorithmConfig {
     }
     /// Return an observed ID only when extensions are enabled and the field exists.
     pub fn wire_id(&self, algorithm: Algorithm) -> Option<u8> {
-        self.ids.get(&algorithm).copied().filter(|_| self.enabled)
+        self.ids.get(&algorithm).copied()
     }
     /// Borrow the complete original configuration, including unrecognized trailing bytes.
     pub fn raw(&self) -> &[u8] {
@@ -807,12 +807,13 @@ impl DeviceProfile {
         let id = self.config.as_ref()?.wire_id(algorithm)?;
         // 3.1 introduces AES management (0A) and randomized Ed25519 (FF).
         // Preserve the observation, but never use a colliding ID for another mode.
-        if self
-            .info
-            .firmware
-            .as_ref()
-            .is_some_and(|f| f.compatibility_base() >= (3, 1, 0))
-            && [0x0a, 0xff].contains(&id)
+        if (self.is_4_0_series() && id == 0x03)
+            || (self
+                .info
+                .firmware
+                .as_ref()
+                .is_some_and(|f| f.compatibility_base() >= (3, 1, 0))
+                && [0x0a, 0xff].contains(&id))
         {
             return None;
         }
@@ -822,7 +823,8 @@ impl DeviceProfile {
     /// reserved AES-management/randomized-signing IDs never resolve as extensions,
     /// even if malformed configuration observations assign them. Raw bytes remain
     /// available through algorithm_config; older layouts retain their own IDs.
-    /// The two IDs appended in 4.0.x resolve for that firmware series.
+    /// The two IDs appended in 4.0.x resolve for that firmware series, which
+    /// also reserves the TDEA ID (03).
     pub fn algorithm_wire_id(&self, algorithm: Algorithm) -> Option<u8> {
         match algorithm {
             Algorithm::Rsa1024 => Some(0x06),
@@ -901,16 +903,36 @@ impl DeviceProfile {
         }
         self.firmware_range((3, 0, 0), (3, 1, 0))
     }
-    /// Return the complete PIV algorithm-map length for a configuration write.
-    /// Requires firmware with evidenced write support. The 3.1.x series uses ten
-    /// bytes and the 4.0.x series uses twelve.
+    /// Validate a complete PIV algorithm configuration for writing to this firmware.
+    /// The 3.1.x series uses ten bytes. The 4.0.x series uses twelve and validates
+    /// IDs even when extensions are disabled.
     ///
     /// # Errors
-    /// Returns the capability error for unsupported or unknown firmware.
-    pub fn algorithm_config_write_len(&self) -> Result<usize, Error> {
+    /// Returns a capability error for unsupported or unknown firmware, or
+    /// InvalidArgument for a map with the wrong length or invalid IDs.
+    pub fn validate_algorithm_config_write(&self, config: &AlgorithmConfig) -> Result<(), Error> {
         self.capability(Capability::AlgorithmConfigWrite)
             .require()?;
-        Ok(if self.is_4_0_series() { 12 } else { 10 })
+        let modern = self.is_4_0_series();
+        let data = config.raw();
+        let ids = &data[1..];
+        let expected_len = if modern { 12 } else { 10 };
+        if data.len() != expected_len
+            || ((modern || config.enabled())
+                && ids.iter().enumerate().any(|(index, id)| {
+                    [0, 0x06, 0x07, 0x0a, 0x11, 0x14, 0xff].contains(id)
+                        || (modern && *id == 0x03)
+                        || ids[..index].contains(id)
+                }))
+        {
+            return Err(Error::new(ErrorKind::InvalidArgument));
+        }
+        Ok(())
+    }
+    /// Whether the evidenced PIV framing requires short APDUs even when the
+    /// transport accepts extended commands. Firmware 4.0.x requires short framing.
+    pub fn piv_requires_short_apdus(&self) -> bool {
+        self.is_4_0_series()
     }
     /// Whether an asymmetric algorithm is evidenced for PIV key operations.
     /// Extended algorithms require observed enabled IDs or a caller-confirmed 2.x

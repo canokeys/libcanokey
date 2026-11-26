@@ -16,6 +16,16 @@ fn algorithm_map_write_uses_the_firmware_series_length() {
         let error = set_algorithm_config(p, wrong, access(), Default::default()).unwrap_err();
         assert_eq!(error.kind, ErrorKind::InvalidArgument);
     }
+    let mut disabled = full().raw().to_vec();
+    disabled[0] = 0;
+    let config = AlgorithmConfig::parse(&disabled).unwrap();
+    assert!(p.validate_algorithm_config_write(&config).is_ok());
+    for id in [0, 3, 0xff, disabled[10]] {
+        disabled[11] = id;
+        let config = AlgorithmConfig::parse(&disabled).unwrap();
+        let error = set_algorithm_config(&p, config, access(), Default::default()).unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidArgument);
+    }
     let mut op = set_algorithm_config(&p, full(), access(), Default::default()).unwrap();
     authenticate(&mut op);
     assert_eq!(

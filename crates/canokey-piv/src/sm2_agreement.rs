@@ -68,10 +68,9 @@ fn ga(
 ) -> Result<LogicalCommand, Error> {
     let mut outer = TlvWriter::new(options.limits.max_input_bytes);
     push(&mut outer, 0x7c, inner.as_bytes())?;
-    let mut command = keys::key_command(0x87, id, slot.reference(), outer.into_bytes());
+    let mut command = keys::key_command(0x87, id, slot.reference(), outer.into_bytes(), false);
     // A chained first SM2 command selects signing, not agreement.
     command.allow_chaining = false;
-    command.allow_extended = false;
     canokey_protocol::operation::validate_command(&command, options)?;
     Ok(command)
 }

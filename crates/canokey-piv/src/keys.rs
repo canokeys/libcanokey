@@ -155,7 +155,13 @@ fn policies(
     }
     Ok(())
 }
-pub(crate) fn key_command(ins: u8, p1: u8, p2: u8, data: SecretBytes) -> LogicalCommand {
+pub(crate) fn key_command(
+    ins: u8,
+    p1: u8,
+    p2: u8,
+    data: SecretBytes,
+    allow_extended: bool,
+) -> LogicalCommand {
     let mut command = LogicalCommand::new(
         ApduHeader::new(0, ins, p1, p2),
         vec![],
@@ -163,7 +169,7 @@ pub(crate) fn key_command(ins: u8, p1: u8, p2: u8, data: SecretBytes) -> Logical
     );
     command.data = data;
     command.allow_chaining = true;
-    command.allow_extended = true;
+    command.allow_extended = allow_extended;
     command
 }
 fn generated(
@@ -235,7 +241,13 @@ pub(crate) fn prepare_generate_key_at(
     policies(profile, policy, &mut fields)?;
     let mut data = TlvWriter::new(options.limits.max_input_bytes);
     data.push(Tag::from_bytes(&[0xac])?, fields.into_bytes().as_bytes())?;
-    let mut command = key_command(0x47, 0, reference, data.into_bytes());
+    let mut command = key_command(
+        0x47,
+        0,
+        reference,
+        data.into_bytes(),
+        !profile.piv_requires_short_apdus(),
+    );
     command.allow_chaining = false;
     access::prepare(command, options, move |r| {
         generated(algorithm, r, options.limits.max_total_response_bytes)
@@ -307,7 +319,13 @@ pub(crate) fn prepare_import_key_at(
     let mut fields = material.fields;
     fields.extend(policy.as_bytes());
     access::prepare(
-        key_command(0xfe, id, reference, fields),
+        key_command(
+            0xfe,
+            id,
+            reference,
+            fields,
+            !profile.piv_requires_short_apdus(),
+        ),
         options,
         write::mutation,
     )

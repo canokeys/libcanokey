@@ -50,13 +50,16 @@ fn mlkem512_decapsulates_only_the_selected_parameter_set() {
         .unwrap_err();
         assert_eq!(error.kind, kind);
     }
+    let mut options = OperationOptions::default();
+    options.exchange.allow_extended = true;
+    options.exchange.max_command_bytes = 1024;
     let mut op = decapsulate_with_algorithm(
         &p,
         Slot::KeyManagement,
         Algorithm::MlKem512,
         SecretBytes::new(vec![0x42; 768]),
         Access::None,
-        Default::default(),
+        options,
     )
     .unwrap();
     selected(&mut op);

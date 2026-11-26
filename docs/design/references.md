@@ -379,11 +379,14 @@ and consumer integration were not verified; no physical device was accessed.
 
 ## Firmware 4.0 post-quantum parameter sets
 
-The 4.0.x matrix follows the firmware's ML-DSA-44 and ML-KEM-512 wire
-formats. The PIV EE map appends the configurable IDs for both algorithms.
-PIV generation, seed import, metadata, streaming signing and chained
-decapsulation use the parameter-set-specific lengths. The FIDO getInfo table
-adds ML-DSA-44 to builds with unrestricted algorithms. ML-KEM-512 is PIV-only.
+Rust firmware 4.0 defines the twelve-byte PIV EE map and reserves 03 even
+when extensions are disabled. Its PIV applet requires short APDUs.
+[Rust PIV contract](https://github.com/canokeys/canokey-core/blob/17a7e6ba7abcdc267df7115ed2efecb4747791ad/docs/applets/piv.md)
+· [Rust map validation](https://github.com/canokeys/canokey-core/blob/17a7e6ba7abcdc267df7115ed2efecb4747791ad/crates/core/src/applets/piv/repository.rs)
+
+The C reference fixtures pin the PQ generation, import, metadata, signing and
+decapsulation encodings. The FIDO getInfo generator adds ML-DSA-44 to
+builds with unrestricted algorithms.
 [PIV configuration](https://github.com/canokeys/canokey-core/blob/a44d25d8fb16622a211d1813daade6f70570cef9/include/piv.h)
 · [PIV transcripts](https://github.com/canokeys/canokey-core/blob/a44d25d8fb16622a211d1813daade6f70570cef9/test/test_piv.c)
 · [CTAP getInfo generator](https://github.com/canokeys/canokey-core/blob/a44d25d8fb16622a211d1813daade6f70570cef9/scripts/gen_ctap_get_info.py)

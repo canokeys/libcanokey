@@ -2,7 +2,7 @@
 use crate::*;
 use canokey_protocol::{ApduHeader, ExpectedLength};
 
-/// Read the F9 signer's metadata, including its public key, on firmware 3.1.x.
+/// Read the F9 signer's metadata, including its public key, on firmware 3.1.x/4.0.x.
 /// Selects PIV without authenticating; returned fields own all bytes. F9 is not
 /// exposed as an ordinary signing or move/delete slot. Provisioning uses the
 /// dedicated attestation-key operations.
@@ -40,7 +40,7 @@ pub fn read_attestation_metadata(
     access::with_access(profile, Access::None, target, options)
 }
 
-/// Read and unwrap the F9 signer's certificate in object 5FFF01 on 3.1.x.
+/// Read and unwrap the F9 signer's certificate in object 5FFF01 on 3.1.x/4.0.x.
 /// Selects PIV without authentication; owns the unwrapped DER independently.
 /// This parses only the bounded certificate container (including gzip), with
 /// no X.509 syntax, signature, key-match or trust validation.

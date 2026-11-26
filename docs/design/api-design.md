@@ -118,7 +118,9 @@ Firmware 3.1.x uses a ten-byte EE map. Firmware 4.0.x appends configurable
 ML-DSA-44 and ML-KEM-512 IDs at zero-based offsets 10 and 11. The firmware
 defaults are E4 and E5, respectively. Operations require the observed enabled
 IDs. Missing fields leave capability Unknown. Disabled maps preserve all bytes
-without exposing IDs. EE writes require the full series-specific map.
+without exposing IDs. EE writes require the full series-specific map. On 4.0.x,
+IDs must be unique and avoid reserved values including 03, even in a disabled map.
+4.0.x PIV commands use short APDUs, with chaining for permitted long inputs.
 
 After an acknowledged
 2.x Admin 40/07 write, callers may create a new immutable snapshot using
@@ -757,12 +759,6 @@ retaining state. Factories still revalidate their complete operation policy.
   mutation/free. Catch unwindable panics; poisoned operations can only be freed.
   Dangling pointers and allocator/process aborts cannot be made recoverable.
 
-A Console FRB adapter belongs in Console and calls the Rust facade directly. It may
-hold a private enum of concrete Operation types and Option for idempotent close,
-but must not duplicate protocol state. Dart owns async execution; Python bindings
-would follow the same model with a caller-owned synchronous loop. Binding examples:
-[Console](../guides/console-integration.md), [PKCS#11](../guides/pkcs11-integration.md).
-
 CanoKey private RSA, ECDH/X25519 and ML-KEM operations may use every ordinary
 asymmetric slot evidenced by the profile. PIV slot names do not impose host
 key-usage policy; consumers such as PKCS#11/cardmod retain their own mapping and
@@ -817,25 +813,15 @@ responses accept definite BER length encodings, including the actual firmware's
 non-minimal two-octet lengths for 128-byte secrets. Exact fields, point validity,
 requested secret length and the common response/depth budgets remain enforced.
 
-### Read-only PIV F9 observations (0.1.4)
+### PIV F9 signer
 
-`read_attestation_metadata` and `read_attestation_certificate` expose the
-3.1.x F9 signer without adding it to ordinary `Slot`. Both select PIV, require
-evidenced Attestation support before I/O, and perform no authentication or
-mutation. Metadata uses the same bounded decoder as ordinary keys; the
-certificate reads object 5FFF01 with the standard bounded container decoder.
-Key and certificate presence remain independent. Signatures, public-key
-agreement, attestation identity and trust policy belong to the caller.
+The dedicated F9 APIs require evidenced attestation support on 3.1.x/4.0.x.
+`read_attestation_metadata` and `read_attestation_certificate` select PIV
+and read F7/F9 and object 5FFF01 without authentication. Key and certificate
+presence are independent. Both use the ordinary bounded metadata and
+certificate-container decoders.
 
-
-### PIV F9 key provisioning
-
-`generate_attestation_key` and `import_attestation_key` use dedicated
-`AttestationKeyParameters` and never widen ordinary `Slot`. The algorithm is
-fixed to P-256. Both require evidenced Attestation support and explicit
-management access before I/O, sharing bounded encoding, authentication and
-response parsing with ordinary provisioning. Imported material must be P-256.
-Keys may change even when the response fails; operations never retry or roll
-back. Certificates are retained. Overwrite consent, public-key export from
-metadata, certificate replacement and trust changes remain caller policy.
-No F9 key move/delete or general private-operation API is added.
+`generate_attestation_key` and `import_attestation_key` provision P-256
+under explicit management access and preserve the existing certificate. F9
+is outside the ordinary `Slot` API. On any attempted write, the caller owns
+overwrite consent, cache invalidation and the certificate/trust binding.

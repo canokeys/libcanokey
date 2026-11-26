@@ -269,14 +269,7 @@ pub(crate) fn prepare_config(
     options: OperationOptions,
 ) -> Result<Sequence<MutationResult>, Error> {
     require(profile)?;
-    if config.raw().len() != profile.algorithm_config_write_len()?
-        || (config.enabled()
-            && config.raw()[1..]
-                .iter()
-                .any(|b| [0, 0x0a, 0x07, 0x11, 0x14, 0xff].contains(b)))
-    {
-        return Err(Error::new(ErrorKind::InvalidArgument));
-    }
+    profile.validate_algorithm_config_write(&config)?;
     access::prepare(
         command(0xee, 2, 0, SecretBytes::new(config.raw().to_vec()), false),
         options,

@@ -44,8 +44,8 @@ C applications link `canokey-c` and include
 [`include/canokey.h`](crates/canokey-c/include/canokey.h). The runnable example
 [probe.c](crates/canokey-c/examples/probe.c) shows size queries, profile transfer
 and cleanup; build and run it with `bash scripts/run-c-example.sh`. The C ABI is
-experimental. See the [PKCS#11 integration guide](docs/guides/pkcs11-integration.md)
-for a complete session sketch.
+experimental. For module-specific guidance, see the
+[PKCS#11 integration guide](docs/guides/pkcs11-integration.md).
 
 ## How it works
 
@@ -162,10 +162,6 @@ cargo run -p canokey --example batch --locked
 bash scripts/run-c-example.sh
 ```
 
-Boundary sketches for real integrations:
-[Console/Dart](docs/guides/console-integration.md),
-[PKCS#11/C](docs/guides/pkcs11-integration.md).
-
 ## Certificate inspection
 
 Enable `canokey/x509` for parsing, or `canokey/serde` for optional serialization.
@@ -199,10 +195,6 @@ Depend on a lower-level crate directly only when you need it without the facade.
 | [`canokey-compat`](crates/canokey-compat) | Immutable profiles, capability evidence, firmware rules |
 | [`canokey-key`](crates/canokey-key) | Shared public-key TLV fields and pure SPKI export |
 
-The facade optionally re-exports the independent crates.io package
-[`x509-info`](https://github.com/canokeys/x509-info) 0.1.1. The full architecture
-and layering rationale live in the [documentation map](docs/README.md).
-
 ## Building and contributing
 
 ```sh
@@ -225,13 +217,8 @@ commits) are in [AGENTS.md](AGENTS.md).
 
 ## Documentation
 
-- [Documentation map](docs/README.md): design documents vs user guides, with an
-  architecture overview.
-- [API contracts](docs/design/api-design.md): ownership, execution and binding rules.
-- [Reference evidence](docs/design/references.md): pinned firmware and consumer sources.
-- The companion [canokey-pkcs11 migration](https://github.com/canokeys/canokey-pkcs11/blob/codex/libcanokey/docs/libcanokey-piv-migration-plan.md)
-  validates the PIV C ABI against native Windows hardware. Console/ckman and
-  general Python bindings are separate projects, out of scope for this repository.
+- Ownership, execution and binding rules are in the [API contracts](docs/design/api-design.md).
+- Pinned firmware and consumer sources are in the [reference evidence](docs/design/references.md).
 
 Copyright 2026 canokeys.org. Licensed under [Apache-2.0](LICENSE). Each workspace
 crate inherits the metadata and includes a copy of the root license for packaging.

@@ -128,11 +128,15 @@ pub(crate) fn prepare_sign_streaming(
     let (prefix, data) = if algorithm == Algorithm::Sm2 {
         // Firmware selects full-message SM2 only on a chained first frame. Send
         // just the outer tag, so an empty message cannot finish on that frame.
-        let mut prefix =
-            keys::key_command(0x87, id, slot.reference(), SecretBytes::new(vec![0x7c]));
+        let mut prefix = keys::key_command(
+            0x87,
+            id,
+            slot.reference(),
+            SecretBytes::new(vec![0x7c]),
+            false,
+        );
         prefix.header.cla = 0x10;
         prefix.allow_chaining = false;
-        prefix.allow_extended = false;
         prefix.continuation = Continuation::None;
         canokey_protocol::operation::validate_command(&prefix, options)?;
         (
@@ -142,8 +146,7 @@ pub(crate) fn prepare_sign_streaming(
     } else {
         (None, bytes)
     };
-    let mut command = keys::key_command(0x87, id, slot.reference(), data);
-    command.allow_extended = false;
+    let command = keys::key_command(0x87, id, slot.reference(), data, false);
     let encoding = if algorithm == Algorithm::Sm2 {
         SignatureEncoding::P1363
     } else {

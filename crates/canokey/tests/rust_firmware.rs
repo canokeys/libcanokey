@@ -158,4 +158,13 @@ fn small_pq_algorithms_require_the_4_0_series_and_observed_ids() {
     assert!(AlgorithmConfig::parse(&malformed).is_err());
     malformed[11] = 0;
     assert!(AlgorithmConfig::parse(&malformed).is_err());
+    malformed[11] = 0x03;
+    let mut observed = DeviceObservations::new(b"4.0.0".to_vec());
+    observed.algorithm_config = Some(AlgorithmConfig::parse(&malformed).unwrap());
+    let profile = DeviceProfile::from_observations(observed).unwrap();
+    assert_eq!(profile.algorithm_wire_id(Algorithm::MlKem512), None);
+    assert_eq!(
+        profile.key_algorithm_support(Algorithm::MlKem512).support,
+        Support::Unsupported
+    );
 }

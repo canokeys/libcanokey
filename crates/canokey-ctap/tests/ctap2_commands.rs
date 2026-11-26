@@ -174,18 +174,10 @@ fn firmware_4_0_advertises_mldsa44_and_chains_its_fido_responses() {
     params.pub_key_cred_params = vec![CoseAlgorithm::MlDsa44];
     let mut make = make_credential(params, OperationOptions::default()).unwrap();
     begin(&mut make);
-    let mut expected = make_credential_message();
-    let algorithms = hex("04 82 a263616c672664747970656a7075626c69632d6b6579
-                               a263616c67383064747970656a7075626c69632d6b6579");
-    let start = expected
-        .windows(algorithms.len())
-        .position(|w| w == algorithms)
-        .unwrap();
-    expected.splice(
-        start..start + algorithms.len(),
-        hex("0481a263616c67382f64747970656a7075626c69632d6b6579"),
+    assert_command(
+        &make,
+        &make_credential_message("81 a263616c67382f64747970656a7075626c69632d6b6579"),
     );
-    assert_command(&make, &expected);
     let mut auth_data = vec![0x11; 32];
     auth_data.extend(hex(&format!(
         "41 00000000 {AAGUID} 0004 01020304 a3 0107 03382f 20590520"
@@ -266,21 +258,21 @@ fn make_credential_params() -> MakeCredentialParams {
     params
 }
 
-/// Expected canonical CBOR of the makeCredential request map built by
-/// [`make_credential_params`].
-fn make_credential_message() -> Vec<u8> {
+/// Expected makeCredential message with the supplied golden CBOR algorithm list.
+fn make_credential_message(algorithms: &str) -> Vec<u8> {
     let mut message = vec![0x01];
-    message.extend_from_slice(&hex("a9
+    message.extend_from_slice(&hex(&format!(
+        "a9
          01 5820 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
          02 a2 626964 6b6578616d706c652e636f6d 646e616d65 674578616d706c65
          03 a3 626964 4401020304 646e616d65 6475736572 6b646973706c61794e616d65 6455736572
-         04 82 a263616c672664747970656a7075626c69632d6b6579
-                a263616c67383064747970656a7075626c69632d6b6579
+         04 {algorithms}
          05 81 a362696444bbbbbbbb64747970656a7075626c69632d6b65796a7472616e73706f72747381636e6663
          06 a1 6b686d61632d736563726574 f5
          07 a1 62726b f5
          08 50 cccccccccccccccccccccccccccccccc
-         09 01"));
+         09 01"
+    )));
     message
 }
 
@@ -302,7 +294,13 @@ fn attested_auth_data() -> Vec<u8> {
 fn make_credential_golden_command_and_typed_response() {
     let mut op = make_credential(make_credential_params(), OperationOptions::default()).unwrap();
     begin(&mut op);
-    assert_command(&op, &make_credential_message());
+    assert_command(
+        &op,
+        &make_credential_message(
+            "82 a263616c672664747970656a7075626c69632d6b6579
+                a263616c67383064747970656a7075626c69632d6b6579",
+        ),
+    );
 
     // Response: {"fmt": "packed", authData, attStmt, epAtt: false,
     // largeBlobKey: 32 bytes}.

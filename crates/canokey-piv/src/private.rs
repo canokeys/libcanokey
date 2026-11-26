@@ -161,6 +161,7 @@ fn command(
         id,
         slot.reference(),
         outer.into_bytes(),
+        !profile.piv_requires_short_apdus(),
     ))
 }
 fn reply(response: ResponseData, limit: usize) -> Result<SecretBytes, Error> {
