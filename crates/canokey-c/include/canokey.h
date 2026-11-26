@@ -98,11 +98,12 @@ enum { CNK_ALGORITHM_RSA1024=1, CNK_ALGORITHM_RSA2048=2,
        CNK_ALGORITHM_P256=5, CNK_ALGORITHM_P384=6, CNK_ALGORITHM_P521=7,
        CNK_ALGORITHM_SECP256K1=8, CNK_ALGORITHM_SM2=9,
        CNK_ALGORITHM_ED25519=10, CNK_ALGORITHM_X25519=11,
-       CNK_ALGORITHM_MLDSA65=12, CNK_ALGORITHM_MLKEM768=13 };
+       CNK_ALGORITHM_MLDSA65=12, CNK_ALGORITHM_MLKEM768=13,
+       CNK_ALGORITHM_MLDSA44=14, CNK_ALGORITHM_MLKEM512=15 };
 enum { CNK_KEY_PIN_DEFAULT=0, CNK_KEY_PIN_NEVER=1, CNK_KEY_PIN_ONCE=2, CNK_KEY_PIN_ALWAYS=3 };
 enum { CNK_KEY_TOUCH_DEFAULT=0, CNK_KEY_TOUCH_NEVER=1, CNK_KEY_TOUCH_ALWAYS=2, CNK_KEY_TOUCH_CACHED=3 };
 enum { CNK_SIGN_RSA_BLOCK=1, CNK_SIGN_DIGEST=2, CNK_SIGN_MESSAGE=3 };
-enum { CNK_STREAM_MLDSA65=1, CNK_STREAM_ED25519_RANDOMIZED=2, CNK_STREAM_SM2=3 };
+enum { CNK_STREAM_MLDSA65=1, CNK_STREAM_ED25519_RANDOMIZED=2, CNK_STREAM_SM2=3, CNK_STREAM_MLDSA44=4 };
 enum { CNK_SIGNATURE_RAW=1, CNK_SIGNATURE_DER=2, CNK_SIGNATURE_P1363=3 };
 enum { CNK_PUBLIC_MODULUS=1, CNK_PUBLIC_EXPONENT=2, CNK_PUBLIC_POINT_OR_RAW=3, CNK_PUBLIC_SPKI=4 };
 enum { CNK_METADATA_HAS_ALGORITHM=1, CNK_METADATA_HAS_POLICY=2,
@@ -151,6 +152,8 @@ cnk_status_t cnk_piv_printed_management_key_copy(const uint8_t *,size_t,uint8_t 
 cnk_status_t cnk_piv_read_version_selected_new(const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_read_configuration_selected_new(const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_random_selected_new(size_t,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+/* Ten-byte projection. Use cnk_operation_result_copy_bytes for the complete
+ * wire map, including ML-DSA-44 and ML-KEM-512 at offsets 10 and 11 on 4.0.x. */
 cnk_status_t cnk_operation_piv_configuration_copy(const cnk_operation_t *,uint8_t *,size_t *);
 cnk_status_t cnk_piv_container_name_validate(const uint8_t *,size_t,cnk_error_v1 *);
 cnk_status_t cnk_piv_write_object_container_new(const cnk_profile_t *,const uint8_t *,size_t,const uint8_t *,size_t,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
@@ -164,6 +167,9 @@ cnk_status_t cnk_piv_derive_new(const cnk_profile_t *,uint32_t slot,uint32_t alg
 /* ML-KEM-768: exactly 1088 ciphertext bytes, 32 result bytes. No KDF or sender
  * authentication. Uses the observed enabled algorithm ID; inputs are copied. */
 cnk_status_t cnk_piv_decapsulate_new(const cnk_profile_t *,uint32_t slot,const uint8_t *,size_t,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
+/* Select ML-KEM-512 (768 ciphertext bytes) or ML-KEM-768 (1088 bytes).
+ * The operation returns a 32-byte secret through cnk_operation_result_copy_bytes. */
+cnk_status_t cnk_piv_decapsulate_with_algorithm_new(const cnk_profile_t *,uint32_t slot,uint32_t algorithm,const uint8_t *,size_t,const cnk_piv_access_v1 *,const cnk_operation_options_v1 *,cnk_operation_t **,cnk_error_v1 *);
 cnk_status_t cnk_piv_read_metadata_directory_new(const cnk_profile_t * profile,const cnk_piv_access_v1 * auth,const cnk_operation_options_v1 * opts,cnk_operation_t ** out,cnk_error_v1 * error);
 cnk_status_t cnk_piv_read_container_name_new(const cnk_profile_t * profile,uint32_t reference,const cnk_piv_access_v1 * auth,const cnk_operation_options_v1 * opts,cnk_operation_t ** out,cnk_error_v1 * error);
 cnk_status_t cnk_piv_set_container_name_new(const cnk_profile_t * profile,uint32_t reference,const uint8_t * data,size_t len,const cnk_piv_access_v1 * auth,const cnk_operation_options_v1 * opts,cnk_operation_t ** out,cnk_error_v1 * error);
@@ -206,8 +212,11 @@ enum { CNK_BATCH_VERIFY_PIN=1, CNK_BATCH_AUTHENTICATE_MANAGEMENT=2, CNK_BATCH_LO
        CNK_BATCH_DECAPSULATE=17, CNK_BATCH_SIGN_STREAMING=18, CNK_BATCH_READ_DIRECTORY=19,
        CNK_BATCH_READ_CONTAINER_NAME=20, CNK_BATCH_SET_CONTAINER_NAME=21,
        CNK_BATCH_MOVE_KEY=22, CNK_BATCH_DELETE_KEY=23, CNK_BATCH_RESET_PIN_PUK_RETRIES=24,
-       CNK_BATCH_SET_ALGORITHM_CONFIG=25, CNK_BATCH_ATTEST=26, CNK_BATCH_AGREE_SM2=27 };
+       CNK_BATCH_SET_ALGORITHM_CONFIG=25, CNK_BATCH_ATTEST=26, CNK_BATCH_AGREE_SM2=27,
+       CNK_BATCH_DECAPSULATE_WITH_ALGORITHM=28 };
 /* Only fields relevant to kind are read. Unused pointers/lengths should be NULL/0.
+ * CNK_BATCH_DECAPSULATE selects ML-KEM-768. The explicit variant uses algorithm,
+ * reference and data/data_len with the same lengths as the single operation.
  * All nested ranges are copied. No SELECT/probe/nested Batch requests exist. */
 typedef struct {
     uint32_t struct_size,kind,reference,algorithm,input_kind;

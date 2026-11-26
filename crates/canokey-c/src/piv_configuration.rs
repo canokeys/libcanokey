@@ -497,7 +497,8 @@ pub unsafe extern "C" fn cnk_piv_random_selected_new(
 }
 /// Copy a ten-byte configuration projection: enabled, Ed25519, RSA3072,
 /// RSA4096, X25519, secp256k1, P521, SM2, MLDSA65, MLKEM768. Zero means absent
-/// or disabled; the raw byte getter retains the original observed format.
+/// or disabled. Use the raw result-byte getter for the entire observed map,
+/// including the ML-DSA-44 and ML-KEM-512 IDs appended on 4.0.x.
 /// # Safety
 /// op is live without concurrent mutation/free. len is initialized/writable;
 /// a non-NULL buffer covers its capacity. Output ranges do not alias handles.
@@ -598,7 +599,7 @@ pub unsafe extern "C" fn cnk_profile_piv_capabilities(
                 piv_support
             }
         };
-        for code in 1..=13 {
+        for code in 1..=15 {
             let Ok(algorithm) = crate::piv_keys::algorithm(code) else {
                 continue;
             };

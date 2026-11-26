@@ -134,6 +134,15 @@ pub enum BatchRequest {
         /// Exactly 1088 ciphertext bytes.
         ciphertext: SecretBytes,
     },
+    /// Explicit ML-KEM decapsulation without a KDF or sender authentication.
+    DecapsulateWithAlgorithm {
+        /// Ordinary asymmetric slot with the corresponding private key.
+        slot: Slot,
+        /// ML-KEM-512 or ML-KEM-768.
+        algorithm: Algorithm,
+        /// Owned ciphertext, 768 bytes for ML-KEM-512 or 1088 for ML-KEM-768.
+        ciphertext: SecretBytes,
+    },
 }
 impl BatchRequest {
     fn input_len(&self) -> usize {
@@ -152,9 +161,9 @@ impl BatchRequest {
                     b.len()
                 }
             },
-            Self::Decrypt { ciphertext, .. } | Self::Decapsulate { ciphertext, .. } => {
-                ciphertext.len()
-            }
+            Self::Decrypt { ciphertext, .. }
+            | Self::Decapsulate { ciphertext, .. }
+            | Self::DecapsulateWithAlgorithm { ciphertext, .. } => ciphertext.len(),
             Self::SignStreaming { input, .. } => input.input_len(),
             Self::Derive { peer, .. } => peer.len(),
             _ => 0,
@@ -506,7 +515,21 @@ pub fn batch(
                 BatchItem::Bytes,
             ),
             BatchRequest::Decapsulate { slot, ciphertext } => mapped(
-                private::prepare_decapsulate(profile, slot, ciphertext, options)?,
+                private::prepare_decapsulate(
+                    profile,
+                    slot,
+                    Algorithm::MlKem768,
+                    ciphertext,
+                    options,
+                )?,
+                BatchItem::Bytes,
+            ),
+            BatchRequest::DecapsulateWithAlgorithm {
+                slot,
+                algorithm,
+                ciphertext,
+            } => mapped(
+                private::prepare_decapsulate(profile, slot, algorithm, ciphertext, options)?,
                 BatchItem::Bytes,
             ),
         };

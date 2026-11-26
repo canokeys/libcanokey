@@ -83,13 +83,14 @@ The historical matrix follows ckman's pinned firmware changelog and executable
 feature rules, cross-checked against core sources. Historical 1.3 and
 1.5.2–3.0.3 rules retain their patch-specific boundaries. Modern firmware uses a
 compatibility-series contract: all `3.1.x` patches share the 3.1 rules, and all
-`4.0.x` patches share the existing 4.0 rules (currently the same protocol rules).
+`4.0.x` patches share the 4.0 rules.
 Patch releases are assumed protocol-backward-compatible within these series;
 a newly released patch does not require a library update. A verified protocol
 exception may receive a narrow override rather than changing the whole series.
 
-One compatibility-base resolver selects capabilities, framing, configuration
-layouts, management algorithms, signature encodings and warnings. Original
+The compatibility-base resolver selects shared capabilities, framing, management
+algorithms, signature encodings and warnings. The 4.0.x PIV algorithm-map layout
+and new algorithm gates use the actual firmware series. Original
 firmware bytes, parsed patch numbers and suffixes remain unchanged in identity.
 Series rules produce FirmwareMatrix evidence; optional algorithms still require
 observed PIV configuration or CTAP getInfo. Suffix-bearing versions use their
@@ -113,6 +114,12 @@ SecurityStatusNotSatisfied at construction when
 `Capability::PivProtectedAlgorithmConfigRead` is Supported. `Existing`,
 `Management` and `PinAndManagement` remain allowed, unknown firmware is not
 rejected by this gate, and from 3.1.0 the unauthenticated read is unchanged.
+Firmware 3.1.x uses a ten-byte EE map. Firmware 4.0.x appends configurable
+ML-DSA-44 and ML-KEM-512 IDs at zero-based offsets 10 and 11. The firmware
+defaults are E4 and E5, respectively. Operations require the observed enabled
+IDs. Missing fields leave capability Unknown. Disabled maps preserve all bytes
+without exposing IDs. EE writes require the full series-specific map.
+
 After an acknowledged
 2.x Admin 40/07 write, callers may create a new immutable snapshot using
 `with_legacy_piv_extensions(bool)` (C: `cnk_profile_with_legacy_piv_extensions`).
@@ -158,16 +165,24 @@ and SM2 digests (caller computes SM3(ZA||M)). SM2 returns DER on legacy supporte
 firmware and P1363 on 3.1.0; `Signature::encoding()` reports this without guessing
 from bytes. Conversion checks representation, not signature validity.
 
-`sign_streaming` explicitly chooses pure ML-DSA-65 with empty context, randomized
-Ed25519 or full-message SM2. All accept empty messages; none substitutes prehash
-semantics. SM2 accepts an optional 1..32 byte identity and always starts a chain.
+`sign_streaming` explicitly chooses pure ML-DSA-44/65 with empty context,
+randomized Ed25519 or full-message SM2. All accept empty messages and use the
+full message. ML-DSA-44 returns 2420 signature bytes and ML-DSA-65 returns 3309.
+SM2 accepts an optional 1..32 byte identity and always starts a chain.
 Firmware TLV lengths bound the body to 65535 bytes in addition to host budgets.
+On 4.0.x, the ML-DSA-44 public key is 1312 bytes and imports use a 32-byte seed
+under tag 09. The ML-KEM-512 public key is 800 bytes and imports use a 64-byte
+`d || z` seed under tag 0A. Generation and metadata use the same raw public-key
+fields as ML-DSA-65 and ML-KEM-768.
 
 RSA decrypt returns a raw modulus-sized block without unpadding. ECDH checks
 uncompressed peer points using RustCrypto; X25519 requires 32 RFC 7748 bytes and
-rejects an all-zero result. ML-KEM-768 decapsulation requires 1088 ciphertext bytes
-and returns 32 secret bytes; implicit rejection does not authenticate the sender.
-No KDF is applied. SM2 agreement is a separate protocol, not generic ECDH. `agree_sm2` takes role,
+rejects an all-zero result. `decapsulate_with_algorithm` and
+`BatchRequest::DecapsulateWithAlgorithm` select ML-KEM-512 (768 ciphertext bytes)
+or ML-KEM-768 (1088 ciphertext bytes). `decapsulate` and
+`BatchRequest::Decapsulate` select ML-KEM-768. Both parameter sets return 32
+secret bytes without a KDF. Implicit rejection does not authenticate the sender.
+`agree_sm2` takes role,
 peer static/ephemeral points, identities and key length up front; it returns an own
 public ephemeral point and a key derived by the firmware's SM2 KDF. The initiator
 reads policy first and rejects PIN-always because the two GA steps cannot preserve
@@ -482,6 +497,8 @@ caller-held selected context. All factories are profile-free: they enforce
 the CTAP2 specification, not any authenticator's advertised capabilities.
 `AuthenticatorInfo` retains the raw getInfo map alongside its typed
 accessors, so fields the library does not interpret stay observable.
+On 4.0.x, FIDO authenticators that enable ML-DSA-44 advertise COSE -48 through
+getInfo. ML-KEM-512 is available exclusively through PIV.
 
 `cbor` implements the strict canonical CBOR CTAP2 authenticators speak:
 definite-length items only, shortest-form integers and lengths, no tags, at
@@ -670,7 +687,11 @@ these boundaries. Package reuse does not establish device support.
 Selected version/configuration probes do not invent a profile or authenticate.
 RNG checks the live PIV version before bounded generation and owns zeroizing
 output. Configuration projections use zero for disabled/unobserved IDs while raw
-observations remain available. Firmware/model/serial accessors read immutable
+observations remain available. The C projection stays ten bytes. The C raw-result
+getter exposes the full 4.0.x map, including its two appended IDs.
+`cnk_piv_decapsulate_with_algorithm_new` and
+`CNK_BATCH_DECAPSULATE_WITH_ALGORITHM` take the explicit ML-KEM algorithm.
+Firmware/model/serial accessors read immutable
 probe results. Empty-slot checks accept only explicit absence and never decode
 an occupied key into permission to replace it.
 

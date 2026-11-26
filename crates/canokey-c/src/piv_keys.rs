@@ -18,6 +18,8 @@ pub(super) fn algorithm(value: u32) -> Result<piv::Algorithm, u32> {
         11 => Ok(X25519),
         12 => Ok(MlDsa65),
         13 => Ok(MlKem768),
+        14 => Ok(MlDsa44),
+        15 => Ok(MlKem512),
         _ => Err(ARG),
     }
 }
@@ -37,6 +39,8 @@ pub(super) fn algorithm_code(value: piv::Algorithm) -> u32 {
         X25519 => 11,
         MlDsa65 => 12,
         MlKem768 => 13,
+        MlDsa44 => 14,
+        MlKem512 => 15,
     }
 }
 /// Copied key-generation/import parameters; uses CNK_ALGORITHM_* constants.
@@ -118,6 +122,8 @@ pub(super) unsafe fn material(
             X25519 => piv::PrivateKeyMaterial::x25519_key(values[0]),
             MlDsa65 => piv::PrivateKeyMaterial::mldsa65_seed(values[0]),
             MlKem768 => piv::PrivateKeyMaterial::mlkem768_seed(values[0]),
+            MlDsa44 => piv::PrivateKeyMaterial::mldsa44_seed(values[0]),
+            MlKem512 => piv::PrivateKeyMaterial::mlkem512_seed(values[0]),
             _ => return Err(failure(Error::new(ErrorKind::UnsupportedAlgorithm), error)),
         }
     };
@@ -369,11 +375,44 @@ pub unsafe extern "C" fn cnk_piv_decapsulate_new(
     out: *mut *mut CnkOperation,
     error: *mut CnkError,
 ) -> u32 {
+    cnk_piv_decapsulate_with_algorithm_new(
+        profile,
+        reference,
+        algorithm_code(piv::Algorithm::MlKem768),
+        data,
+        len,
+        auth,
+        opts,
+        out,
+        error,
+    )
+}
+/// Select ML-KEM-512 (768 ciphertext bytes) or ML-KEM-768 (1088 ciphertext bytes).
+/// Copies the inputs into an owned operation. The result-byte getter copies the
+/// 32-byte shared secret. An unsupported algorithm or wrong length fails before I/O.
+///
+/// # Safety
+/// Follow the crate pointer/aliasing contract. profile must be live and data
+/// must cover len readable bytes. Optional auth/opts/error and nested ranges
+/// must be valid. out must be writable and non-NULL.
+#[no_mangle]
+pub unsafe extern "C" fn cnk_piv_decapsulate_with_algorithm_new(
+    profile: *const CnkProfile,
+    reference: u32,
+    key_algorithm: u32,
+    data: *const u8,
+    len: usize,
+    auth: *const CnkPivAccess,
+    opts: *const CnkOptions,
+    out: *mut *mut CnkOperation,
+    error: *mut CnkError,
+) -> u32 {
     create(out, error, || {
         let options = piv_options(opts)?;
-        piv::decapsulate(
+        piv::decapsulate_with_algorithm(
             &profile.as_ref().ok_or(ARG)?.0,
             slot(reference)?,
+            algorithm(key_algorithm)?,
             piv_input(data, len, options, error)?,
             piv_access(auth, opts, error)?,
             options,
@@ -739,6 +778,7 @@ pub(super) unsafe fn streaming_input(
                 Some(bytes(user_id, user_id_len)?.to_vec())
             },
         }),
+        4 => Ok(piv::StreamingSignInput::MlDsa44(message)),
         _ => Err(ARG),
     }
 }

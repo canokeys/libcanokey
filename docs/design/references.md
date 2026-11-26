@@ -368,7 +368,7 @@ leaves Admin/OATH/PASS/NDEF commands, configuration layouts, PIV AES-192
 management and algorithm IDs/encodings unchanged. OpenPGP/PIV add session-yield
 predicates; the other changes concern USB/session lifecycle and crypto safety.
 PIV re-selection preservation and CTAP algorithm build restrictions already exist
-in `e558d5c`; existing 3.1.0/4.0.0 capability semantics are retained here.
+in `e558d5c`; the common 3.1.0 and 4.0.0 capability rules are based on that evidence.
 These sources establish the baseline for the
 [3.1.x/4.0.x compatibility-series policy](api-design.md#profiles-and-probing):
 patch releases reuse existing rules, including modern framing and SM2 P1363
@@ -376,3 +376,14 @@ signatures; unknown major/minor series remain conservative. CTAP algorithms
 and PIV extension enablement still require device observations. This is source
 and offline-transcript evidence: USB/IP execution, physical NFC/touch, persistence,
 and consumer integration were not verified; no physical device was accessed.
+
+## Firmware 4.0 post-quantum parameter sets
+
+The 4.0.x matrix follows the firmware's ML-DSA-44 and ML-KEM-512 wire
+formats. The PIV EE map appends the configurable IDs for both algorithms.
+PIV generation, seed import, metadata, streaming signing and chained
+decapsulation use the parameter-set-specific lengths. The FIDO getInfo table
+adds ML-DSA-44 to builds with unrestricted algorithms. ML-KEM-512 is PIV-only.
+[PIV configuration](https://github.com/canokeys/canokey-core/blob/a44d25d8fb16622a211d1813daade6f70570cef9/include/piv.h)
+· [PIV transcripts](https://github.com/canokeys/canokey-core/blob/a44d25d8fb16622a211d1813daade6f70570cef9/test/test_piv.c)
+· [CTAP getInfo generator](https://github.com/canokeys/canokey-core/blob/a44d25d8fb16622a211d1813daade6f70570cef9/scripts/gen_ctap_get_info.py)

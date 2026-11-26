@@ -75,7 +75,8 @@ impl FirmwareVersion {
     }
     fn compatibility_base(&self) -> (u16, u16, u16) {
         // Patch releases in these series preserve the same protocol contract.
-        // Rust 4.0 currently shares the 3.1 rules; historical patch gates remain.
+        // The common rules are shared by 3.1 and 4.0. Features introduced in
+        // 4.0 check the actual series separately.
         match (self.major, self.minor) {
             (3, 1) | (4, 0) => (3, 1, 0),
             _ => (self.major, self.minor, self.patch),
@@ -315,6 +316,10 @@ pub enum Algorithm {
     MlDsa65,
     /// ML-KEM-768 key encapsulation.
     MlKem768,
+    /// ML-DSA-44 signature algorithm.
+    MlDsa44,
+    /// ML-KEM-512 key encapsulation.
+    MlKem512,
 }
 /// Owned observed extension-ID mapping, preserving the original bytes.
 /// Missing extension fields stay absent; a disabled mapping exposes no wire IDs.
@@ -327,12 +332,14 @@ pub struct AlgorithmConfig {
 impl AlgorithmConfig {
     /// Parse observed configuration without inventing missing extension fields.
     ///
-    /// Seven bytes use the legacy layout; later fields add P-521, ML-DSA and ML-KEM.
+    /// Seven bytes use the legacy layout. The ten-byte map adds P-521,
+    /// ML-DSA-65 and ML-KEM-768. The twelve-byte map appends ML-DSA-44 and ML-KEM-512.
+    /// Disabled maps retain their raw bytes without interpreting their IDs.
     /// Bytes beyond the understood fields are preserved by [`Self::raw`].
     ///
     /// # Errors
     /// Returns [`ErrorKind::InvalidResponse`] for fewer than seven bytes, an invalid
-    /// enable flag, or zero/reserved/duplicate IDs among recognized fields.
+    /// enable flag, or zero/reserved/duplicate IDs among enabled, recognized fields.
     pub fn parse(data: &[u8]) -> Result<Self, Error> {
         if data.len() < 7 || data[0] > 1 {
             return Err(Error::new(ErrorKind::InvalidResponse));
@@ -354,18 +361,21 @@ impl AlgorithmConfig {
         if data.len() >= 10 {
             algorithms.push(Algorithm::MlKem768);
         }
+        if data.len() >= 12 {
+            algorithms.extend([Algorithm::MlDsa44, Algorithm::MlKem512]);
+        }
+        let enabled = data[0] == 1;
         let mut ids = BTreeMap::new();
-        for (alg, id) in algorithms.into_iter().zip(data[1..].iter().copied()) {
-            if id == 0
-                || [0x06, 0x07, 0x11, 0x14].contains(&id)
-                || ids.values().any(|old| *old == id)
-            {
-                return Err(Error::new(ErrorKind::InvalidResponse));
+        if enabled {
+            for (alg, id) in algorithms.into_iter().zip(data[1..].iter().copied()) {
+                if [0, 0x06, 0x07, 0x11, 0x14].contains(&id) || ids.values().any(|old| *old == id) {
+                    return Err(Error::new(ErrorKind::InvalidResponse));
+                }
+                ids.insert(alg, id);
             }
-            ids.insert(alg, id);
         }
         Ok(Self {
-            enabled: data[0] == 1,
+            enabled,
             ids,
             raw: data.to_vec(),
         })
@@ -784,7 +794,16 @@ impl DeviceProfile {
             AdminConfigurationLayout::Features
         })
     }
+    fn is_4_0_series(&self) -> bool {
+        self.info
+            .firmware
+            .as_ref()
+            .is_some_and(|f| (f.major, f.minor) == (4, 0))
+    }
     fn extension_wire_id(&self, algorithm: Algorithm) -> Option<u8> {
+        if matches!(algorithm, Algorithm::MlDsa44 | Algorithm::MlKem512) && !self.is_4_0_series() {
+            return None;
+        }
         let id = self.config.as_ref()?.wire_id(algorithm)?;
         // 3.1 introduces AES management (0A) and randomized Ed25519 (FF).
         // Preserve the observation, but never use a colliding ID for another mode.
@@ -803,6 +822,7 @@ impl DeviceProfile {
     /// reserved AES-management/randomized-signing IDs never resolve as extensions,
     /// even if malformed configuration observations assign them. Raw bytes remain
     /// available through algorithm_config; older layouts retain their own IDs.
+    /// The two IDs appended in 4.0.x resolve for that firmware series.
     pub fn algorithm_wire_id(&self, algorithm: Algorithm) -> Option<u8> {
         match algorithm {
             Algorithm::Rsa1024 => Some(0x06),
@@ -845,6 +865,8 @@ impl DeviceProfile {
             Algorithm::X25519,
             Algorithm::MlDsa65,
             Algorithm::MlKem768,
+            Algorithm::MlDsa44,
+            Algorithm::MlKem512,
         ]
         .into_iter()
         .find(|a| self.algorithm_wire_id(*a) == Some(id))
@@ -879,11 +901,23 @@ impl DeviceProfile {
         }
         self.firmware_range((3, 0, 0), (3, 1, 0))
     }
+    /// Return the complete PIV algorithm-map length for a configuration write.
+    /// Requires firmware with evidenced write support. The 3.1.x series uses ten
+    /// bytes and the 4.0.x series uses twelve.
+    ///
+    /// # Errors
+    /// Returns the capability error for unsupported or unknown firmware.
+    pub fn algorithm_config_write_len(&self) -> Result<usize, Error> {
+        self.capability(Capability::AlgorithmConfigWrite)
+            .require()?;
+        Ok(if self.is_4_0_series() { 12 } else { 10 })
+    }
     /// Whether an asymmetric algorithm is evidenced for PIV key operations.
     /// Extended algorithms require observed enabled IDs or a caller-confirmed 2.x
     /// Admin switch with firmware-fixed IDs; guessed fallback IDs
     /// never authorize a key write. RSA-1024 is not implemented by inspected firmware.
     /// Ed/X operations require the encoding fixes from 3.0.1 onward.
+    /// ML-DSA-44 and ML-KEM-512 require 4.0.x and their observed enabled IDs.
     pub fn key_algorithm_support(&self, algorithm: Algorithm) -> CapabilityStatus {
         let baseline = self.firmware_range((1, 3, 0), (3, 1, 0));
         if baseline.support != Support::Supported {
@@ -895,11 +929,19 @@ impl DeviceProfile {
                 support: Support::Unsupported,
                 evidence: Evidence::FirmwareMatrix,
             },
+            Algorithm::MlDsa44 | Algorithm::MlKem512 if !self.is_4_0_series() => CapabilityStatus {
+                support: Support::Unsupported,
+                evidence: Evidence::FirmwareMatrix,
+            },
             _ => {
                 let range = self.firmware_range(
                     match algorithm {
                         Algorithm::Ed25519 | Algorithm::X25519 => (3, 0, 1),
-                        Algorithm::EccP521 | Algorithm::MlDsa65 | Algorithm::MlKem768 => (3, 1, 0),
+                        Algorithm::EccP521
+                        | Algorithm::MlDsa65
+                        | Algorithm::MlKem768
+                        | Algorithm::MlDsa44
+                        | Algorithm::MlKem512 => (3, 1, 0),
                         _ => (2, 0, 0),
                     },
                     (3, 1, 0),
@@ -936,12 +978,12 @@ impl DeviceProfile {
         }
     }
     /// Whether the firmware supports the explicit streaming signing protocol.
-    /// Only ML-DSA-65 (empty context), randomized Ed25519 and SM2 are accepted.
+    /// ML-DSA-44/65 use empty context. Randomized Ed25519 and SM2 are also accepted.
     /// Requires 3.1.x/4.0.x and observed enabled algorithm IDs; unknown series remain Unknown.
     pub fn streaming_signing_support(&self, algorithm: Algorithm) -> CapabilityStatus {
         if !matches!(
             algorithm,
-            Algorithm::MlDsa65 | Algorithm::Ed25519 | Algorithm::Sm2
+            Algorithm::MlDsa44 | Algorithm::MlDsa65 | Algorithm::Ed25519 | Algorithm::Sm2
         ) {
             return CapabilityStatus {
                 support: Support::Unsupported,

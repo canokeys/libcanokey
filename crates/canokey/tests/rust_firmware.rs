@@ -117,3 +117,45 @@ fn observed_extension_ids_require_a_known_series() {
         );
     }
 }
+
+#[test]
+fn small_pq_algorithms_require_the_4_0_series_and_observed_ids() {
+    let map = [
+        1, 0xe0, 5, 0x16, 0xe1, 0x53, 0x15, 0x54, 0xe2, 0xe3, 0xd4, 0xd5,
+    ];
+    for (firmware, bytes, expected) in [
+        ("3.1.3", &map[..], Support::Unsupported),
+        ("4.0.0", &map[..10], Support::Unknown),
+        ("4.0.0", &map[..], Support::Supported),
+        ("4.0.7-dev", &map[..], Support::Supported),
+        ("4.1.0", &map[..], Support::Unknown),
+        ("4.0.0", &[0; 12][..], Support::Unsupported),
+    ] {
+        let mut observed = DeviceObservations::new(firmware.as_bytes().to_vec());
+        observed.algorithm_config = Some(AlgorithmConfig::parse(bytes).unwrap());
+        let profile = DeviceProfile::from_observations(observed).unwrap();
+        assert_eq!(profile.algorithm_config().unwrap().raw(), bytes);
+        for (algorithm, id) in [(Algorithm::MlDsa44, 0xd4), (Algorithm::MlKem512, 0xd5)] {
+            assert_eq!(profile.key_algorithm_support(algorithm).support, expected);
+            assert_eq!(
+                profile.algorithm_from_wire_id(id),
+                (expected == Support::Supported).then_some(algorithm)
+            );
+            assert_eq!(
+                profile.openpgp_algorithm_support(algorithm, true).support,
+                Support::Unsupported
+            );
+        }
+        assert_eq!(
+            profile
+                .streaming_signing_support(Algorithm::MlDsa44)
+                .support,
+            expected
+        );
+    }
+    let mut malformed = map;
+    malformed[11] = malformed[9];
+    assert!(AlgorithmConfig::parse(&malformed).is_err());
+    malformed[11] = 0;
+    assert!(AlgorithmConfig::parse(&malformed).is_err());
+}

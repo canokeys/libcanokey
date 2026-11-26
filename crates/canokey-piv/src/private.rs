@@ -261,10 +261,10 @@ pub(crate) fn parse_signature(
     } else if let Some(width) = curve_len(algorithm) {
         ec_signature(bytes.as_bytes(), width)?;
     } else {
-        let width = if algorithm == Algorithm::MlDsa65 {
-            3309
-        } else {
-            rsa_len(algorithm).unwrap_or(64)
+        let width = match algorithm {
+            Algorithm::MlDsa44 => 2420,
+            Algorithm::MlDsa65 => 3309,
+            _ => rsa_len(algorithm).unwrap_or(64),
         };
         if bytes.len() != width {
             return Err(invalid());
@@ -430,23 +430,57 @@ pub fn decapsulate(
     access: Access,
     options: OperationOptions,
 ) -> Result<Operation<SecretBytes>, Error> {
-    let target = prepare_decapsulate(profile, slot, ciphertext, options)?;
+    decapsulate_with_algorithm(
+        profile,
+        slot,
+        Algorithm::MlKem768,
+        ciphertext,
+        access,
+        options,
+    )
+}
+
+/// Decapsulate with an explicitly selected card-held ML-KEM key.
+/// Takes ownership of 768 ciphertext bytes for ML-KEM-512 or 1088 for ML-KEM-768.
+/// The result is a 32-byte shared secret in zeroized storage. Encapsulation,
+/// key derivation and application key confirmation remain with the caller.
+/// An invalid ciphertext can produce a secret through implicit rejection.
+///
+/// # Errors
+/// Other algorithms and incorrect ciphertext lengths fail before I/O. An enabled,
+/// observed wire ID and a supported PIV slot are required. ML-KEM-512 requires
+/// 4.0.x firmware. Card, budget and response errors propagate without replay.
+pub fn decapsulate_with_algorithm(
+    profile: &DeviceProfile,
+    slot: Slot,
+    algorithm: Algorithm,
+    ciphertext: SecretBytes,
+    access: Access,
+    options: OperationOptions,
+) -> Result<Operation<SecretBytes>, Error> {
+    let target = prepare_decapsulate(profile, slot, algorithm, ciphertext, options)?;
     access::with_access(profile, access, target, options)
 }
 
 pub(crate) fn prepare_decapsulate(
     profile: &DeviceProfile,
     slot: Slot,
+    algorithm: Algorithm,
     ciphertext: SecretBytes,
     options: OperationOptions,
 ) -> Result<Sequence<SecretBytes>, Error> {
-    if ciphertext.len() != 1088 {
+    let width = match algorithm {
+        Algorithm::MlKem512 => 768,
+        Algorithm::MlKem768 => 1088,
+        _ => return Err(Error::new(ErrorKind::UnsupportedAlgorithm)),
+    };
+    if ciphertext.len() != width {
         return Err(Error::new(ErrorKind::InvalidArgument));
     }
     let command = command(
         profile,
         slot,
-        Algorithm::MlKem768,
+        algorithm,
         0x81,
         ciphertext.as_bytes(),
         options,

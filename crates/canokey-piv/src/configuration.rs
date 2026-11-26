@@ -250,9 +250,9 @@ pub(crate) fn prepare_retry_reset(
     )
 }
 /// Replace the complete algorithm-ID configuration with explicit management access.
-/// Exactly ten known-layout bytes are required on 3.1.0; unknown trailing fields
-/// are not silently discarded. Success returns ReprobeRequired; uncertain writes
-/// also invalidate the caller's profile. Never continue with cached wire IDs.
+/// The complete map is ten bytes on 3.1.x and twelve bytes on 4.0.x. A different
+/// length fails before I/O. Success returns ReprobeRequired. Uncertain writes
+/// also invalidate the caller's profile. Reprobe before using the wire IDs.
 pub fn set_algorithm_config(
     profile: &DeviceProfile,
     config: AlgorithmConfig,
@@ -268,8 +268,8 @@ pub(crate) fn prepare_config(
     config: AlgorithmConfig,
     options: OperationOptions,
 ) -> Result<Sequence<MutationResult>, Error> {
-    checked(profile, Capability::AlgorithmConfigWrite, None)?;
-    if config.raw().len() != 10
+    require(profile)?;
+    if config.raw().len() != profile.algorithm_config_write_len()?
         || (config.enabled()
             && config.raw()[1..]
                 .iter()

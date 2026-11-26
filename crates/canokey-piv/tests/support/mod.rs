@@ -10,6 +10,13 @@ pub fn profile(version: &str) -> DeviceProfile {
     DeviceProfile::from_observations(o).unwrap()
 }
 #[allow(dead_code)]
+pub fn profile_4_0() -> DeviceProfile {
+    let mut o = DeviceObservations::new(b"4.0.0".to_vec());
+    o.piv_version = Some(PivApplicationVersion([5, 7, 0]));
+    o.algorithm_config = Some(AlgorithmConfig::parse(&hex("01e00516e15354555657d4d5")).unwrap());
+    DeviceProfile::from_observations(o).unwrap()
+}
+#[allow(dead_code)]
 pub fn profile_without_ml() -> DeviceProfile {
     let mut o = DeviceObservations::new(b"3.1.0".to_vec());
     o.piv_version = Some(PivApplicationVersion([5, 7, 0]));

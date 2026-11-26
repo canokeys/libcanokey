@@ -8,13 +8,16 @@ use support::*;
 fn send_ciphertext<T>(op: &mut Operation<T>) {
     let mut payload = hex("7c820446820081820440");
     payload.extend([0x42; 1088]);
+    send_chunks(op, 0x57, &payload);
+}
+fn send_chunks<T>(op: &mut Operation<T>, id: u8, payload: &[u8]) {
     let chunks = payload.chunks(255).collect::<Vec<_>>();
     for (i, chunk) in chunks.iter().enumerate() {
         let last = i == chunks.len() - 1;
         let mut command = vec![
             if last { 0 } else { 0x10 },
             0x87,
-            0x57,
+            id,
             0x9d,
             chunk.len() as u8,
         ];
@@ -25,6 +28,44 @@ fn send_ciphertext<T>(op: &mut Operation<T>) {
             op.advance(&[0x90, 0]).unwrap();
         }
     }
+}
+
+#[test]
+fn mlkem512_decapsulates_only_the_selected_parameter_set() {
+    let p = profile_4_0();
+    for (algorithm, len, kind) in [
+        (Algorithm::MlKem512, 767, ErrorKind::InvalidArgument),
+        (Algorithm::MlKem512, 1088, ErrorKind::InvalidArgument),
+        (Algorithm::MlKem768, 768, ErrorKind::InvalidArgument),
+        (Algorithm::MlDsa44, 768, ErrorKind::UnsupportedAlgorithm),
+    ] {
+        let error = decapsulate_with_algorithm(
+            &p,
+            Slot::KeyManagement,
+            algorithm,
+            SecretBytes::new(vec![0x42; len]),
+            Access::None,
+            Default::default(),
+        )
+        .unwrap_err();
+        assert_eq!(error.kind, kind);
+    }
+    let mut op = decapsulate_with_algorithm(
+        &p,
+        Slot::KeyManagement,
+        Algorithm::MlKem512,
+        SecretBytes::new(vec![0x42; 768]),
+        Access::None,
+        Default::default(),
+    )
+    .unwrap();
+    selected(&mut op);
+    let mut payload = hex("7c820306820081820300");
+    payload.extend([0x42; 768]);
+    send_chunks(&mut op, 0xd5, &payload);
+    assert_eq!(op.advance(&secret_reply(32)).unwrap(), Step::Done);
+    assert_eq!(op.take_result().unwrap().as_bytes(), &[0; 32]);
+    assert!(op.take_result().is_err());
 }
 fn secret_reply(len: usize) -> Vec<u8> {
     let mut data = vec![0x7c, (len + 2) as u8, 0x82, len as u8];

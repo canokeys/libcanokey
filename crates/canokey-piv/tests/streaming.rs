@@ -23,6 +23,53 @@ fn operation(input: StreamingSignInput) -> Operation<Signature> {
     .unwrap()
 }
 #[test]
+fn mldsa44_checks_the_raw_signature_width_after_continuation() {
+    for size in [2420, 2419, 3309] {
+        let mut op = sign_streaming(
+            &profile_4_0(),
+            Slot::Signature,
+            StreamingSignInput::MlDsa44(message(&[])),
+            Access::None,
+            Default::default(),
+        )
+        .unwrap();
+        selected(&mut op);
+        assert_eq!(
+            op.command().unwrap().as_bytes(),
+            hex("0087d49c067c0482008100")
+        );
+        let mut reply = hex("7c82097882820974");
+        reply[2..4].copy_from_slice(&(size as u16 + 4).to_be_bytes());
+        reply[6..8].copy_from_slice(&(size as u16).to_be_bytes());
+        reply.extend(vec![0x77; size]);
+        let mut chunks = reply.chunks(256).peekable();
+        while let Some(chunk) = chunks.next() {
+            let mut response = chunk.to_vec();
+            if chunks.peek().is_some() {
+                response.extend([0x61, 0]);
+                assert_eq!(op.advance(&response).unwrap(), Step::Exchange);
+                assert_eq!(op.command().unwrap().as_bytes(), hex("00c0000000"));
+            } else {
+                response.extend([0x90, 0]);
+                let step = op.advance(&response);
+                if size == 2420 {
+                    assert_eq!(step.unwrap(), Step::Done);
+                } else {
+                    assert_eq!(step.unwrap_err().kind, ErrorKind::InvalidResponse);
+                }
+            }
+        }
+        if size == 2420 {
+            let signature = op.take_result().unwrap();
+            assert_eq!(signature.algorithm(), Algorithm::MlDsa44);
+            assert_eq!(signature.encoding(), SignatureEncoding::Raw);
+            assert_eq!(signature.as_bytes(), [0x77; 2420]);
+        } else {
+            assert!(op.result().is_err());
+        }
+    }
+}
+#[test]
 fn empty_messages_use_explicit_modes_and_sm2_always_starts_a_chain() {
     let mut ed = operation(StreamingSignInput::Ed25519Randomized(message(&[])));
     selected(&mut ed);

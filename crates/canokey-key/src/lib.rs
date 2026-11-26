@@ -64,7 +64,7 @@ pub enum PublicKey {
     },
     /// Raw Edwards/Montgomery or post-quantum public bytes.
     Raw {
-        /// Ed25519, X25519, ML-DSA-65 or ML-KEM-768.
+        /// Ed25519, X25519, ML-DSA-44/65 or ML-KEM-512/768.
         algorithm: Algorithm,
         /// Raw public encoding, without TLV/SPKI prefixes.
         bytes: Vec<u8>,
@@ -92,7 +92,9 @@ pub fn curve_len(algorithm: Algorithm) -> Option<usize> {
 fn raw_len(algorithm: Algorithm) -> Option<usize> {
     match algorithm {
         Algorithm::Ed25519 | Algorithm::X25519 => Some(32),
+        Algorithm::MlDsa44 => Some(1312),
         Algorithm::MlDsa65 => Some(1952),
+        Algorithm::MlKem512 => Some(800),
         Algorithm::MlKem768 => Some(1184),
         _ => None,
     }
@@ -232,7 +234,9 @@ impl PublicKey {
                 let id = match algorithm {
                     Algorithm::Ed25519 => "1.3.101.112",
                     Algorithm::X25519 => "1.3.101.110",
+                    Algorithm::MlDsa44 => "2.16.840.1.101.3.4.3.17",
                     Algorithm::MlDsa65 => "2.16.840.1.101.3.4.3.18",
+                    Algorithm::MlKem512 => "2.16.840.1.101.3.4.4.1",
                     Algorithm::MlKem768 => "2.16.840.1.101.3.4.4.2",
                     _ => return Err(bad()),
                 };

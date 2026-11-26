@@ -153,6 +153,11 @@ pub unsafe extern "C" fn cnk_piv_batch_new(
                     slot: slot(r.reference)?,
                     ciphertext: data()?,
                 },
+                28 => piv::BatchRequest::DecapsulateWithAlgorithm {
+                    slot: slot(r.reference)?,
+                    algorithm: algorithm(r.algorithm)?,
+                    ciphertext: data()?,
+                },
                 27 => piv::BatchRequest::AgreeSm2 {
                     slot: slot(r.reference)?,
                     input: piv_sm2::input(r.sm2)?,

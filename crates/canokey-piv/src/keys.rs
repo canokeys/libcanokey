@@ -96,9 +96,19 @@ impl PrivateKeyMaterial {
     pub fn mldsa65_seed(bytes: &[u8]) -> Result<Self, Error> {
         Self::field(Algorithm::MlDsa65, 0x09, bytes, 32)
     }
+    /// Copy a 32-byte ML-DSA-44 seed into PIV import tag 09.
+    /// Other lengths return InvalidArgument.
+    pub fn mldsa44_seed(bytes: &[u8]) -> Result<Self, Error> {
+        Self::field(Algorithm::MlDsa44, 0x09, bytes, 32)
+    }
     /// Copy a 64-byte ML-KEM-768 seed in d || z order.
     pub fn mlkem768_seed(bytes: &[u8]) -> Result<Self, Error> {
         Self::field(Algorithm::MlKem768, 0x0a, bytes, 64)
+    }
+    /// Copy a 64-byte ML-KEM-512 seed in d || z order into PIV import tag 0A.
+    /// Other lengths return InvalidArgument.
+    pub fn mlkem512_seed(bytes: &[u8]) -> Result<Self, Error> {
+        Self::field(Algorithm::MlKem512, 0x0a, bytes, 64)
     }
     fn field(algorithm: Algorithm, tag: u8, bytes: &[u8], len: usize) -> Result<Self, Error> {
         if bytes.len() != len {

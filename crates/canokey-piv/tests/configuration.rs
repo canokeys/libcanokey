@@ -7,6 +7,27 @@ use support::*;
 fn config() -> AlgorithmConfig {
     AlgorithmConfig::parse(&hex("01e00516e15354555657")).unwrap()
 }
+
+#[test]
+fn algorithm_map_write_uses_the_firmware_series_length() {
+    let p = profile_4_0();
+    let full = || p.algorithm_config().unwrap().clone();
+    for (p, wrong) in [(&p, config()), (&profile("3.1.0"), full())] {
+        let error = set_algorithm_config(p, wrong, access(), Default::default()).unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidArgument);
+    }
+    let mut op = set_algorithm_config(&p, full(), access(), Default::default()).unwrap();
+    authenticate(&mut op);
+    assert_eq!(
+        op.command().unwrap().as_bytes(),
+        hex("00ee02000c01e00516e15354555657d4d5")
+    );
+    assert_eq!(op.advance(&[0x90, 0]).unwrap(), Step::Done);
+    assert_eq!(
+        op.take_result().unwrap().profile_effect,
+        ProfileEffect::ReprobeRequired
+    );
+}
 fn dual() -> Access {
     let Access::Management(management) = access() else {
         unreachable!()

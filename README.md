@@ -75,10 +75,11 @@ generation/import (P-256/P-384/P-521/secp256k1/SM2 scalars, RSA CRT, Ed25519/X25
 seeds) with public-key SPKI export. Dedicated F9 attestation-signer P-256
 generation/import and read-only metadata/certificate observations are available
 on evidenced firmware; callers own overwrite consent and trust policy. Classic RSA/ECDSA/SM2/Ed25519 signing with DER/P1363
-conversion; explicit ML-DSA (empty context), randomized Ed25519 and SM2 full-message
+conversion; explicit ML-DSA-44/65 (empty context), randomized Ed25519 and SM2 full-message
 streaming signing, including empty messages; raw RSA decryption, ECDH
-(P-256/P-384/P-521/secp256k1), X25519, ML-KEM-768 decapsulation and SM2 agreement
-with pre-exchanged peer keys. Classic PIV hashing/padding and postprocessing KDF
+(P-256/P-384/P-521/secp256k1), X25519, ML-KEM-512/768 decapsulation and SM2 agreement
+with pre-exchanged peer keys. PIV ML-DSA-44 and ML-KEM-512 require firmware 4.0.x
+and enabled IDs observed in the PIV algorithm map. Classic PIV hashing/padding and postprocessing KDF
 remain caller responsibilities. Batch requests run under one SELECT and retain
 completed results after a later failure.
 
@@ -97,7 +98,8 @@ KeePassXC interop path on firmware 3.1.0.
 **CTAP/FIDO2** — ISO 7816 transport envelope (explicit FIDO2 selection, `80 10`
 message wrap, `80 C0` continuation) plus a typed CTAP2 client: strict canonical
 CBOR, COSE key and authenticatorData parsing, getInfo/makeCredential/getAssertion/
-reset/selection. The `clientpin` feature (default in `canokey-ctap`, opt-in on the
+reset/selection. Firmware 4.0.x can advertise ML-DSA-44 (COSE -48) through
+getInfo. ML-KEM-512 is PIV-only. The `clientpin` feature (default in `canokey-ctap`, opt-in on the
 facade) adds ClientPIN protocols 1/2, credential management with bounded enumeration,
 authenticatorConfig and fragmented largeBlobs. Raw CTAP1/U2F register/authenticate/
 check-only/version commands are ungated; the hmac-secret extension covers the

@@ -9,6 +9,9 @@ pub enum StreamingSignInput {
     /// Pure ML-DSA-65 with an empty context. Nonempty context and HashML-DSA are
     /// not representable because the evidenced firmware hardcodes the empty context.
     MlDsa65(SecretBytes),
+    /// Pure ML-DSA-44 with an empty context on 4.0.x firmware.
+    /// The owned bytes are the full message, including an empty message.
+    MlDsa44(SecretBytes),
     /// Randomized Ed25519 using firmware's explicit FF mode. Signatures verify as
     /// Ed25519 but are not deterministic. This is not Ed25519ph or Ed25519ctx.
     Ed25519Randomized(SecretBytes),
@@ -26,13 +29,14 @@ impl StreamingSignInput {
     pub fn algorithm(&self) -> Algorithm {
         match self {
             Self::MlDsa65(_) => Algorithm::MlDsa65,
+            Self::MlDsa44(_) => Algorithm::MlDsa44,
             Self::Ed25519Randomized(_) => Algorithm::Ed25519,
             Self::Sm2 { .. } => Algorithm::Sm2,
         }
     }
     pub(crate) fn input_len(&self) -> usize {
         match self {
-            Self::MlDsa65(m) | Self::Ed25519Randomized(m) => m.len(),
+            Self::MlDsa44(m) | Self::MlDsa65(m) | Self::Ed25519Randomized(m) => m.len(),
             Self::Sm2 { message, user_id } => message
                 .len()
                 .saturating_add(user_id.as_ref().map_or(0, Vec::len)),
@@ -45,7 +49,8 @@ impl StreamingSignInput {
 /// retain raw ML-DSA/Ed25519 or P1363 SM2 encoding, with EC conversion getters.
 ///
 /// # Errors
-/// Requires evidenced 3.1.0 firmware and observed enabled algorithm IDs. Invalid
+/// Requires evidenced 3.1.x/4.0.x firmware (4.0.x for ML-DSA-44) and observed
+/// enabled algorithm IDs. Invalid
 /// SM2 IDs, host budgets or a TLV body larger than 65535 bytes fail before SELECT.
 /// Intermediate acknowledgements must be empty 9000; failures/cancellation stop
 /// without replay. Cancellation is local; the caller must isolate/drain pending I/O.
@@ -103,7 +108,9 @@ pub(crate) fn prepare_sign_streaming(
         return Err(Error::new(ErrorKind::LimitExceeded));
     }
     let (message, user_id) = match input {
-        StreamingSignInput::MlDsa65(m) | StreamingSignInput::Ed25519Randomized(m) => (m, None),
+        StreamingSignInput::MlDsa44(m)
+        | StreamingSignInput::MlDsa65(m)
+        | StreamingSignInput::Ed25519Randomized(m) => (m, None),
         StreamingSignInput::Sm2 { message, user_id } => (message, user_id),
     };
     let mut inner = TlvWriter::new(options.limits.max_input_bytes.min(65535));

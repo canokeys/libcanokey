@@ -2,7 +2,7 @@
 //! (including canonical CBOR payloads) and typed response parsing from
 //! canned card responses.
 use canokey_ctap::cbor::Value;
-use canokey_ctap::cose::CoseAlgorithm;
+use canokey_ctap::cose::{CoseAlgorithm, CoseKey};
 use canokey_ctap::{
     get_assertion, get_info, get_next_assertion, make_credential, reset, selection,
     GetAssertionParams, MakeCredentialParams, PinUvAuth, PinUvAuthProtocol,
@@ -145,6 +145,98 @@ fn get_info_missing_versions_rejected() {
     let error = op.advance(&reply).unwrap_err();
     assert_eq!(error.kind, ErrorKind::InvalidResponse);
     assert_eq!(error.phase, Phase::Parsing);
+}
+
+#[test]
+fn firmware_4_0_advertises_mldsa44_and_chains_its_fido_responses() {
+    let mut info = get_info(OperationOptions::default()).unwrap();
+    begin(&mut info);
+    assert_command(&info, &[0x04]);
+    let reply = hex(&format!(
+        "00 a4 01 81 684649444f5f325f33 03 50 {AAGUID}
+         0a 82 a263616c67383064747970656a7075626c69632d6b6579
+               a263616c67382f64747970656a7075626c69632d6b6579
+         0e 1a00040000"
+    ));
+    feed_ctap_chunks(&mut info, &reply);
+    let info = info.take_result().unwrap();
+    assert_eq!(info.firmware_version(), Some(0x0004_0000));
+    assert_eq!(
+        info.algorithms()
+            .unwrap()
+            .iter()
+            .map(|p| p.algorithm())
+            .collect::<Vec<_>>(),
+        [CoseAlgorithm::MlDsa65, CoseAlgorithm::MlDsa44]
+    );
+
+    let mut params = make_credential_params();
+    params.pub_key_cred_params = vec![CoseAlgorithm::MlDsa44];
+    let mut make = make_credential(params, OperationOptions::default()).unwrap();
+    begin(&mut make);
+    let mut expected = make_credential_message();
+    let algorithms = hex("04 82 a263616c672664747970656a7075626c69632d6b6579
+                               a263616c67383064747970656a7075626c69632d6b6579");
+    let start = expected
+        .windows(algorithms.len())
+        .position(|w| w == algorithms)
+        .unwrap();
+    expected.splice(
+        start..start + algorithms.len(),
+        hex("0481a263616c67382f64747970656a7075626c69632d6b6579"),
+    );
+    assert_command(&make, &expected);
+    let mut auth_data = vec![0x11; 32];
+    auth_data.extend(hex(&format!(
+        "41 00000000 {AAGUID} 0004 01020304 a3 0107 03382f 20590520"
+    )));
+    auth_data.extend([0x42; 1312]);
+    let mut reply = hex("00 a3 01 646e6f6e65 02 59");
+    reply.extend((auth_data.len() as u16).to_be_bytes());
+    reply.extend(auth_data);
+    reply.extend(hex("03 a0"));
+    feed_ctap_chunks(&mut make, &reply);
+    let credential = make.take_result().unwrap();
+    assert_eq!(
+        credential
+            .auth_data()
+            .attested_credential_data()
+            .unwrap()
+            .credential_public_key(),
+        &CoseKey::MlDsa {
+            algorithm: CoseAlgorithm::MlDsa44,
+            public: vec![0x42; 1312]
+        }
+    );
+
+    let mut assertion = get_assertion(get_assertion_params(), OperationOptions::default()).unwrap();
+    begin(&mut assertion);
+    assert_command(&assertion, &get_assertion_message());
+    let mut reply =
+        hex("00 a3 01 a262696448eeeeeeeeeeeeeeee64747970656a7075626c69632d6b6579 02 5825");
+    reply.extend(assertion_auth_data());
+    reply.extend(hex("03 590974"));
+    reply.extend([0x77; 2420]);
+    feed_ctap_chunks(&mut assertion, &reply);
+    assert_eq!(
+        assertion.take_result().unwrap().signature().as_bytes(),
+        &[0x77; 2420]
+    );
+}
+
+fn feed_ctap_chunks<T>(op: &mut canokey_protocol::Operation<T>, reply: &[u8]) {
+    let mut chunks = reply.chunks(256).peekable();
+    while let Some(chunk) = chunks.next() {
+        let mut response = chunk.to_vec();
+        if chunks.peek().is_some() {
+            response.extend([0x61, 0]);
+            assert_eq!(op.advance(&response).unwrap(), Step::Exchange);
+            assert_eq!(op.command().unwrap().as_bytes(), hex("80c0000000"));
+        } else {
+            response.extend([0x90, 0]);
+            assert_eq!(op.advance(&response).unwrap(), Step::Done);
+        }
+    }
 }
 
 // ----------------------------------------------------- make_credential ----

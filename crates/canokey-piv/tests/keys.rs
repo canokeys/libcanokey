@@ -413,6 +413,97 @@ fn mlkem768_seed_import_writes_seed_tlv() {
 }
 
 #[test]
+fn small_pq_generation_metadata_and_seed_import_follow_the_configured_ids() {
+    let p = profile_4_0();
+    for (algorithm, id, public_len, oid, seed_tag, seed_len, material) in [
+        (
+            Algorithm::MlDsa44,
+            0xd4,
+            1312,
+            "2.16.840.1.101.3.4.3.17",
+            9,
+            32,
+            PrivateKeyMaterial::mldsa44_seed(&[0x42; 32]).unwrap(),
+        ),
+        (
+            Algorithm::MlKem512,
+            0xd5,
+            800,
+            "2.16.840.1.101.3.4.4.1",
+            10,
+            64,
+            PrivateKeyMaterial::mlkem512_seed(&[0x42; 64]).unwrap(),
+        ),
+    ] {
+        let slot = Slot::Signature;
+        let params = KeyParameters::new(slot, algorithm);
+        let mut generate = generate_key(&p, params, access(), Default::default()).unwrap();
+        authenticate(&mut generate);
+        assert_eq!(
+            generate.command().unwrap().as_bytes(),
+            [0, 0x47, 0, 0x9c, 5, 0xac, 3, 0x80, 1, id]
+        );
+        let public = vec![0x55; public_len];
+        let fields = tlv(&[0x86], &public);
+        let generated = tlv(&[0x7f, 0x49], &fields);
+        for (index, chunk) in generated.chunks(256).enumerate() {
+            let mut reply = chunk.to_vec();
+            reply.extend(if (index + 1) * 256 >= generated.len() {
+                [0x90, 0]
+            } else {
+                [0x61, 0]
+            });
+            generate.advance(&reply).unwrap();
+        }
+        let key = generate.take_result().unwrap();
+        assert_eq!(
+            key,
+            PublicKey::Raw {
+                algorithm,
+                bytes: public.clone()
+            }
+        );
+        let der = key.to_spki_der().unwrap();
+        let spki = spki::SubjectPublicKeyInfoRef::from_der(&der).unwrap();
+        assert_eq!(spki.algorithm.oid.to_string(), oid);
+        assert!(spki.algorithm.parameters.is_none());
+        assert_eq!(spki.subject_public_key.as_bytes().unwrap(), public);
+
+        let mut metadata = get_metadata(
+            &p,
+            MetadataReference::Key(slot),
+            Access::None,
+            Default::default(),
+        )
+        .unwrap();
+        selected(&mut metadata);
+        let mut data = vec![1, 1, id, 2, 2, 1, 1, 3, 1, 2];
+        data.extend(tlv(&[4], &fields));
+        for (index, chunk) in data.chunks(256).enumerate() {
+            let mut reply = chunk.to_vec();
+            reply.extend(if (index + 1) * 256 >= data.len() {
+                [0x90, 0]
+            } else {
+                [0x61, 0]
+            });
+            metadata.advance(&reply).unwrap();
+        }
+        assert_eq!(
+            metadata.result().unwrap().fields().public_key.as_ref(),
+            Some(&key)
+        );
+        assert!(PublicKey::from_tlv(algorithm, &tlv(&[0x86], &public[1..]), 2048).is_err());
+
+        let mut import = import_key(&p, params, material, access(), Default::default()).unwrap();
+        authenticate(&mut import);
+        let mut expected = vec![0, 0xfe, id, 0x9c, seed_len + 2, seed_tag, seed_len];
+        expected.extend(vec![0x42; usize::from(seed_len)]);
+        assert_eq!(import.command().unwrap().as_bytes(), expected);
+        assert_eq!(import.advance(&[0x90, 0]).unwrap(), Step::Done);
+    }
+}
+
+#[test]
 fn ml_seed_import_rejects_bad_lengths_and_algorithm_mismatch() {
     // One below the MlDsa65 seed length and one above the MlKem768 length;
     // both hit the same fixed-length check.
